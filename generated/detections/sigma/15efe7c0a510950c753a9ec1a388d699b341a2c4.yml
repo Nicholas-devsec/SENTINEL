@@ -1,0 +1,18 @@
+title: SENTINEL SHA1 15efe7c0a510950c753a9ec1a388d699b341a2c4
+id: 15efe7c0a510950c753a9ec1a388d699b341a2c4
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "15efe7c0a510950c753a9ec1a388d699b341a2c4"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1593.002
+  - attack.t1036.004
+  - attack.t1553.002

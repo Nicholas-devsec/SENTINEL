@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl == "c56a1b268f358d9fb4d6264932706b53a7347e2544bb5f26355b0c7fc1d299d8" or RemoteIP == "c56a1b268f358d9fb4d6264932706b53a7347e2544bb5f26355b0c7fc1d299d8"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

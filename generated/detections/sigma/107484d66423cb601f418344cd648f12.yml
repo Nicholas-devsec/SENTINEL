@@ -1,0 +1,18 @@
+title: SENTINEL MD5 107484d66423cb601f418344cd648f12
+id: 107484d66423cb601f418344cd648f12
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "107484d66423cb601f418344cd648f12"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

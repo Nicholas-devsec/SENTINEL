@@ -1,0 +1,18 @@
+title: SENTINEL MD5 5190ef1733183a0dc63fb623357f56d6
+id: 5190ef1733183a0dc63fb623357f56d6
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "5190ef1733183a0dc63fb623357f56d6"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

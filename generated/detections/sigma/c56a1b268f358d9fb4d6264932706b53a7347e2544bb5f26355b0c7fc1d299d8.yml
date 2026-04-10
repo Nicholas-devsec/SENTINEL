@@ -1,0 +1,18 @@
+title: SENTINEL SHA256 c56a1b268f358d9fb4d6264932706b53a7347e2544bb5f26355b0c7fc1d299d8
+id: c56a1b268f358d9fb4d6264932706b53a7347e2544bb5f26355b0c7fc1d299d8
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "c56a1b268f358d9fb4d6264932706b53a7347e2544bb5f26355b0c7fc1d299d8"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672
