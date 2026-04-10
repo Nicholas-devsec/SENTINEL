@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from sentinel.agents.delivery import DeliveryAgent
+from sentinel.agents.scorer import ScoredIOC
+from sentinel.config import SentinelSettings
+from sentinel.db.models import FeedbackRecord
+from sentinel.delivery.email_digest import render_daily_digest
+
+
+class FakeTelegramBot:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send_message(self, **kwargs) -> None:
+        self.messages.append(kwargs)
+
+
+class FakeSendGridClient:
+    def __init__(self) -> None:
+        self.sent_messages = []
+
+    def send(self, message):
+        self.sent_messages.append(message)
+        return {"status_code": 202}
+
+
+class FakeSession:
+    def __init__(self, storage: list[FeedbackRecord]) -> None:
+        self.storage = storage
+
+    async def __aenter__(self) -> FakeSession:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def add(self, record: FeedbackRecord) -> None:
+        self.storage.append(record)
+
+    async def commit(self) -> None:
+        return None
+
+
+class FakeSessionFactory:
+    def __init__(self) -> None:
+        self.storage: list[FeedbackRecord] = []
+
+    def __call__(self) -> FakeSession:
+        return FakeSession(self.storage)
+
+
+class FakeQuery:
+    def __init__(self, data: str, user_id: str) -> None:
+        self.data = data
+        self.from_user = type("User", (), {"id": user_id})
+        self.answered = False
+
+    async def answer(self) -> None:
+        self.answered = True
+
+
+def build_settings() -> SentinelSettings:
+    return SentinelSettings.model_validate(
+        {
+            "thresholds": {"alert_score": 70, "rule_score": 50, "karpathy_experiments": 25, "karpathy_budget_mins": 30},
+            "delivery": {
+                "telegram_token": "token",
+                "telegram_chat_id": "12345",
+                "telegram_max_alerts_per_run": 3,
+                "enable_email": False,
+                "sendgrid_key": "key",
+                "email_from": "sentinel@example.com",
+                "email_to": ["analyst@example.com"],
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidates() -> None:
+    telegram_bot = FakeTelegramBot()
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "8.8.8.8",
+            "type": "ipv4",
+            "source": "feed-a",
+            "risk_score": 80,
+            "severity": "high",
+            "mitre_techniques": ["T1071"],
+            "mitre_tactics": ["command and control"],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "example.org",
+            "type": "domain",
+            "source": "feed-b",
+            "risk_score": 55,
+            "severity": "medium",
+            "mitre_techniques": ["T1566.001"],
+            "mitre_tactics": ["initial access"],
+            "last_seen": now - timedelta(hours=2),
+        },
+        {
+            "id": str(uuid4()),
+            "value": "old.example",
+            "type": "domain",
+            "source": "feed-c",
+            "risk_score": 60,
+            "severity": "medium",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now - timedelta(days=2),
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert result.digest_candidates == 2
+    assert len(telegram_bot.messages) == 1
+    assert "SENTINEL Alert" in telegram_bot.messages[0]["text"]
+    assert "Intel Links:" in telegram_bot.messages[0]["text"]
+    assert telegram_bot.messages[0]["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_limits_telegram_alert_burst() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 35
+    settings.delivery.telegram_max_alerts_per_run = 2
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {"id": str(uuid4()), "value": "a.example", "type": "domain", "source": "feed-a", "risk_score": 40, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "b.example", "type": "domain", "source": "feed-a", "risk_score": 39, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "c.example", "type": "domain", "source": "feed-a", "risk_score": 38, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 2
+    assert len(telegram_bot.messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_records_feedback_from_callback() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"false_positive:{ioc_id}", user_id="42")
+
+    record = await agent.handle_callback_query(query)
+
+    assert query.answered is True
+    assert str(record.ioc_id) == ioc_id
+    assert record.verdict == "false_positive"
+    assert session_factory.storage[0].analyst_id == "42"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_renders_and_sends_daily_digest() -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.delivery.enable_email = True
+    sendgrid_client = FakeSendGridClient()
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=sendgrid_client,
+        session_factory=FakeSessionFactory(),
+    )
+    digest_items = [
+        asdict(
+            ScoredIOC(
+                value="8.8.4.4",
+                type="ipv4",
+                source="feed-a",
+                risk_score=72.0,
+                severity="high",
+                mitre_techniques=["T1071"],
+                mitre_tactics=["command and control"],
+            )
+        )
+    ]
+
+    response = await agent.daily_digest(digest_items)
+
+    assert response["status_code"] == 202
+    assert len(sendgrid_client.sent_messages) == 1
+    payload = sendgrid_client.sent_messages[0].get()
+    assert payload["subject"] == "SENTINEL Daily Digest"
+    assert "8.8.4.4" in payload["content"][0]["value"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_skips_daily_digest_when_email_disabled() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+
+    response = await agent.daily_digest([])
+
+    assert response["status"] == "disabled"
+
+
+def test_render_daily_digest_includes_ioc_rows() -> None:
+    html = render_daily_digest(
+        [
+            {
+                "value": "example.org",
+                "type": "domain",
+                "source": "feed-a",
+                "risk_score": 55.0,
+                "severity": "medium",
+                "mitre_techniques": ["T1566.001"],
+            }
+        ],
+        generated_at="2026-04-08T12:00:00+00:00",
+    )
+
+    assert "example.org" in html
+    assert "T1566.001" in html
+
+
+def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
+    from sentinel.delivery.telegram_bot import format_alert_message
+
+    rendered = format_alert_message(
+        value="162.243.103.246",
+        ioc_type="ipv4",
+        source="feodotracker",
+        risk_score=24.19,
+        severity="informational",
+        source_title="Feodo IP Blocklist",
+        reference_url="https://feodotracker.abuse.ch/",
+        related_cves=["CVE-2026-12345"],
+        vt_detections=None,
+        abuse_confidence=0,
+        shodan_ports=[],
+        external_links={
+            "VirusTotal": "https://www.virustotal.com/gui/ip-address/162.243.103.246",
+            "AbuseIPDB": "https://www.abuseipdb.com/check/162.243.103.246",
+            "Shodan": "https://www.shodan.io/host/162.243.103.246",
+        },
+        mitre_techniques=[],
+        mitre_tactics=[],
+    )
+
+    assert "AbuseIPDB confidence: 0%" in rendered
+    assert "Shodan ports: none reported" in rendered
+    assert "https://www.shodan.io/host/162.243.103.246" in rendered
+    assert "Source Intel: Feodo IP Blocklist" in rendered
+    assert "Source Link: https://feodotracker.abuse.ch/" in rendered
+    assert "Related CVEs: CVE-2026-12345" in rendered
+
+
+def test_format_alert_message_shows_hash_intel_links() -> None:
+    from sentinel.delivery.telegram_bot import format_alert_message
+
+    rendered = format_alert_message(
+        value="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        ioc_type="sha256",
+        source="otx",
+        risk_score=91.0,
+        severity="critical",
+        source_title="Stealer Campaign Impacting SLTT macOS Users",
+        reference_url="https://otx.alienvault.com/pulse/69d7ed2e323d7edb856fa161",
+        related_cves=[],
+        vt_detections=18,
+        abuse_confidence=None,
+        shodan_ports=[],
+        external_links={
+            "VirusTotal": "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            "OTX": "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        },
+        mitre_techniques=["T1059"],
+        mitre_tactics=["execution"],
+    )
+
+    assert "VirusTotal detections: 18" in rendered
+    assert "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
+    assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
+    assert "Source Intel: Stealer Campaign Impacting SLTT macOS Users" in rendered

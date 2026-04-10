@@ -1,0 +1,2 @@
+# Placeholder for the Tranco top 10k allowlist referenced by ValidationAgent.
+

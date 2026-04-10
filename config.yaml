@@ -1,0 +1,80 @@
+schedule:
+  scrape_interval_hours: 4
+  daily_digest_time: "08:00"
+  karpathy_loop_day: "sunday"
+  enable_karpathy_job: false
+  karpathy_loop_type: "source"
+
+thresholds:
+  alert_score: 35
+  rule_score: 30
+  karpathy_experiments: 25
+  karpathy_budget_mins: 30
+
+sources:
+  otx_api_key: ${OTX_API_KEY}
+  max_item_age_days: 30
+  feeds:
+    - name: urlhaus
+      url: https://urlhaus.abuse.ch/downloads/csv_recent/
+      trust: 0.91
+      enabled: true
+    - name: feodotracker
+      url: https://feodotracker.abuse.ch/downloads/ipblocklist.json
+      trust: 0.93
+      enabled: true
+    - name: otx
+      url: https://otx.alienvault.com/api/v1/pulses/subscribed
+      trust: 0.90
+      enabled: true
+    - name: rss_default
+      url: https://blog.talosintelligence.com/feed/
+      trust: 0.60
+      enabled: false
+
+enrichment:
+  virustotal_key: ${VT_API_KEY}
+  shodan_key: ${SHODAN_API_KEY}
+  abuseipdb_key: ${ABUSEIPDB_API_KEY}
+  weights:
+    vt_ratio: 0.35
+    abuse_confidence: 0.30
+    source_trust: 0.20
+    recency: 0.15
+
+crowdstrike:
+  enabled: false
+  client_id: ${CS_CLIENT_ID}
+  client_secret: ${CS_CLIENT_SECRET}
+  base_url: https://api.crowdstrike.com
+
+delivery:
+  telegram_token: ${TELEGRAM_BOT_TOKEN}
+  telegram_chat_id: ${TELEGRAM_CHAT_ID}
+  telegram_max_alerts_per_run: 3
+  enable_email: false
+  sendgrid_key: ${SENDGRID_API_KEY}
+  email_from: sentinel@yourdomain.com
+  email_to:
+    - analyst@yourdomain.com
+
+anthropic:
+  api_key: ${ANTHROPIC_API_KEY}
+  model: claude-sonnet-4-20250514
+
+openai:
+  api_key: ${OPENAI_API_KEY}
+  model: gpt-5.4
+  base_url: ${OPENAI_BASE_URL}
+
+mitre:
+  stix_path: ${MITRE_STIX_PATH}
+
+db:
+  url: ${DATABASE_URL}
+  redis_url: ${REDIS_URL}
+
+git:
+  skills_repo_path: ./skills
+  author_name: SENTINEL Learner
+  author_email: sentinel@bot

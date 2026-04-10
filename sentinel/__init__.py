@@ -1,0 +1,2 @@
+"""SENTINEL application package."""
+
