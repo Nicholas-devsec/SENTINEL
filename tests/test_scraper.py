@@ -178,7 +178,7 @@ async def test_otx_pulse_adapter_normalizes_real_hash_indicator_types() -> None:
 
 @pytest.mark.asyncio
 async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(settings: SentinelSettings) -> None:
-    settings.sources.max_item_age_days = 30
+    settings.sources.max_item_age_hours = 24
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("urlhaus.csv"):
@@ -204,7 +204,7 @@ async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(setti
                         {
                             "id": "old-pulse",
                             "name": "Old Pulse",
-                            "modified": "2025-01-01T00:00:00Z",
+                            "modified": "2026-04-01T00:00:00Z",
                             "indicators": [{"indicator": "example-old.test", "type": "domain"}],
                         },
                     ]
@@ -215,13 +215,57 @@ async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(setti
         raise AssertionError(f"Unexpected request {request.url}")
 
     transport = httpx.MockTransport(handler)
+    import sentinel.agents.scraper as scraper_module
+
+    previous_now = scraper_module._now_utc
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 9, 7, 0, 0, tzinfo=scraper_module.UTC)
     async with httpx.AsyncClient(transport=transport) as http_client:
-        agent = ScraperAgent(settings=settings, http_client=http_client)
-        records = await agent.run()
+        try:
+            agent = ScraperAgent(settings=settings, http_client=http_client)
+            records = await agent.run()
+        finally:
+            scraper_module._now_utc = previous_now
 
     assert len(records) == 1
     assert records[0].attributes["related_cves"] == ["CVE-2026-12345"]
     assert records[0].reference_url == "https://otx.alienvault.com/pulse/recent"
+
+
+@pytest.mark.asyncio
+async def test_scraper_agent_uses_strict_rolling_24_hour_window(settings: SentinelSettings) -> None:
+    settings.sources.max_item_age_hours = 24
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("urlhaus.csv"):
+            return httpx.Response(
+                200,
+                text=(
+                    "id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter\n"
+                    "1,2026-04-08 08:30:00,http://recent.test,online,2026-04-08 08:35:00,malware_download,phishing,https://urlhaus.local/1,tester\n"
+                    "2,2026-04-08 06:30:00,http://stale.test,online,2026-04-08 06:40:00,malware_download,phishing,https://urlhaus.local/2,tester\n"
+                ),
+            )
+        if request.url.path.endswith("feodo.json"):
+            return httpx.Response(200, json=[])
+        if request.url.path.endswith("otx"):
+            return httpx.Response(200, json={"results": []})
+        if request.url.path.endswith("rss.xml"):
+            return httpx.Response(200, text="<?xml version='1.0'?><rss version='2.0'><channel></channel></rss>")
+        raise AssertionError(f"Unexpected request {request.url}")
+
+    transport = httpx.MockTransport(handler)
+    import sentinel.agents.scraper as scraper_module
+
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        agent = ScraperAgent(settings=settings, http_client=http_client)
+        previous_now = scraper_module._now_utc
+        scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 9, 7, 0, 0, tzinfo=scraper_module.UTC)
+        try:
+            records = await agent.run()
+        finally:
+            scraper_module._now_utc = previous_now
+
+    assert [record.value for record in records] == ["http://recent.test"]
 
 
 @pytest.mark.asyncio
@@ -269,13 +313,20 @@ async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: 
         raise AssertionError(f"Unexpected request {request.url}")
 
     transport = httpx.MockTransport(handler)
+    import sentinel.agents.scraper as scraper_module
+
+    previous_now = scraper_module._now_utc
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 9, 7, 0, 0, tzinfo=scraper_module.UTC)
     async with httpx.AsyncClient(transport=transport) as http_client:
-        agent = ScraperAgent(
-            settings=settings,
-            redis_client=redis_client,
-            http_client=http_client,
-        )
-        records = await agent.run()
+        try:
+            agent = ScraperAgent(
+                settings=settings,
+                redis_client=redis_client,
+                http_client=http_client,
+            )
+            records = await agent.run()
+        finally:
+            scraper_module._now_utc = previous_now
 
     assert len(records) == 4
     queued = await redis_client.lrange(agent.queue_name, 0, -1)
@@ -311,12 +362,19 @@ async def test_scraper_agent_skips_queue_when_redis_disabled(settings: SentinelS
         raise AssertionError(f"Unexpected request {request.url}")
 
     transport = httpx.MockTransport(handler)
+    import sentinel.agents.scraper as scraper_module
+
+    previous_now = scraper_module._now_utc
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 9, 7, 0, 0, tzinfo=scraper_module.UTC)
     async with httpx.AsyncClient(transport=transport) as http_client:
-        agent = ScraperAgent(
-            settings=settings,
-            redis_client=None,
-            http_client=http_client,
-        )
-        records = await agent.run()
+        try:
+            agent = ScraperAgent(
+                settings=settings,
+                redis_client=None,
+                http_client=http_client,
+            )
+            records = await agent.run()
+        finally:
+            scraper_module._now_utc = previous_now
 
     assert len(records) == 3

@@ -382,7 +382,7 @@ class ScraperAgent(BaseAgent):
         return sorted(matches)
 
     def _is_recent(self, item: RawIOC) -> bool:
-        cutoff = datetime.now(UTC) - __import__("datetime").timedelta(days=self.settings.sources.max_item_age_days)
+        cutoff = _now_utc() - __import__("datetime").timedelta(hours=self.settings.sources.max_item_age_hours)
         return max(item.first_seen, item.last_seen) >= cutoff
 
     def _decorate_item(self, item: RawIOC) -> RawIOC:

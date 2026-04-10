@@ -12,6 +12,7 @@ from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings
 from sentinel.db.models import FeedbackRecord
 from sentinel.delivery.email_digest import render_daily_digest
+from sentinel.delivery.telegram_bot import format_daily_digest_message
 
 
 class FakeTelegramBot:
@@ -190,9 +191,10 @@ async def test_delivery_agent_renders_and_sends_daily_digest() -> None:
     settings = build_settings().model_copy(deep=True)
     settings.delivery.enable_email = True
     sendgrid_client = FakeSendGridClient()
+    telegram_bot = FakeTelegramBot()
     agent = DeliveryAgent(
         settings=settings,
-        telegram_bot=FakeTelegramBot(),
+        telegram_bot=telegram_bot,
         sendgrid_client=sendgrid_client,
         session_factory=FakeSessionFactory(),
     )
@@ -212,8 +214,11 @@ async def test_delivery_agent_renders_and_sends_daily_digest() -> None:
 
     response = await agent.daily_digest(digest_items)
 
-    assert response["status_code"] == 202
+    assert response["telegram"]["status"] == "sent"
+    assert response["email"]["status"] == "sent"
     assert len(sendgrid_client.sent_messages) == 1
+    assert len(telegram_bot.messages) == 1
+    assert "SENTINEL Daily Digest" in telegram_bot.messages[0]["text"]
     payload = sendgrid_client.sent_messages[0].get()
     assert payload["subject"] == "SENTINEL Daily Digest"
     assert "8.8.4.4" in payload["content"][0]["value"]
@@ -221,16 +226,56 @@ async def test_delivery_agent_renders_and_sends_daily_digest() -> None:
 
 @pytest.mark.asyncio
 async def test_delivery_agent_skips_daily_digest_when_email_disabled() -> None:
+    telegram_bot = FakeTelegramBot()
     agent = DeliveryAgent(
         settings=build_settings(),
-        telegram_bot=FakeTelegramBot(),
+        telegram_bot=telegram_bot,
         sendgrid_client=None,
         session_factory=FakeSessionFactory(),
     )
 
     response = await agent.daily_digest([])
 
-    assert response["status"] == "disabled"
+    assert response["telegram"]["status"] == "sent"
+    assert response["email"]["status"] == "disabled"
+    assert "No qualifying IOC activity" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_daily_digest_sends_top_10_by_risk_score() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.delivery.telegram_daily_digest_limit = 10
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {
+            "value": f"ioc-{index}",
+            "type": "domain",
+            "source": "otx",
+            "risk_score": float(index),
+            "severity": "informational",
+            "related_cves": [],
+            "external_links": {},
+        }
+        for index in range(12)
+    ]
+
+    response = await agent.daily_digest(items)
+
+    assert response["count"] == 10
+    rendered = telegram_bot.messages[0]["text"]
+    assert "1. [INFORMATIONAL] ioc-11" in rendered
+    assert "2. [INFORMATIONAL] ioc-10" in rendered
+    assert "10. [INFORMATIONAL] ioc-2" in rendered
+    assert "ioc-11" in rendered
+    assert "ioc-10" in rendered
+    assert "ioc-0" not in rendered
+    assert "11. " not in rendered
 
 
 def test_render_daily_digest_includes_ioc_rows() -> None:
@@ -250,6 +295,33 @@ def test_render_daily_digest_includes_ioc_rows() -> None:
 
     assert "example.org" in html
     assert "T1566.001" in html
+
+
+def test_format_daily_digest_message_limits_and_shows_cves_and_links() -> None:
+    rendered = format_daily_digest_message(
+        items=[
+            {
+                "value": "bad.example",
+                "type": "domain",
+                "source": "otx",
+                "risk_score": 82.3,
+                "severity": "high",
+                "source_title": "OTX Pulse Example",
+                "related_cves": ["CVE-2026-1234"],
+                "external_links": {
+                    "VirusTotal": "https://www.virustotal.com/gui/domain/bad.example",
+                    "OTX": "https://otx.alienvault.com/browse/global/pulses?q=bad.example",
+                },
+            }
+        ],
+        generated_at="2026-04-09T07:00:00+00:00",
+        limit=10,
+    )
+
+    assert "SENTINEL Daily Digest" in rendered
+    assert "OTX Pulse Example" in rendered
+    assert "CVE-2026-1234" in rendered
+    assert "VirusTotal:" in rendered
 
 
 def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:

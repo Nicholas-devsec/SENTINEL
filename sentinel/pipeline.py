@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.enricher import EnrichedIOC, EnrichmentAgent
 from sentinel.agents.rule_generator import GeneratedArtifacts, RuleGeneratorAgent
-from sentinel.agents.scorer import ScoredIOC, ScoringAgent
+from sentinel.agents.scorer import ScoredIOC, ScoringAgent, build_external_links_for_ioc
 from sentinel.agents.scraper import RawIOC, ScraperAgent
 from sentinel.agents.validator import ValidationAgent
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
@@ -150,8 +150,10 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                 (
                     await session.scalars(
                         select(IOC)
-                        .where(IOC.risk_score >= 50)
                         .where(IOC.last_seen >= cutoff)
+                        .where(IOC.risk_score.is_not(None))
+                        .order_by(IOC.risk_score.desc(), IOC.last_seen.desc())
+                        .limit(settings.delivery.telegram_daily_digest_limit)
                     )
                 ).all()
             )
@@ -163,12 +165,21 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                 "source": row.source,
                 "risk_score": float(row.risk_score or 0.0),
                 "severity": row.severity or "informational",
+                "source_title": row.source_title,
+                "reference_url": row.reference_url,
+                "related_cves": list(row.related_cves or []),
+                "vt_detections": row.vt_detections,
+                "abuse_confidence": row.abuse_confidence,
+                "shodan_ports": list(row.shodan_ports or []),
+                "external_links": {},
                 "mitre_techniques": row.mitre_techniques,
                 "mitre_tactics": row.mitre_tactics,
                 "last_seen": row.last_seen,
             }
             for row in rows
         ]
+        for item in items:
+            item["external_links"] = build_external_links_for_ioc(item)
         return await delivery.daily_digest(items)
     finally:
         closer = getattr(delivery, "aclose", None)

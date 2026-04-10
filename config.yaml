@@ -1,6 +1,7 @@
 schedule:
   scrape_interval_hours: 4
-  daily_digest_time: "08:00"
+  daily_digest_time: "07:00"
+  timezone: "America/Vancouver"
   karpathy_loop_day: "sunday"
   enable_karpathy_job: false
   karpathy_loop_type: "source"
@@ -13,7 +14,7 @@ thresholds:
 
 sources:
   otx_api_key: ${OTX_API_KEY}
-  max_item_age_days: 30
+  max_item_age_hours: 24
   feeds:
     - name: urlhaus
       url: https://urlhaus.abuse.ch/downloads/csv_recent/
@@ -52,6 +53,7 @@ delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
   telegram_max_alerts_per_run: 3
+  telegram_daily_digest_limit: 10
   enable_email: false
   sendgrid_key: ${SENDGRID_API_KEY}
   email_from: sentinel@yourdomain.com

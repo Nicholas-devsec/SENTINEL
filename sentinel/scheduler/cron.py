@@ -32,7 +32,7 @@ async def karpathy_loop_job() -> None:
 
 def build_scheduler() -> AsyncIOScheduler:
     settings = get_settings()
-    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
     scheduler.add_job(
         scrape_pipeline,
         IntervalTrigger(hours=settings.schedule.scrape_interval_hours),

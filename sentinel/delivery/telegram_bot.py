@@ -81,6 +81,42 @@ def format_alert_message(
     )
 
 
+def format_daily_digest_message(
+    *,
+    items: list[dict[str, Any]],
+    generated_at: str,
+    limit: int,
+) -> str:
+    lines = [
+        "SENTINEL Daily Digest",
+        f"Generated: {generated_at}",
+        f"Top {min(limit, len(items))} IOC(s) from the last 24 hours",
+        "",
+    ]
+    if not items:
+        lines.append("No qualifying IOC activity in the last 24 hours.")
+        return "\n".join(lines)
+    for index, item in enumerate(items[:limit], start=1):
+        cves = ", ".join(item.get("related_cves", [])[:3]) if item.get("related_cves") else "None"
+        lines.append(
+            f"{index}. [{item['severity'].upper()}] {item['value']} | {item['type']} | "
+            f"score={float(item['risk_score']):.2f} | source={item['source']}"
+        )
+        if item.get("source_title"):
+            lines.append(f"   Intel: {item['source_title']}")
+        if item.get("related_cves"):
+            lines.append(f"   CVEs: {cves}")
+        links = item.get("external_links") or {}
+        if links:
+            preferred = []
+            for name in ("VirusTotal", "OTX", "URLhaus", "AbuseIPDB", "Shodan"):
+                if name in links:
+                    preferred.append(f"{name}: {links[name]}")
+            if preferred:
+                lines.append(f"   Links: {' | '.join(preferred[:3])}")
+    return "\n".join(lines)
+
+
 async def build_telegram_application(token: str, callback_handler) -> Application:
     application = Application.builder().token(token).build()
 

@@ -15,7 +15,7 @@ from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.models import FeedbackRecord, IOC
 from sentinel.delivery.email_digest import render_daily_digest, send_daily_digest
-from sentinel.delivery.telegram_bot import build_feedback_markup, format_alert_message
+from sentinel.delivery.telegram_bot import build_feedback_markup, format_alert_message, format_daily_digest_message
 
 
 @dataclass(slots=True)
@@ -152,16 +152,42 @@ class DeliveryAgent(BaseAgent):
         )
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
-        if not self.settings.delivery.enable_email or self.sendgrid_client is None:
-            return {"status": "disabled", "reason": "email delivery is disabled"}
-        html = render_daily_digest(items, generated_at=datetime.now(UTC).isoformat())
-        return await send_daily_digest(
-            sendgrid_client=self.sendgrid_client,
-            email_from=self.settings.delivery.email_from,
-            recipients=self.settings.delivery.email_to,
-            subject="SENTINEL Daily Digest",
-            html=html,
-        )
+        sorted_items = sorted(items, key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
+        top_items = sorted_items[: self.settings.delivery.telegram_daily_digest_limit]
+        result: dict[str, Any] = {
+            "telegram": {"status": "disabled", "sent": False},
+            "email": {"status": "disabled"},
+            "count": len(top_items),
+        }
+        if self.telegram_bot is not None:
+            message = format_daily_digest_message(
+                items=top_items,
+                generated_at=datetime.now(UTC).isoformat(),
+                limit=self.settings.delivery.telegram_daily_digest_limit,
+            )
+            try:
+                await self.telegram_bot.send_message(
+                    chat_id=self.settings.delivery.telegram_chat_id,
+                    text=message,
+                )
+                result["telegram"] = {"status": "sent", "sent": True}
+            except TelegramError as exc:
+                self.logger.warning("Telegram daily digest delivery failed: %s", type(exc).__name__)
+                result["telegram"] = {"status": "failed", "sent": False, "error": type(exc).__name__}
+        if self.settings.delivery.enable_email and self.sendgrid_client is not None:
+            html = render_daily_digest(top_items, generated_at=datetime.now(UTC).isoformat())
+            response = await send_daily_digest(
+                sendgrid_client=self.sendgrid_client,
+                email_from=self.settings.delivery.email_from,
+                recipients=self.settings.delivery.email_to,
+                subject="SENTINEL Daily Digest",
+                html=html,
+            )
+            result["email"] = {
+                "status": "sent",
+                "status_code": getattr(response, "status_code", None) if not isinstance(response, dict) else response.get("status_code"),
+            }
+        return result
 
     async def run(self, scored_iocs: list[ScoredIOC | dict[str, Any]], *args: Any, **kwargs: Any) -> DeliveryResult:
         self.reload_skill()

@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 LIVE_SETUP.local.md
 LIVE_KEYS_COSTS.local.md
+EC2_DEPLOY.local.md
 .karpathy_runs/
 data/sentinel.db
 data/attack-stix-data/

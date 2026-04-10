@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 class ScheduleSettings(BaseModel):
     scrape_interval_hours: int = 4
-    daily_digest_time: str = "08:00"
+    daily_digest_time: str = "07:00"
+    timezone: str = "America/Vancouver"
     karpathy_loop_day: str = "sunday"
     enable_karpathy_job: bool = False
     karpathy_loop_type: str = "source"
@@ -35,7 +36,7 @@ class FeedConfig(BaseModel):
 
 class SourceSettings(BaseModel):
     otx_api_key: str = "${OTX_API_KEY}"
-    max_item_age_days: int = 30
+    max_item_age_hours: int = 24
     feeds: list[FeedConfig] = Field(default_factory=list)
 
 
@@ -64,6 +65,7 @@ class DeliverySettings(BaseModel):
     telegram_token: str = "${TELEGRAM_BOT_TOKEN}"
     telegram_chat_id: str = "${TELEGRAM_CHAT_ID}"
     telegram_max_alerts_per_run: int = 3
+    telegram_daily_digest_limit: int = 10
     enable_email: bool = False
     sendgrid_key: str = "${SENDGRID_API_KEY}"
     email_from: str = "sentinel@yourdomain.com"
