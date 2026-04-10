@@ -42,14 +42,19 @@ def build_scheduler() -> AsyncIOScheduler:
     hour, minute = settings.schedule.daily_digest_time.split(":")
     scheduler.add_job(
         daily_digest_job,
-        CronTrigger(hour=int(hour), minute=int(minute)),
+        CronTrigger(hour=int(hour), minute=int(minute), timezone=settings.schedule.timezone),
         id="daily-digest",
         replace_existing=True,
     )
     if settings.schedule.enable_karpathy_job:
         scheduler.add_job(
             karpathy_loop_job,
-            CronTrigger(day_of_week=settings.schedule.karpathy_loop_day, hour=3, minute=0),
+            CronTrigger(
+                day_of_week=settings.schedule.karpathy_loop_day,
+                hour=3,
+                minute=0,
+                timezone=settings.schedule.timezone,
+            ),
             id="karpathy-loop",
             replace_existing=True,
         )
