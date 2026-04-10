@@ -1,0 +1,18 @@
+title: SENTINEL URL https://mansfieldpediatrics.com/ledger/b2955c54eb0c047463993b379e015e737aabed37b4
+id: https-mansfieldpediatrics-com-ledger-b2955c54eb0c047463993b379e015e737aabed37b4
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "https://mansfieldpediatrics.com/ledger/b2955c54eb0c047463993b379e015e737aabed37b4"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

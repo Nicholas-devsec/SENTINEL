@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for https://main.mon2gate.net/modules/wallets",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "url",
+  "value": "https://main.mon2gate.net/modules/wallets"
+}

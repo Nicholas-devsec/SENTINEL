@@ -1,0 +1,2 @@
+index=main (dest_host="microsoft-update.support")
+| stats count by host, dest_host

@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for main.mon2gate.net",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "main.mon2gate.net"
+}

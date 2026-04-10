@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for http://info-payeasy.com/assets/index-DdmV8luQ.js",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "url",
+  "value": "http://info-payeasy.com/assets/index-DdmV8luQ.js"
+}

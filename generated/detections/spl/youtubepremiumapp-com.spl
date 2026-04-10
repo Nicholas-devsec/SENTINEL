@@ -1,0 +1,2 @@
+index=main (dest_host="youtubepremiumapp.com")
+| stats count by host, dest_host

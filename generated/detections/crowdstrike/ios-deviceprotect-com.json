@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for ios-deviceprotect.com",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "ios-deviceprotect.com"
+}

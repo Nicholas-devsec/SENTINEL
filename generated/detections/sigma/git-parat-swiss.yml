@@ -1,0 +1,18 @@
+title: SENTINEL DOMAIN git.parat.swiss
+id: git-parat-swiss
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "git.parat.swiss"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

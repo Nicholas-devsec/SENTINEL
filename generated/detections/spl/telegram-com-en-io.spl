@@ -1,0 +1,2 @@
+index=main (dest_host="telegram.com-en.io")
+| stats count by host, dest_host

@@ -1,0 +1,18 @@
+title: SENTINEL DOMAIN encryption-plug-in-signal.com-ae.net
+id: encryption-plug-in-signal-com-ae-net
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "encryption-plug-in-signal.com-ae.net"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

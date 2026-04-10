@@ -1,0 +1,18 @@
+title: SENTINEL DOMAIN main.mon2gate.net
+id: main-mon2gate-net
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "main.mon2gate.net"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

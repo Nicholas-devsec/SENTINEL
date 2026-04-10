@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for http://filegrowthlabs.com/s3/?c=AA-0uWlVgQUAHYwCAFVTOQASAAAAAACP",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "url",
+  "value": "http://filegrowthlabs.com/s3/?c=AA-0uWlVgQUAHYwCAFVTOQASAAAAAACP"
+}

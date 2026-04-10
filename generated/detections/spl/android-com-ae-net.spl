@@ -1,0 +1,2 @@
+index=main (dest_host="android.com-ae.net")
+| stats count by host, dest_host

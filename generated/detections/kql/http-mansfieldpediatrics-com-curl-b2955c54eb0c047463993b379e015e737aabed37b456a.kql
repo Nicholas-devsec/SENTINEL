@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl == "http://mansfieldpediatrics.com/curl/b2955c54eb0c047463993b379e015e737aabed37b456a" or RemoteIP == "http://mansfieldpediatrics.com/curl/b2955c54eb0c047463993b379e015e737aabed37b456a"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

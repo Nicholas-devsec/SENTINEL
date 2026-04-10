@@ -1,0 +1,2 @@
+index=main (url="http://mansfieldpediatrics.com/curl/")
+| stats count by host, url

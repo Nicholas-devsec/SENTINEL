@@ -1,0 +1,2 @@
+index=main (url="http://filegrowthlabs.com/s3/?c=AA-")
+| stats count by host, url

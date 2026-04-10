@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for http://mansfieldpediatrics.com/curl/",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "url",
+  "value": "http://mansfieldpediatrics.com/curl/"
+}

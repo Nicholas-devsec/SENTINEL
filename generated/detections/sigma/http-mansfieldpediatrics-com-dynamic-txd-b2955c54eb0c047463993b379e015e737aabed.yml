@@ -1,0 +1,18 @@
+title: SENTINEL URL http://mansfieldpediatrics.com/dynamic?txd=b2955c54eb0c047463993b379e015e737aabed
+id: http-mansfieldpediatrics-com-dynamic-txd-b2955c54eb0c047463993b379e015e737aabed
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "http://mansfieldpediatrics.com/dynamic?txd=b2955c54eb0c047463993b379e015e737aabed"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001
