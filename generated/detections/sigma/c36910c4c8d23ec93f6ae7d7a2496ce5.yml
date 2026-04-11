@@ -1,0 +1,18 @@
+title: SENTINEL MD5 c36910c4c8d23ec93f6ae7d7a2496ce5
+id: c36910c4c8d23ec93f6ae7d7a2496ce5
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "c36910c4c8d23ec93f6ae7d7a2496ce5"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1546.008
+  - attack.t1564.003
+  - attack.t1593.002

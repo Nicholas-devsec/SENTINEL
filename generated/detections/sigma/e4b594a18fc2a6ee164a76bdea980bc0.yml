@@ -1,0 +1,18 @@
+title: SENTINEL MD5 e4b594a18fc2a6ee164a76bdea980bc0
+id: e4b594a18fc2a6ee164a76bdea980bc0
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "e4b594a18fc2a6ee164a76bdea980bc0"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

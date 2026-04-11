@@ -1,0 +1,18 @@
+title: SENTINEL DOMAIN sfrclak.com
+id: sfrclak-com
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    DestinationHostname: "sfrclak.com"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

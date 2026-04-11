@@ -1,0 +1,2 @@
+index=main (url="http://eshareflies.im/ad/")
+| stats count by host, url

@@ -1,0 +1,2 @@
+index=main (file_hash="e4b594a18fc2a6ee164a76bdea980bc0")
+| stats count by host, file_hash

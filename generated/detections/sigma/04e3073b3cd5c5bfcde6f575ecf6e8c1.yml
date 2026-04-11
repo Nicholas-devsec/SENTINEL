@@ -1,0 +1,18 @@
+title: SENTINEL MD5 04e3073b3cd5c5bfcde6f575ecf6e8c1
+id: 04e3073b3cd5c5bfcde6f575ecf6e8c1
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "04e3073b3cd5c5bfcde6f575ecf6e8c1"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: medium
+tags:
+  - attack.t1593.002
+  - attack.t1059.001
+  - attack.t1546.013

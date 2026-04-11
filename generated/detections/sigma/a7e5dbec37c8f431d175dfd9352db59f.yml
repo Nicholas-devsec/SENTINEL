@@ -1,0 +1,18 @@
+title: SENTINEL MD5 a7e5dbec37c8f431d175dfd9352db59f
+id: a7e5dbec37c8f431d175dfd9352db59f
+status: experimental
+logsource:
+  product: network
+  category: network_connection
+detection:
+  selection:
+    Hashes: "a7e5dbec37c8f431d175dfd9352db59f"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+level: informational
+tags:
+  - attack.t1593.002
+  - attack.t1195.002
+  - attack.t1036.004

@@ -1,0 +1,2 @@
+index=main (dest_host="sfrclak.com")
+| stats count by host, dest_host
