@@ -11,6 +11,7 @@ from sentinel.agents.scraper import (
     OTXPulseAdapter,
     RSSAdapter,
     ScraperAgent,
+    SourceScrapeDiagnostic,
     URLHausAdapter,
 )
 from sentinel.config import SentinelSettings
@@ -104,34 +105,40 @@ async def test_rss_adapter_parses_feed_entries() -> None:
 
 @pytest.mark.asyncio
 async def test_otx_pulse_adapter_extracts_indicators() -> None:
+    seen_params: dict[str, str] = {}
+
     transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            json={
-                "results": [
-                    {
-                        "id": "pulse-123",
-                        "name": "OTX Pulse Match",
-                        "modified": "2026-04-08T12:00:00Z",
-                        "tags": ["phishing"],
-                        "references": ["https://otx.alienvault.com/pulse/123"],
-                        "indicators": [
-                            {
-                                "id": "indicator-123",
-                                "indicator": "https://otx.bad.test",
-                                "type": "URL",
-                                "created": "2026-04-08T12:00:00Z",
-                            }
-                        ],
-                    }
-                ]
-            },
-        )
+        lambda request: (
+            seen_params.update(dict(request.url.params)),
+            httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "pulse-123",
+                            "name": "OTX Pulse Match",
+                            "modified": "2026-04-08T12:00:00Z",
+                            "tags": ["phishing"],
+                            "references": ["https://otx.alienvault.com/pulse/123"],
+                            "indicators": [
+                                {
+                                    "id": "indicator-123",
+                                    "indicator": "https://otx.bad.test",
+                                    "type": "URL",
+                                    "created": "2026-04-08T12:00:00Z",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            ),
+        )[1]
     )
     async with httpx.AsyncClient(transport=transport) as client:
         adapter = OTXPulseAdapter(
             "https://feeds.local/otx",
             trust_score=0.9,
+            lookback_hours=24,
             api_key="test-key",
             client=client,
         )
@@ -141,6 +148,8 @@ async def test_otx_pulse_adapter_extracts_indicators() -> None:
     assert records[0].value == "https://otx.bad.test"
     assert records[0].reference_url == "https://otx.alienvault.com/pulse/123"
     assert records[0].attributes["pulse_id"] == "pulse-123"
+    assert seen_params["limit"] == "50"
+    assert "modified_since" in seen_params
 
 
 @pytest.mark.asyncio
@@ -269,6 +278,33 @@ async def test_scraper_agent_uses_strict_rolling_24_hour_window(settings: Sentin
 
 
 @pytest.mark.asyncio
+async def test_scraper_agent_reports_timeout_diagnostic(settings: SentinelSettings) -> None:
+    settings.sources.feeds = [
+        {"name": "otx", "url": "https://feeds.local/otx", "trust": 0.1},
+    ]
+    settings.sources.http_timeout_seconds = 0
+
+    class SlowAdapter:
+        source_name = "otx"
+
+        async def fetch(self):
+            await __import__("asyncio").sleep(0.01)
+            return []
+
+    agent = ScraperAgent(settings=settings)
+    agent._build_adapters = lambda: [SlowAdapter()]  # type: ignore[method-assign]
+    try:
+        report = await agent.run_with_diagnostics()
+    finally:
+        await agent.aclose()
+
+    assert report.items == []
+    assert len(report.diagnostics) == 1
+    assert report.diagnostics[0].source == "otx"
+    assert "TimeoutError" in (report.diagnostics[0].error or "")
+
+
+@pytest.mark.asyncio
 async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: SentinelSettings) -> None:
     redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
     rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -378,3 +414,56 @@ async def test_scraper_agent_skips_queue_when_redis_disabled(settings: SentinelS
             scraper_module._now_utc = previous_now
 
     assert len(records) == 3
+
+
+@pytest.mark.asyncio
+async def test_scraper_agent_reports_diagnostics_for_kept_stale_and_errors(settings: SentinelSettings) -> None:
+    import sentinel.agents.scraper as scraper_module
+    from sentinel.agents.scraper import RawIOC
+
+    class WorkingAdapter:
+        source_name = "working"
+
+        async def fetch(self):
+            return [
+                RawIOC(
+                    value="recent.example",
+                    type="domain",
+                    source="working",
+                    source_trust=0.9,
+                    first_seen=scraper_module.datetime(2026, 4, 9, 6, 0, 0, tzinfo=scraper_module.UTC),
+                    last_seen=scraper_module.datetime(2026, 4, 9, 6, 0, 0, tzinfo=scraper_module.UTC),
+                ),
+                RawIOC(
+                    value="stale.example",
+                    type="domain",
+                    source="working",
+                    source_trust=0.9,
+                    first_seen=scraper_module.datetime(2026, 4, 1, 6, 0, 0, tzinfo=scraper_module.UTC),
+                    last_seen=scraper_module.datetime(2026, 4, 1, 6, 0, 0, tzinfo=scraper_module.UTC),
+                ),
+            ]
+
+    class BrokenAdapter:
+        source_name = "broken"
+
+        async def fetch(self):
+            raise httpx.ReadTimeout("timed out")
+
+    agent = ScraperAgent(settings=settings)
+    previous_now = scraper_module._now_utc
+    previous_build = agent._build_adapters
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 10, 6, 0, 0, tzinfo=scraper_module.UTC)
+    agent._build_adapters = lambda: [WorkingAdapter(), BrokenAdapter()]
+    try:
+        report = await agent.run_with_diagnostics()
+    finally:
+        scraper_module._now_utc = previous_now
+        agent._build_adapters = previous_build
+        await agent.aclose()
+
+    assert [item.value for item in report.items] == ["recent.example"]
+    assert report.diagnostics == [
+        SourceScrapeDiagnostic(source="working", fetched=2, kept=1, stale_dropped=1, error=None),
+        SourceScrapeDiagnostic(source="broken", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
+    ]

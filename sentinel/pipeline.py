@@ -133,7 +133,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             digest_candidates=delivery_result.digest_candidates,
         )
     finally:
-        for key in ("scraper", "enricher", "rule_generator"):
+        for key in ("scraper", "enricher", "rule_generator", "delivery"):
             closer = getattr(agents[key], "aclose", None)
             if closer is not None:
                 await closer()

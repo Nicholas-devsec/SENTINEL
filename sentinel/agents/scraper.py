@@ -44,6 +44,21 @@ class RawIOC:
         return payload
 
 
+@dataclass(slots=True)
+class SourceScrapeDiagnostic:
+    source: str
+    fetched: int = 0
+    kept: int = 0
+    stale_dropped: int = 0
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class ScrapeReport:
+    items: list[RawIOC]
+    diagnostics: list[SourceScrapeDiagnostic]
+
+
 class SourceAdapter(Protocol):
     source_name: str
 
@@ -93,11 +108,13 @@ class OTXPulseAdapter:
         api_url: str,
         *,
         trust_score: float,
+        lookback_hours: int | None = None,
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_url = api_url
         self.trust_score = trust_score
+        self.lookback_hours = lookback_hours
         self.api_key = api_key
         self.client = client or httpx.AsyncClient(timeout=30.0)
 
@@ -211,7 +228,12 @@ class OTXPulseAdapter:
         )
 
     async def fetch(self) -> list[RawIOC]:
-        response = await self.client.get(self.api_url, headers=self._headers())
+        params: dict[str, Any] = {"limit": 50}
+        if self.lookback_hours is not None:
+            # OTX accepts timestamp-based filtering; keeping this explicit narrows the pull to the same
+            # rolling window we enforce locally and reduces stale subscribed pulse results.
+            params["modified_since"] = (_now_utc() - __import__("datetime").timedelta(hours=self.lookback_hours)).isoformat()
+        response = await self.client.get(self.api_url, headers=self._headers(), params=params)
         response.raise_for_status()
         payload = response.json()
         pulses = payload.get("results", payload) if isinstance(payload, dict) else payload
@@ -366,7 +388,12 @@ class ScraperAgent(BaseAgent):
         super().__init__(skill_path)
         self.settings = settings or get_settings()
         self.redis = redis_client
-        self.http_client = http_client or httpx.AsyncClient(timeout=30.0)
+        request_timeout = float(self.settings.sources.http_timeout_seconds)
+        self.http_client = http_client or httpx.AsyncClient(
+            timeout=httpx.Timeout(request_timeout, connect=min(request_timeout, 10.0)),
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=0),
+        )
         self._owns_redis = redis_client is None
         self._owns_http_client = http_client is None
 
@@ -429,6 +456,7 @@ class ScraperAgent(BaseAgent):
                     OTXPulseAdapter(
                         feed.url,
                         trust_score=trust_score,
+                        lookback_hours=self.settings.sources.max_item_age_hours,
                         api_key=self.settings.sources.otx_api_key,
                         client=self.http_client,
                     )
@@ -455,21 +483,63 @@ class ScraperAgent(BaseAgent):
         return count
 
     async def run(self, *args: Any, **kwargs: Any) -> list[RawIOC]:
+        report = await self.run_with_diagnostics(*args, **kwargs)
+        return report.items
+
+    async def _fetch_adapter(self, adapter: SourceAdapter) -> list[RawIOC]:
+        timeout_seconds = float(self.settings.sources.http_timeout_seconds)
+        return await asyncio.wait_for(adapter.fetch(), timeout=timeout_seconds)
+
+    async def run_with_diagnostics(self, *args: Any, **kwargs: Any) -> ScrapeReport:
         self.reload_skill()
         adapters = self._build_adapters()
-        results = await asyncio.gather(*(adapter.fetch() for adapter in adapters), return_exceptions=True)
+        results = await asyncio.gather(*(self._fetch_adapter(adapter) for adapter in adapters), return_exceptions=True)
         collected: list[RawIOC] = []
+        diagnostics: list[SourceScrapeDiagnostic] = []
         for adapter, result in zip(adapters, results, strict=True):
             if isinstance(result, Exception):
                 self.logger.exception("Scrape failed for source %s", adapter.source_name, exc_info=result)
+                diagnostics.append(
+                    SourceScrapeDiagnostic(
+                        source=adapter.source_name,
+                        error=f"{type(result).__name__}: {result}",
+                    )
+                )
                 continue
-            self.logger.info("Scraped %s indicators from %s", len(result), adapter.source_name)
-            collected.extend(self._decorate_item(item) for item in result if self._is_recent(item))
+            kept = 0
+            stale = 0
+            for item in result:
+                if self._is_recent(item):
+                    collected.append(self._decorate_item(item))
+                    kept += 1
+                else:
+                    stale += 1
+            self.logger.info(
+                "Scraped %s indicators from %s; kept=%s stale_dropped=%s",
+                len(result),
+                adapter.source_name,
+                kept,
+                stale,
+            )
+            diagnostics.append(
+                SourceScrapeDiagnostic(
+                    source=adapter.source_name,
+                    fetched=len(result),
+                    kept=kept,
+                    stale_dropped=stale,
+                )
+            )
         await self.publish_to_queue(collected)
-        return collected
+        return ScrapeReport(items=collected, diagnostics=diagnostics)
 
     async def aclose(self) -> None:
         if self._owns_http_client:
-            await self.http_client.aclose()
+            try:
+                await asyncio.wait_for(self.http_client.aclose(), timeout=5.0)
+            except TimeoutError:
+                self.logger.warning("Timed out while closing scraper HTTP client; continuing shutdown.")
         if self._owns_redis and self.redis is not None:
-            await self.redis.aclose()
+            try:
+                await asyncio.wait_for(self.redis.aclose(), timeout=5.0)
+            except TimeoutError:
+                self.logger.warning("Timed out while closing scraper Redis client; continuing shutdown.")

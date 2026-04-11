@@ -45,3 +45,29 @@ def test_build_scheduler_uses_configured_timezone_and_7am_digest(monkeypatch) ->
             scheduler.shutdown(wait=False)
         except SchedulerNotRunningError:
             pass
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_daily_digest_job_runs_pipeline_before_digest(monkeypatch) -> None:
+    settings = build_settings()
+    calls: list[str] = []
+
+    async def fake_run_pipeline_once(*, settings):
+        calls.append("pipeline")
+        return {"ok": True}
+
+    async def fake_run_daily_digest(*, settings):
+        calls.append("digest")
+        return {"sent": True}
+
+    monkeypatch.setattr(cron, "get_settings", lambda: settings)
+    monkeypatch.setattr(cron, "validate_runtime_settings", lambda settings, command: None)
+    monkeypatch.setattr(cron, "run_pipeline_once", fake_run_pipeline_once)
+    monkeypatch.setattr(cron, "run_daily_digest", fake_run_daily_digest)
+
+    await cron.daily_digest_job()
+
+    assert calls == ["pipeline", "digest"]

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 
 from sentinel.agents.delivery import DeliveryAgent
+from sentinel.agents.scraper import ScraperAgent
 from sentinel.config import get_settings, validate_runtime_settings
 from sentinel.delivery.telegram_listener import run_telegram_listener
 from sentinel.delivery.telegram_bot import fetch_chat_candidates, format_chat_candidates
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run SENTINEL MVP commands")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("run-once", help="Run the full live MVP pipeline once")
+    subcommands.add_parser("scraper-diagnose", help="Fetch live sources and print per-feed scrape diagnostics")
     subcommands.add_parser("daily-digest", help="Send the daily digest for the last 24 hours")
     subcommands.add_parser("scheduler", help="Run the APScheduler service loop")
     subcommands.add_parser("telegram-listen", help="Start Telegram polling to capture analyst callback feedback")
@@ -58,10 +60,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def _dispatch(command: str, **kwargs) -> None:
     settings = get_settings()
-    validate_runtime_settings(settings, command=command)
+    if command != "scraper-diagnose":
+        validate_runtime_settings(settings, command=command)
     if command == "run-once":
         result = await run_pipeline_once(settings=settings)
         print(result)
+        return
+    if command == "scraper-diagnose":
+        scraper = ScraperAgent(settings=settings)
+        try:
+            report = await scraper.run_with_diagnostics()
+        finally:
+            await scraper.aclose()
+        print(f"Scrape diagnostics: kept_total={len(report.items)}")
+        for diagnostic in report.diagnostics:
+            error = diagnostic.error or "none"
+            print(
+                f"- source={diagnostic.source} fetched={diagnostic.fetched} kept={diagnostic.kept} "
+                f"stale_dropped={diagnostic.stale_dropped} error={error}"
+            )
         return
     if command == "daily-digest":
         result = await run_daily_digest(settings=settings)

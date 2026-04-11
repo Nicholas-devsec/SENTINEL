@@ -15,6 +15,7 @@ thresholds:
 sources:
   otx_api_key: ${OTX_API_KEY}
   max_item_age_hours: 24
+  http_timeout_seconds: 60
   feeds:
     - name: urlhaus
       url: https://urlhaus.abuse.ch/downloads/csv_recent/

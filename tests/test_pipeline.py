@@ -103,6 +103,7 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
     assert agents["scraper"].closed is True
     assert agents["enricher"].closed is True
     assert agents["rule_generator"].closed is True
+    assert agents["delivery"].closed is True
 
 
 @pytest.mark.asyncio

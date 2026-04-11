@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -8,17 +10,23 @@ from sentinel.config import get_settings, validate_runtime_settings
 from sentinel.pipeline import run_daily_digest, run_pipeline_once
 from sentinel.runtime import build_karpathy_loop
 
+logger = logging.getLogger(__name__)
+
 
 async def scrape_pipeline() -> None:
     settings = get_settings()
     validate_runtime_settings(settings, command="run-once")
-    await run_pipeline_once(settings=settings)
+    result = await run_pipeline_once(settings=settings)
+    logger.info("Scheduled scrape pipeline finished: %s", result)
 
 
 async def daily_digest_job() -> None:
     settings = get_settings()
-    validate_runtime_settings(settings, command="daily-digest")
-    await run_daily_digest(settings=settings)
+    validate_runtime_settings(settings, command="run-once")
+    pipeline_result = await run_pipeline_once(settings=settings)
+    logger.info("Scheduled pre-digest pipeline finished: %s", pipeline_result)
+    digest_result = await run_daily_digest(settings=settings)
+    logger.info("Scheduled daily digest finished: %s", digest_result)
 
 
 async def karpathy_loop_job() -> None:
@@ -58,12 +66,17 @@ def build_scheduler() -> AsyncIOScheduler:
             id="karpathy-loop",
             replace_existing=True,
         )
+    for job in scheduler.get_jobs():
+        logger.info("Registered scheduler job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
     return scheduler
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     scheduler = build_scheduler()
     scheduler.start()
+    for job in scheduler.get_jobs():
+        logger.info("Scheduler started job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
     try:
         while True:
             await __import__("asyncio").sleep(3600)

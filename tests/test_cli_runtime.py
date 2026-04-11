@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from sentinel import cli
+from sentinel.agents.scraper import ScrapeReport, SourceScrapeDiagnostic
 from sentinel.config import SentinelSettings, validate_runtime_settings
 
 
@@ -129,6 +130,37 @@ async def test_cli_dispatch_reports_when_no_real_samples_found(monkeypatch, tmp_
     await cli._dispatch("send-real-samples", types=["sha256"], limit=1)
 
     assert "No matching real IOC samples found" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_cli_dispatch_prints_scraper_diagnostics(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = build_settings(tmp_path)
+
+    class FakeScraperAgent:
+        def __init__(self, *, settings):
+            self.settings = settings
+
+        async def run_with_diagnostics(self):
+            return ScrapeReport(
+                items=[{"value": "example.test"}],
+                diagnostics=[
+                    SourceScrapeDiagnostic(source="urlhaus", fetched=5, kept=2, stale_dropped=3, error=None),
+                    SourceScrapeDiagnostic(source="otx", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
+                ],
+            )
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "ScraperAgent", FakeScraperAgent)
+
+    await cli._dispatch("scraper-diagnose")
+
+    output = capsys.readouterr().out
+    assert "Scrape diagnostics: kept_total=1" in output
+    assert "source=urlhaus fetched=5 kept=2 stale_dropped=3 error=none" in output
+    assert "source=otx fetched=0 kept=0 stale_dropped=0 error=ReadTimeout: timed out" in output
 
 
 @pytest.mark.asyncio

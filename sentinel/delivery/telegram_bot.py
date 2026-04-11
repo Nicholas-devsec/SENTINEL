@@ -7,6 +7,13 @@ from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Upda
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 
+MAX_TELEGRAM_MESSAGE_CHARS = 3500
+MAX_DIGEST_LINKS_PER_ITEM = 2
+MAX_SOURCE_TITLE_CHARS = 90
+MAX_IOC_VALUE_CHARS = 120
+MAX_LINK_CHARS = 140
+
+
 @dataclass(slots=True)
 class TelegramChatCandidate:
     chat_id: str
@@ -30,6 +37,7 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
 
 def format_alert_message(
     *,
+    heading: str = "SENTINEL Alert",
     value: str,
     ioc_type: str,
     source: str,
@@ -65,7 +73,7 @@ def format_alert_message(
     cves = ", ".join(related_cves or []) if related_cves else "None"
     source_context = source_title or "None"
     return (
-        f"SENTINEL Alert\n"
+        f"{heading}\n"
         f"IOC: {value}\n"
         f"Type: {ioc_type}\n"
         f"Source: {source}\n"
@@ -81,12 +89,32 @@ def format_alert_message(
     )
 
 
+def format_daily_digest_intro(*, generated_at: str, count: int, limit: int) -> str:
+    displayed = min(count, limit)
+    if displayed == 0:
+        return (
+            "SENTINEL Daily Digest\n"
+            f"Generated: {generated_at}\n"
+            "No qualifying IOC activity in the last 24 hours."
+        )
+    return (
+        "SENTINEL Daily Digest\n"
+        f"Generated: {generated_at}\n"
+        f"Delivering {displayed} analyst-ready IOC card(s) from the last 24 hours."
+    )
+
+
 def format_daily_digest_message(
     *,
     items: list[dict[str, Any]],
     generated_at: str,
     limit: int,
 ) -> str:
+    def truncate(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
+
     lines = [
         "SENTINEL Daily Digest",
         f"Generated: {generated_at}",
@@ -96,25 +124,35 @@ def format_daily_digest_message(
     if not items:
         lines.append("No qualifying IOC activity in the last 24 hours.")
         return "\n".join(lines)
+    omitted = 0
     for index, item in enumerate(items[:limit], start=1):
         cves = ", ".join(item.get("related_cves", [])[:3]) if item.get("related_cves") else "None"
-        lines.append(
+        candidate_lines = [
             f"{index}. [{item['severity'].upper()}] {item['value']} | {item['type']} | "
             f"score={float(item['risk_score']):.2f} | source={item['source']}"
-        )
+        ]
+        candidate_lines[0] = candidate_lines[0].replace(item["value"], truncate(str(item["value"]), MAX_IOC_VALUE_CHARS))
         if item.get("source_title"):
-            lines.append(f"   Intel: {item['source_title']}")
+            candidate_lines.append(f"   Intel: {truncate(str(item['source_title']), MAX_SOURCE_TITLE_CHARS)}")
         if item.get("related_cves"):
-            lines.append(f"   CVEs: {cves}")
+            candidate_lines.append(f"   CVEs: {cves}")
         links = item.get("external_links") or {}
         if links:
             preferred = []
             for name in ("VirusTotal", "OTX", "URLhaus", "AbuseIPDB", "Shodan"):
                 if name in links:
-                    preferred.append(f"{name}: {links[name]}")
+                    preferred.append(f"{name}: {truncate(str(links[name]), MAX_LINK_CHARS)}")
             if preferred:
-                lines.append(f"   Links: {' | '.join(preferred[:3])}")
-    return "\n".join(lines)
+                candidate_lines.append(f"   Links: {' | '.join(preferred[:MAX_DIGEST_LINKS_PER_ITEM])}")
+        preview = "\n".join(lines + candidate_lines)
+        if len(preview) > MAX_TELEGRAM_MESSAGE_CHARS:
+            omitted = len(items[:limit]) - (index - 1)
+            break
+        lines.extend(candidate_lines)
+    if omitted > 0:
+        lines.append("")
+        lines.append(f"Omitted {omitted} item(s) to keep this digest within Telegram message limits.")
+    return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
 
 
 async def build_telegram_application(token: str, callback_handler) -> Application:

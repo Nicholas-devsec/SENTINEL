@@ -37,6 +37,7 @@ class FeedConfig(BaseModel):
 class SourceSettings(BaseModel):
     otx_api_key: str = "${OTX_API_KEY}"
     max_item_age_hours: int = 24
+    http_timeout_seconds: int = 60
     feeds: list[FeedConfig] = Field(default_factory=list)
 
 

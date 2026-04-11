@@ -15,7 +15,11 @@ from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.models import FeedbackRecord, IOC
 from sentinel.delivery.email_digest import render_daily_digest, send_daily_digest
-from sentinel.delivery.telegram_bot import build_feedback_markup, format_alert_message, format_daily_digest_message
+from sentinel.delivery.telegram_bot import (
+    build_feedback_markup,
+    format_alert_message,
+    format_daily_digest_intro,
+)
 
 
 @dataclass(slots=True)
@@ -160,16 +164,39 @@ class DeliveryAgent(BaseAgent):
             "count": len(top_items),
         }
         if self.telegram_bot is not None:
-            message = format_daily_digest_message(
-                items=top_items,
-                generated_at=datetime.now(UTC).isoformat(),
-                limit=self.settings.delivery.telegram_daily_digest_limit,
-            )
+            generated_at = datetime.now(UTC).isoformat()
             try:
                 await self.telegram_bot.send_message(
                     chat_id=self.settings.delivery.telegram_chat_id,
-                    text=message,
+                    text=format_daily_digest_intro(
+                        generated_at=generated_at,
+                        count=len(top_items),
+                        limit=self.settings.delivery.telegram_daily_digest_limit,
+                    ),
                 )
+                for index, item in enumerate(top_items, start=1):
+                    message = format_alert_message(
+                        heading=f"SENTINEL Daily Digest {index}/{len(top_items)}",
+                        value=item["value"],
+                        ioc_type=item["type"],
+                        source=item["source"],
+                        risk_score=float(item["risk_score"]),
+                        severity=item["severity"],
+                        source_title=item.get("source_title"),
+                        reference_url=item.get("reference_url"),
+                        related_cves=item.get("related_cves", []),
+                        vt_detections=item.get("vt_detections"),
+                        abuse_confidence=item.get("abuse_confidence"),
+                        shodan_ports=item.get("shodan_ports", []),
+                        external_links=item.get("external_links", {}),
+                        mitre_techniques=item.get("mitre_techniques", []),
+                        mitre_tactics=item.get("mitre_tactics", []),
+                    )
+                    await self.telegram_bot.send_message(
+                        chat_id=self.settings.delivery.telegram_chat_id,
+                        text=message,
+                        reply_markup=self._build_markup(item.get("id")),
+                    )
                 result["telegram"] = {"status": "sent", "sent": True}
             except TelegramError as exc:
                 self.logger.warning("Telegram daily digest delivery failed: %s", type(exc).__name__)
@@ -205,3 +232,10 @@ class DeliveryAgent(BaseAgent):
             if await self.send_immediate_alert(item):
                 sent_immediate += 1
         return DeliveryResult(immediate_alerts=sent_immediate, digest_candidates=len(digest_candidates))
+
+    async def aclose(self) -> None:
+        closer = getattr(self.telegram_bot, "shutdown", None)
+        if closer is not None:
+            maybe_awaitable = closer()
+            if hasattr(maybe_awaitable, "__await__"):
+                await maybe_awaitable
