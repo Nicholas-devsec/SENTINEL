@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -197,6 +198,8 @@ class DeliveryAgent(BaseAgent):
                         text=message,
                         reply_markup=self._build_markup(item.get("id")),
                     )
+                    if index < len(top_items):
+                        await asyncio.sleep(0.75)
                 result["telegram"] = {"status": "sent", "sent": True}
             except TelegramError as exc:
                 self.logger.warning("Telegram daily digest delivery failed: %s", type(exc).__name__)
