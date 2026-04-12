@@ -43,6 +43,7 @@ enrichment:
   virustotal_key: ${VT_API_KEY}
   shodan_key: ${SHODAN_API_KEY}
   abuseipdb_key: ${ABUSEIPDB_API_KEY}
+  enable_whois: false
   weights:
     vt_ratio: 0.35
     abuse_confidence: 0.30

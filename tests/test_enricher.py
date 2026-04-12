@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sentinel.agents.enricher import EnrichmentAgent
+from sentinel.config import SentinelSettings
 
 
 class FakeVirusTotalClient:
@@ -89,11 +90,26 @@ updated_by: test
     return skill_path
 
 
+def build_settings(*, enable_whois: bool = False) -> SentinelSettings:
+    return SentinelSettings.model_validate(
+        {
+            "enrichment": {
+                "virustotal_key": "vt",
+                "shodan_key": "shodan",
+                "abuseipdb_key": "abuse",
+                "enable_whois": enable_whois,
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_enrichment_agent_merges_provider_results_and_scores(enrichment_skill: Path) -> None:
     now = datetime.now(UTC)
     agent = EnrichmentAgent(
         skill_path=str(enrichment_skill),
+        settings=build_settings(enable_whois=True),
         virustotal_client=FakeVirusTotalClient(
             {"last_analysis_stats": {"malicious": 6, "suspicious": 2, "harmless": 2, "undetected": 10}}
         ),
@@ -131,6 +147,7 @@ async def test_enrichment_agent_handles_partial_provider_failures(enrichment_ski
     now = datetime.now(UTC)
     agent = EnrichmentAgent(
         skill_path=str(enrichment_skill),
+        settings=build_settings(enable_whois=True),
         virustotal_client=FakeVirusTotalClient(RuntimeError("vt unavailable")),
         shodan_client=FakeShodanClient(RuntimeError("shodan unavailable")),
         abuseipdb_client=FakeAbuseIPDBClient({"data": {"abuseConfidenceScore": 20}}),
@@ -163,6 +180,7 @@ async def test_enrichment_agent_respects_provider_semaphore_limits(enrichment_sk
     whois_client = FakeWhoisClient({"registrar": "Example"}, delay=0.05)
     agent = EnrichmentAgent(
         skill_path=str(enrichment_skill),
+        settings=build_settings(enable_whois=True),
         virustotal_client=FakeVirusTotalClient({"last_analysis_stats": {}}),
         shodan_client=FakeShodanClient(None),
         abuseipdb_client=FakeAbuseIPDBClient(None),
@@ -192,3 +210,33 @@ async def test_enrichment_agent_respects_provider_semaphore_limits(enrichment_sk
     )
 
     assert whois_client.max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_enrichment_agent_disables_whois_by_default(enrichment_skill: Path) -> None:
+    now = datetime.now(UTC)
+    whois_client = FakeWhoisClient({"registrar": "Should not be used"})
+    agent = EnrichmentAgent(
+        skill_path=str(enrichment_skill),
+        settings=build_settings(enable_whois=False),
+        virustotal_client=FakeVirusTotalClient({"last_analysis_stats": {}}),
+        shodan_client=FakeShodanClient(None),
+        abuseipdb_client=FakeAbuseIPDBClient(None),
+        whois_client=whois_client,
+    )
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "example.test",
+                "type": "domain",
+                "source": "feed-a",
+                "source_trust": 0.9,
+                "first_seen": now - timedelta(hours=1),
+                "last_seen": now,
+            }
+        ]
+    )
+
+    assert enriched[0].whois == {}
+    assert whois_client.max_active == 0

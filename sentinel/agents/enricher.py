@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -58,7 +59,7 @@ class EnrichmentAgent(BaseAgent):
         self.virustotal_client = virustotal_client or VirusTotalClient(self.settings.enrichment.virustotal_key)
         self.shodan_client = shodan_client or ShodanClient(self.settings.enrichment.shodan_key)
         self.abuseipdb_client = abuseipdb_client or AbuseIPDBClient(self.settings.enrichment.abuseipdb_key)
-        self.whois_client = whois_client or WhoisClient()
+        self.whois_client = (whois_client or WhoisClient()) if self.settings.enrichment.enable_whois else None
         limits = semaphore_limits or {"virustotal": 4, "shodan": 4, "abuseipdb": 8, "whois": 8}
         self.semaphores = {name: asyncio.Semaphore(limit) for name, limit in limits.items()}
         self._owns_abuse_client = abuseipdb_client is None
@@ -132,6 +133,8 @@ class EnrichmentAgent(BaseAgent):
         return await self._bounded("abuseipdb", self.abuseipdb_client.lookup_ip(ioc["value"]))
 
     async def _fetch_whois(self, ioc: dict[str, Any]) -> dict[str, Any] | None:
+        if self.whois_client is None:
+            return None
         if ioc["type"] not in {"domain", "url", "ipv4", "ipv6"}:
             return None
         lookup_value = ioc["value"]
@@ -272,7 +275,16 @@ class EnrichmentAgent(BaseAgent):
     async def run(self, validated_iocs: list[IOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[EnrichedIOC]:
         self.reload_skill()
         weights = self.get_scoring_weights()
-        return await asyncio.gather(*(self.enrich_one(ioc, weights=weights) for ioc in validated_iocs))
+        started = time.perf_counter()
+        enriched = await asyncio.gather(*(self.enrich_one(ioc, weights=weights) for ioc in validated_iocs))
+        elapsed = time.perf_counter() - started
+        self.logger.info(
+            "Enrichment completed for %s IOC(s) in %.2fs (whois=%s)",
+            len(validated_iocs),
+            elapsed,
+            "enabled" if self.whois_client is not None else "disabled",
+        )
+        return enriched
 
     async def aclose(self) -> None:
         if self._owns_abuse_client:

@@ -53,6 +53,7 @@ class EnrichmentSettings(BaseModel):
     virustotal_key: str = "${VT_API_KEY}"
     shodan_key: str = "${SHODAN_API_KEY}"
     abuseipdb_key: str = "${ABUSEIPDB_API_KEY}"
+    enable_whois: bool = False
     weights: WeightSettings = Field(default_factory=WeightSettings)
 
 
