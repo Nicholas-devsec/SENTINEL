@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
@@ -255,6 +255,113 @@ class OTXPulseAdapter:
         return records
 
 
+class ThreatFoxAdapter:
+    source_name = "threatfox"
+
+    def __init__(
+        self,
+        api_url: str,
+        *,
+        trust_score: float,
+        api_key: str | None = None,
+        lookback_hours: int = 24,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.api_url = api_url
+        self.trust_score = trust_score
+        self.api_key = api_key
+        self.lookback_hours = lookback_hours
+        self.client = client or httpx.AsyncClient(timeout=30.0)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if self.api_key:
+            headers["Auth-Key"] = self.api_key
+        return headers
+
+    def _normalize_ioc_type(self, raw_type: str | None, value: str) -> tuple[str, str, dict[str, Any]]:
+        if not raw_type:
+            return _infer_ioc_type(value), value, {}
+        normalized = raw_type.strip().lower()
+        attributes: dict[str, Any] = {}
+        if normalized == "ip:port":
+            host, _, port = value.partition(":")
+            if port.isdigit():
+                attributes["port"] = int(port)
+            return "ipv4", host, attributes
+        mapping = {
+            "ip": "ipv4",
+            "ipv4": "ipv4",
+            "ipv6": "ipv6",
+            "domain": "domain",
+            "url": "url",
+            "md5_hash": "md5",
+            "sha1_hash": "sha1",
+            "sha256_hash": "sha256",
+            "md5": "md5",
+            "sha1": "sha1",
+            "sha256": "sha256",
+        }
+        return mapping.get(normalized, _infer_ioc_type(value)), value, attributes
+
+    async def fetch(self) -> list[RawIOC]:
+        if not self.api_key or _is_missing_secret(self.api_key):
+            return []
+        days = max(1, min(7, int((self.lookback_hours + 23) // 24)))
+        response = await self.client.post(
+            self.api_url,
+            headers=self._headers(),
+            json={"query": "get_iocs", "days": days},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("query_status") != "ok":
+            return []
+        data = payload.get("data")
+        if not isinstance(data, list):
+            return []
+        records: list[RawIOC] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("ioc") or "").strip()
+            if not value:
+                continue
+            normalized_type, normalized_value, extra_attributes = self._normalize_ioc_type(item.get("ioc_type"), value)
+            first_seen = _normalize_timestamp(item.get("first_seen"))
+            last_seen = _normalize_timestamp(item.get("last_seen")) if item.get("last_seen") else first_seen
+            tags = []
+            for tag in item.get("tags") or []:
+                if isinstance(tag, str) and tag.strip():
+                    tags.append(tag.strip())
+            for extra_tag in (item.get("malware_printable"), item.get("threat_type")):
+                if isinstance(extra_tag, str) and extra_tag.strip():
+                    tags.append(extra_tag.strip())
+            records.append(
+                RawIOC(
+                    value=normalized_value,
+                    type=normalized_type,
+                    source=self.source_name,
+                    source_trust=self.trust_score,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    tags=sorted(set(tags)),
+                    description=item.get("threat_type_desc") or item.get("ioc_type_desc") or item.get("malware_printable"),
+                    reference_url=item.get("reference") or None,
+                    attributes={
+                        "threatfox_id": item.get("id"),
+                        "threat_type": item.get("threat_type"),
+                        "malware": item.get("malware"),
+                        "malware_printable": item.get("malware_printable"),
+                        "confidence_level": item.get("confidence_level"),
+                        "reporter": item.get("reporter"),
+                        **extra_attributes,
+                    },
+                )
+            )
+        return records
+
+
 class URLHausAdapter:
     source_name = "urlhaus"
 
@@ -409,7 +516,7 @@ class ScraperAgent(BaseAgent):
         return sorted(matches)
 
     def _is_recent(self, item: RawIOC) -> bool:
-        cutoff = _now_utc() - __import__("datetime").timedelta(hours=self.settings.sources.max_item_age_hours)
+        cutoff = _now_utc() - timedelta(hours=self.settings.sources.max_item_age_hours)
         return max(item.first_seen, item.last_seen) >= cutoff
 
     def _decorate_item(self, item: RawIOC) -> RawIOC:
@@ -458,6 +565,16 @@ class ScraperAgent(BaseAgent):
                         trust_score=trust_score,
                         lookback_hours=self.settings.sources.max_item_age_hours,
                         api_key=self.settings.sources.otx_api_key,
+                        client=self.http_client,
+                    )
+                )
+            elif source_name == "threatfox":
+                adapters.append(
+                    ThreatFoxAdapter(
+                        feed.url,
+                        trust_score=trust_score,
+                        api_key=self.settings.sources.threatfox_api_key,
+                        lookback_hours=self.settings.sources.max_item_age_hours,
                         client=self.http_client,
                     )
                 )

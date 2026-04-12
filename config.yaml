@@ -14,9 +14,14 @@ thresholds:
 
 sources:
   otx_api_key: ${OTX_API_KEY}
+  threatfox_api_key: ${THREATFOX_API_KEY}
   max_item_age_hours: 24
   http_timeout_seconds: 60
   feeds:
+    - name: threatfox
+      url: https://threatfox-api.abuse.ch/api/v1/
+      trust: 0.94
+      enabled: true
     - name: urlhaus
       url: https://urlhaus.abuse.ch/downloads/csv_recent/
       trust: 0.91
@@ -54,7 +59,7 @@ delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
   telegram_max_alerts_per_run: 3
-  telegram_daily_digest_limit: 10
+  telegram_daily_digest_limit: 5
   enable_email: false
   sendgrid_key: ${SENDGRID_API_KEY}
   email_from: sentinel@yourdomain.com

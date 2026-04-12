@@ -12,6 +12,7 @@ from sentinel.agents.scraper import (
     RSSAdapter,
     ScraperAgent,
     SourceScrapeDiagnostic,
+    ThreatFoxAdapter,
     URLHausAdapter,
 )
 from sentinel.config import SentinelSettings
@@ -23,7 +24,9 @@ def settings() -> SentinelSettings:
         {
             "sources": {
                 "otx_api_key": "test-otx-key",
+                "threatfox_api_key": "test-threatfox-key",
                 "feeds": [
+                    {"name": "threatfox", "url": "https://feeds.local/threatfox", "trust": 0.1},
                     {"name": "urlhaus", "url": "https://feeds.local/urlhaus.csv", "trust": 0.1},
                     {"name": "feodotracker", "url": "https://feeds.local/feodo.json", "trust": 0.1},
                     {"name": "otx", "url": "https://feeds.local/otx", "trust": 0.1},
@@ -33,6 +36,59 @@ def settings() -> SentinelSettings:
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_threatfox_adapter_parses_recent_iocs() -> None:
+    seen_headers: dict[str, str] = {}
+    seen_json: dict[str, object] = {}
+
+    transport = httpx.MockTransport(
+        lambda request: (
+            seen_headers.update(dict(request.headers)),
+            seen_json.update(json.loads(request.content.decode("utf-8"))),
+            httpx.Response(
+                200,
+                json={
+                    "query_status": "ok",
+                    "data": [
+                        {
+                            "id": "41",
+                            "ioc": "94.103.84.81:443",
+                            "ioc_type": "ip:port",
+                            "ioc_type_desc": "IP address and port",
+                            "threat_type": "botnet_cc",
+                            "threat_type_desc": "Command and control",
+                            "malware": "win.test",
+                            "malware_printable": "Test Malware",
+                            "first_seen": "2026-04-10T12:00:00Z",
+                            "last_seen": "2026-04-10T13:00:00Z",
+                            "confidence_level": 75,
+                            "reference": "https://threatfox.abuse.ch/ioc/41/",
+                            "tags": ["test"],
+                        }
+                    ],
+                },
+            ),
+        )[2]
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = ThreatFoxAdapter(
+            "https://feeds.local/threatfox",
+            trust_score=0.94,
+            api_key="threatfox-key",
+            lookback_hours=24,
+            client=client,
+        )
+        records = await adapter.fetch()
+
+    assert len(records) == 1
+    assert records[0].value == "94.103.84.81"
+    assert records[0].type == "ipv4"
+    assert records[0].attributes["port"] == 443
+    assert records[0].reference_url == "https://threatfox.abuse.ch/ioc/41/"
+    assert seen_headers["auth-key"] == "threatfox-key"
+    assert seen_json == {"query": "get_iocs", "days": 1}
 
 
 @pytest.mark.asyncio
@@ -190,6 +246,8 @@ async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(setti
     settings.sources.max_item_age_hours = 24
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("threatfox"):
+            return httpx.Response(200, json={"query_status": "ok", "data": []})
         if request.url.path.endswith("urlhaus.csv"):
             return httpx.Response(
                 200,
@@ -245,6 +303,8 @@ async def test_scraper_agent_uses_strict_rolling_24_hour_window(settings: Sentin
     settings.sources.max_item_age_hours = 24
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("threatfox"):
+            return httpx.Response(200, json={"query_status": "ok", "data": []})
         if request.url.path.endswith("urlhaus.csv"):
             return httpx.Response(
                 200,

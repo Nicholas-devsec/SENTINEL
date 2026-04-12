@@ -7,12 +7,14 @@ updated_by: human
 # Sources Skill
 
 ## Feed Inventory
+- abuse.ch ThreatFox recent IOC API
 - AlienVault OTX TAXII 2.1 feed
 - abuse.ch URLhaus CSV and recent URL API
 - abuse.ch FeodoTracker JSON
 - Generic RSS security news feeds
 
 ## Trust Scores
+- threatfox: 0.94
 - urlhaus: 0.91
 - feodotracker: 0.93
 - otx: 0.90
@@ -28,4 +30,3 @@ updated_by: human
 
 ## Learner Updates
 <!-- learner: append here -->
-

@@ -263,10 +263,10 @@ async def test_delivery_agent_aclose_shuts_down_telegram_bot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delivery_agent_daily_digest_sends_top_10_by_risk_score() -> None:
+async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
-    settings.delivery.telegram_daily_digest_limit = 10
+    settings.delivery.telegram_daily_digest_limit = 5
     agent = DeliveryAgent(
         settings=settings,
         telegram_bot=telegram_bot,
@@ -288,23 +288,24 @@ async def test_delivery_agent_daily_digest_sends_top_10_by_risk_score() -> None:
 
     response = await agent.daily_digest(items)
 
-    assert response["count"] == 10
-    assert len(telegram_bot.messages) == 11
-    assert "Delivering 10 analyst-ready IOC card(s)" in telegram_bot.messages[0]["text"]
-    assert "SENTINEL Daily Digest 1/10" in telegram_bot.messages[1]["text"]
+    assert response["count"] == 5
+    assert len(telegram_bot.messages) == 6
+    assert "Delivering 5 analyst-ready IOC card(s)" in telegram_bot.messages[0]["text"]
+    assert "SENTINEL Daily Digest 1/5" in telegram_bot.messages[1]["text"]
     assert "IOC: ioc-11" in telegram_bot.messages[1]["text"]
-    assert "SENTINEL Daily Digest 10/10" in telegram_bot.messages[10]["text"]
-    assert "IOC: ioc-2" in telegram_bot.messages[10]["text"]
+    assert "SENTINEL Daily Digest 5/5" in telegram_bot.messages[5]["text"]
+    assert "IOC: ioc-7" in telegram_bot.messages[5]["text"]
     joined = "\n".join(message["text"] for message in telegram_bot.messages)
     assert "IOC: ioc-0\n" not in joined
     assert "IOC: ioc-1\n" not in joined
+    assert "IOC: ioc-6\n" not in joined
 
 
 def test_format_daily_digest_intro_for_non_empty_and_empty_digest() -> None:
-    rendered = format_daily_digest_intro(generated_at="2026-04-11T05:21:51+00:00", count=10, limit=10)
-    assert "Delivering 10 analyst-ready IOC card(s)" in rendered
+    rendered = format_daily_digest_intro(generated_at="2026-04-11T05:21:51+00:00", count=10, limit=5)
+    assert "Delivering 5 analyst-ready IOC card(s)" in rendered
 
-    empty = format_daily_digest_intro(generated_at="2026-04-11T05:21:51+00:00", count=0, limit=10)
+    empty = format_daily_digest_intro(generated_at="2026-04-11T05:21:51+00:00", count=0, limit=5)
     assert "No qualifying IOC activity" in empty
 
 
