@@ -9,6 +9,7 @@ from git import Repo
 
 from sentinel.config import SentinelSettings
 from sentinel.loops.detection_loop import DetectionEffectivenessLoop
+from sentinel.loops.source_loop import SourceQualityLoop
 
 
 class FakeProvider:
@@ -22,8 +23,9 @@ class FakeProvider:
 
 
 class FakeSession:
-    def __init__(self, *, experiment_logs=None) -> None:
+    def __init__(self, *, experiment_logs=None, feedback_rows=None) -> None:
         self.experiment_logs = experiment_logs if experiment_logs is not None else []
+        self.feedback_rows = feedback_rows if feedback_rows is not None else []
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -33,11 +35,12 @@ class FakeSession:
 
 
 class FakeSessionFactory:
-    def __init__(self) -> None:
+    def __init__(self, *, feedback_rows=None) -> None:
         self.experiment_logs: list[dict] = []
+        self.feedback_rows = feedback_rows if feedback_rows is not None else []
 
     def __call__(self) -> FakeSession:
-        return FakeSession(experiment_logs=self.experiment_logs)
+        return FakeSession(experiment_logs=self.experiment_logs, feedback_rows=self.feedback_rows)
 
 
 class SequencedMetric:
@@ -67,6 +70,23 @@ def build_settings() -> SentinelSettings:
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
         }
     )
+
+
+@pytest.fixture
+def source_repo(tmp_path: Path) -> Path:
+    repo_path = tmp_path / "repo"
+    skills_dir = repo_path / "skills"
+    skills_dir.mkdir(parents=True)
+    (repo_path / "README.md").write_text("temp repo\n", encoding="utf-8")
+    (skills_dir / "CHANGELOG.md").write_text("# Skills Changelog\n", encoding="utf-8")
+    (skills_dir / "sources.SKILL.md").write_text(
+        "---\nversion: 1.0.0\nlast_updated: 2026-04-08\nupdated_by: human\n---\n\n# Sources Skill\n\n## Trust Scores\n- threatfox: 0.94\n- otx: 0.90\n\n## Learner Updates\n<!-- learner: append here -->\n",
+        encoding="utf-8",
+    )
+    repo = Repo.init(repo_path)
+    repo.index.add(["README.md", "skills/CHANGELOG.md", "skills/sources.SKILL.md"])
+    repo.index.commit("init")
+    return repo_path
 
 
 @pytest.fixture
@@ -242,3 +262,121 @@ async def test_karpathy_loop_rejects_missing_section_without_mutating_skill(temp
         await loop.optimize(max_experiments=1)
 
     assert (temp_repo / "skills/detection.SKILL.md").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_source_loop_measures_precision_per_source(source_repo: Path) -> None:
+    loop = SourceQualityLoop(
+        provider=FakeProvider([]),
+        skill_path=source_repo / "skills/sources.SKILL.md",
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(
+            feedback_rows=[
+                {"source": "threatfox", "verdict": "confirmed"},
+                {"source": "threatfox", "verdict": "false_positive"},
+                {"source": "threatfox", "verdict": "confirmed"},
+                {"source": "otx", "verdict": "false_positive"},
+                {"source": "otx", "verdict": "false_positive"},
+            ]
+        ),
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        target_source="threatfox",
+    )
+
+    metric = await loop.measure_metric()
+
+    assert metric == pytest.approx(2 / 3)
+
+
+@pytest.mark.asyncio
+async def test_source_loop_rejects_wrong_target_source(source_repo: Path) -> None:
+    provider = FakeProvider(
+        [
+            {
+                "source_name": "otx",
+                "new_trust": 0.88,
+                "reasoning": "Bad target",
+                "expected_effect": "Should fail",
+            }
+        ]
+    )
+    loop = SourceQualityLoop(
+        provider=provider,
+        skill_path=source_repo / "skills/sources.SKILL.md",
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(feedback_rows=[]),
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        metric_override=SequencedMetric([0.5]),
+        target_source="threatfox",
+    )
+
+    with pytest.raises(ValueError, match="must target 'threatfox'"):
+        await loop.optimize(max_experiments=1)
+
+
+@pytest.mark.asyncio
+async def test_source_loop_rejects_out_of_bounds_trust_delta(source_repo: Path) -> None:
+    provider = FakeProvider(
+        [
+            {
+                "source_name": "threatfox",
+                "new_trust": 0.50,
+                "reasoning": "Too large delta",
+                "expected_effect": "Should fail",
+            }
+        ]
+    )
+    loop = SourceQualityLoop(
+        provider=provider,
+        skill_path=source_repo / "skills/sources.SKILL.md",
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(feedback_rows=[]),
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        metric_override=SequencedMetric([0.5]),
+        target_source="threatfox",
+    )
+
+    with pytest.raises(ValueError, match=r"\+/- 0.05"):
+        await loop.optimize(max_experiments=1)
+
+
+@pytest.mark.asyncio
+async def test_source_loop_keeps_positive_delta_and_records_trust_shift(source_repo: Path) -> None:
+    provider = FakeProvider(
+        [
+            {
+                "source_name": "threatfox",
+                "new_trust": 0.90,
+                "reasoning": "Reduce noisy source weight",
+                "expected_effect": "Improve source precision",
+            }
+        ]
+    )
+    sessions = FakeSessionFactory(feedback_rows=[])
+    loop = SourceQualityLoop(
+        provider=provider,
+        skill_path=source_repo / "skills/sources.SKILL.md",
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=sessions,
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        metric_override=SequencedMetric([0.40, 0.58]),
+        now_fn=lambda: datetime(2026, 4, 8, 12, 0, tzinfo=UTC),
+        target_source="threatfox",
+    )
+
+    outcomes = await loop.optimize(max_experiments=1)
+
+    assert outcomes[0].kept is True
+    assert outcomes[0].target_source == "threatfox"
+    assert outcomes[0].trust_before == 0.94
+    assert outcomes[0].trust_after == 0.90
+    assert "- threatfox: 0.90" in (source_repo / "skills/sources.SKILL.md").read_text(encoding="utf-8")
+    assert "actor=karpathy" in (source_repo / "skills/CHANGELOG.md").read_text(encoding="utf-8")

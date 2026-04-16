@@ -127,6 +127,67 @@ async def test_live_preflight_blocks_source_loop_without_feedback(monkeypatch, t
     assert any(check.name == "feedback_window" and not check.passed for check in report.checks)
 
 
+@pytest.mark.asyncio
+async def test_live_preflight_selects_highest_false_positive_source(monkeypatch, tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    skill_path = repo_path / LOOP_SKILL_PATHS["source"]
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    changelog_path = repo_path / "skills/CHANGELOG.md"
+    changelog_path.write_text("# Skills Changelog\n", encoding="utf-8")
+    skill_path.write_text(
+        "---\nversion: 1.0.0\n---\n\n# Source Skill\n\n## Trust Scores\n- threatfox: 0.94\n- otx: 0.90\n",
+        encoding="utf-8",
+    )
+    (repo_path / "README.md").write_text("repo\n", encoding="utf-8")
+    repo = Repo.init(repo_path)
+    repo.index.add(["README.md", "skills/CHANGELOG.md", "skills/sources/SKILL.md"])
+    repo.index.commit("init")
+    monkeypatch.chdir(repo_path)
+
+    feedback_rows = [
+        {"source": "threatfox", "verdict": "false_positive"},
+        {"source": "threatfox", "verdict": "false_positive"},
+        {"source": "threatfox", "verdict": "false_positive"},
+        {"source": "threatfox", "verdict": "confirmed"},
+        {"source": "threatfox", "verdict": "confirmed"},
+        {"source": "otx", "verdict": "false_positive"},
+        {"source": "otx", "verdict": "confirmed"},
+        {"source": "otx", "verdict": "confirmed"},
+        {"source": "otx", "verdict": "confirmed"},
+        {"source": "otx", "verdict": "confirmed"},
+    ]
+
+    report = await inspect_live_karpathy_readiness(
+        loop_type="source",
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(feedback_rows=feedback_rows),
+    )
+
+    assert report.ready is True
+    assert report.target_source == "threatfox"
+    assert report.counts["target_source_feedback_rows"] == 5
+
+
+@pytest.mark.asyncio
+async def test_live_preflight_blocks_scoring_and_detection_loops() -> None:
+    scoring = await inspect_live_karpathy_readiness(
+        loop_type="scoring",
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(),
+    )
+    detection = await inspect_live_karpathy_readiness(
+        loop_type="detection",
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(),
+    )
+
+    assert scoring.ready is False
+    assert detection.ready is False
+    assert any(check.name == "live_supported" and not check.passed for check in scoring.checks)
+    assert any(check.name == "live_supported" and not check.passed for check in detection.checks)
+
+
 def test_build_karpathy_loop_uses_mitre_skill_for_scoring(tmp_path: Path) -> None:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()

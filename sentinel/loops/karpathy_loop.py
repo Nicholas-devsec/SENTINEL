@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -17,12 +18,18 @@ from sentinel.db.models import ExperimentLog, FeedbackRecord, IOC
 from sentinel.loops.providers.base import LLMProvider
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class ExperimentProposal:
     description: str
     patch: str
     section: str
     reasoning: str
+    source_name: str | None = None
+    new_trust: float | None = None
+    expected_effect: str | None = None
 
 
 @dataclass(slots=True)
@@ -33,6 +40,10 @@ class ExperimentOutcome:
     delta: float
     kept: bool
     hypothesis: str
+    target_source: str | None = None
+    trust_before: float | None = None
+    trust_after: float | None = None
+    feedback_count: int | None = None
 
 
 class ThreatIntelLoop:
@@ -176,7 +187,7 @@ class ThreatIntelLoop:
         if not path.exists():
             return
         entry = (
-            f"- {self.now_fn().isoformat()} | loop={self.loop_type} | kept={str(kept).lower()} | "
+            f"- {self.now_fn().isoformat()} | actor=karpathy | loop={self.loop_type} | kept={str(kept).lower()} | "
             f"delta={delta:.4f} | section={proposal.section} | description={proposal.description}\n"
         )
         path.write_text(path.read_text(encoding="utf-8") + entry, encoding="utf-8")
@@ -222,6 +233,8 @@ class ThreatIntelLoop:
             if not kept:
                 self.revert_patch(original)
                 metric_after = metric_before
+                if hasattr(self, "_last_trust_before"):
+                    setattr(self, "_last_trust_after", getattr(self, "_last_trust_before", None))
 
             async with self.session_factory() as session:
                 await self._create_log_row(
@@ -245,6 +258,10 @@ class ThreatIntelLoop:
                 delta=delta,
                 kept=kept,
                 hypothesis=proposal.description,
+                target_source=getattr(proposal, "source_name", None),
+                trust_before=getattr(self, "_last_trust_before", None),
+                trust_after=getattr(self, "_last_trust_after", None),
+                feedback_count=getattr(self, "_last_feedback_count", None),
             )
             outcomes.append(outcome)
             history.append(
@@ -254,6 +271,19 @@ class ThreatIntelLoop:
                     "delta": delta,
                     "kept": kept,
                 }
+            )
+            logger.info(
+                "Karpathy loop=%s experiment=%s source=%s trust_before=%s trust_after=%s metric_before=%.4f metric_after=%.4f delta=%.4f kept=%s feedback_count=%s",
+                self.loop_type,
+                experiment_number,
+                getattr(proposal, "source_name", None),
+                getattr(self, "_last_trust_before", None),
+                getattr(self, "_last_trust_after", None),
+                metric_before,
+                metric_after,
+                delta,
+                kept,
+                getattr(self, "_last_feedback_count", None),
             )
 
             if abs(delta) < 0.001:

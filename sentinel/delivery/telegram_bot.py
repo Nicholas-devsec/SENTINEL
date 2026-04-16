@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -43,6 +44,7 @@ def format_alert_message(
     source: str,
     risk_score: float,
     severity: str,
+    last_seen: datetime | str | None = None,
     source_title: str | None = None,
     reference_url: str | None = None,
     related_cves: list[str] | None = None,
@@ -72,11 +74,25 @@ def format_alert_message(
         intel_links = "- None"
     cves = ", ".join(related_cves or []) if related_cves else "None"
     source_context = source_title or "None"
+    observed_text = "Unknown"
+    if last_seen is not None:
+        if isinstance(last_seen, str):
+            try:
+                observed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            except ValueError:
+                observed = None
+        else:
+            observed = last_seen
+        if observed is not None:
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=UTC)
+            observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
     return (
         f"{heading}\n"
         f"IOC: {value}\n"
         f"Type: {ioc_type}\n"
         f"Source: {source}\n"
+        f"Observed In Feed: {observed_text}\n"
         f"Source Intel: {source_context}\n"
         f"Source Link: {reference_url or 'None'}\n"
         f"Related CVEs: {cves}\n"

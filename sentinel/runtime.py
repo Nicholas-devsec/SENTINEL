@@ -34,7 +34,7 @@ LOOP_PRIMARY_SECTIONS = {
 }
 
 LIVE_DATA_THRESHOLDS = {
-    "source": {"feedback_rows": 6, "distinct_sources": 2},
+    "source": {"feedback_rows": 5, "distinct_sources": 2},
     "scoring": {"analyst_verdicts": 10},
     "detection": {"generated_rules": 10, "pushed_rules": 1},
 }
@@ -56,6 +56,7 @@ class KarpathyReadinessReport:
     checks: list[KarpathyCheck]
     counts: dict[str, int] = field(default_factory=dict)
     current_branch: str | None = None
+    target_source: str | None = None
 
 
 @dataclass(slots=True)
@@ -74,6 +75,10 @@ class KarpathyRunReport:
     scenario: str | None = None
     error: str | None = None
     outcomes: list[ExperimentOutcome] = field(default_factory=list)
+    target_source: str | None = None
+    feedback_count: int | None = None
+    trust_before: float | None = None
+    trust_after: float | None = None
 
 
 class _ScriptedProvider:
@@ -130,6 +135,12 @@ def _build_branch_name(loop_type: str, *, now: datetime | None = None) -> str:
     return f"karpathy-{loop_type}-{stamp}"
 
 
+def _build_source_branch_name(source_name: str, *, now: datetime | None = None) -> str:
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d%H%M%S")
+    normalized = source_name.lower().replace(" ", "-")
+    return f"karpathy-source-{normalized}-{stamp}"
+
+
 def _resolve_repo_root() -> Path:
     repo = Repo(Path.cwd(), search_parent_directories=True)
     return Path(repo.working_tree_dir).resolve()
@@ -145,6 +156,7 @@ def build_karpathy_loop(
     changelog_path: str | Path = "skills/CHANGELOG.md",
     session_factory: Any | None = None,
     metric_override: Any | None = None,
+    target_source: str | None = None,
 ):
     loop_cls = _loop_class_for(loop_type)
     resolved_repo = Path(repo_path) if repo_path is not None else Path.cwd()
@@ -165,6 +177,8 @@ def build_karpathy_loop(
         common_kwargs["session_factory"] = session_factory
     if metric_override is not None:
         common_kwargs["metric_override"] = metric_override
+    if target_source is not None and loop_type == "source":
+        common_kwargs["target_source"] = target_source
     return loop_cls(**common_kwargs)
 
 
@@ -191,11 +205,13 @@ def format_karpathy_report(report: KarpathyRunReport) -> str:
         f"Karpathy {report.mode} report:",
         f"- loop={report.loop_type}",
     ]
-    if report.scenario:
+    if getattr(report, "scenario", None):
         lines.append(f"- scenario={report.scenario}")
-    if report.branch_name:
+    if getattr(report, "branch_name", None):
         lines.append(f"- branch={report.branch_name}")
-    if report.worktree_path:
+    if getattr(report, "target_source", None):
+        lines.append(f"- target_source={report.target_source}")
+    if getattr(report, "worktree_path", None):
         lines.append(f"- worktree={report.worktree_path}")
     lines.extend(
         [
@@ -204,21 +220,26 @@ def format_karpathy_report(report: KarpathyRunReport) -> str:
             f"- reverted={report.reverted}",
             f"- metric_before={report.metric_before if report.metric_before is not None else 'n/a'}",
             f"- metric_after={report.metric_after if report.metric_after is not None else 'n/a'}",
+            f"- feedback_count={getattr(report, 'feedback_count', None) if getattr(report, 'feedback_count', None) is not None else 'n/a'}",
+            f"- trust_before={getattr(report, 'trust_before', None) if getattr(report, 'trust_before', None) is not None else 'n/a'}",
+            f"- trust_after={getattr(report, 'trust_after', None) if getattr(report, 'trust_after', None) is not None else 'n/a'}",
             f"- affected_sections={', '.join(report.affected_sections) if report.affected_sections else 'none'}",
             f"- commit_hashes={', '.join(report.commit_hashes) if report.commit_hashes else 'none'}",
         ]
     )
-    if report.error:
+    if getattr(report, "error", None):
         lines.append(f"- error={report.error}")
-    if report.outcomes:
+    if getattr(report, "outcomes", None):
         lines.append(format_karpathy_outcomes(report.outcomes))
     return "\n".join(lines)
 
 
 def format_karpathy_readiness(report: KarpathyReadinessReport) -> str:
     lines = [f"Karpathy preflight for {report.loop_type}:"]
-    if report.current_branch:
+    if getattr(report, "current_branch", None):
         lines.append(f"- current_branch={report.current_branch}")
+    if getattr(report, "target_source", None):
+        lines.append(f"- target_source={report.target_source}")
     lines.append(f"- skill_path={report.skill_path}")
     lines.append(f"- changelog_path={report.changelog_path}")
     for check in report.checks:
@@ -234,41 +255,80 @@ def format_karpathy_readiness(report: KarpathyReadinessReport) -> str:
 def _build_shadow_scenario(loop_type: str, scenario: str) -> tuple[list[str], list[float], int]:
     section = LOOP_PRIMARY_SECTIONS[loop_type]
     if scenario == "improve":
-        proposal = {
-            "description": f"Improve {loop_type} guidance",
-            "patch": "updated body with tighter rules\n",
-            "section": section,
-            "reasoning": "Expected to improve the live metric.",
-        }
+        proposal = (
+            {
+                "source_name": "threatfox",
+                "new_trust": 0.89,
+                "reasoning": "Recent analyst feedback shows elevated false positives for this source.",
+                "expected_effect": "Improve source precision by reducing noisy indicators.",
+            }
+            if loop_type == "source"
+            else {
+                "description": f"Improve {loop_type} guidance",
+                "patch": "updated body with tighter rules\n",
+                "section": section,
+                "reasoning": "Expected to improve the live metric.",
+            }
+        )
         return [json.dumps(proposal)], [0.40, 0.58], 1
     if scenario == "decline":
-        proposal = {
-            "description": f"Bad {loop_type} change",
-            "patch": "worse body\n",
-            "section": section,
-            "reasoning": "Expected to regress.",
-        }
+        proposal = (
+            {
+                "source_name": "threatfox",
+                "new_trust": 0.89,
+                "reasoning": "Lower confidence might remove useful data.",
+                "expected_effect": "This is expected to regress.",
+            }
+            if loop_type == "source"
+            else {
+                "description": f"Bad {loop_type} change",
+                "patch": "worse body\n",
+                "section": section,
+                "reasoning": "Expected to regress.",
+            }
+        )
         return [json.dumps(proposal)], [0.60, 0.48], 1
     if scenario == "invalid-json":
         return ["not-json"], [0.50], 1
     if scenario == "missing-section":
-        proposal = {
-            "description": "Missing section",
-            "patch": "body",
-            "section": "Does Not Exist",
-            "reasoning": "Should fail closed.",
-        }
+        proposal = (
+            {
+                "source_name": "not-target",
+                "new_trust": 0.50,
+                "reasoning": "Wrong source.",
+                "expected_effect": "Should fail closed.",
+            }
+            if loop_type == "source"
+            else {
+                "description": "Missing section",
+                "patch": "body",
+                "section": "Does Not Exist",
+                "reasoning": "Should fail closed.",
+            }
+        )
         return [json.dumps(proposal)], [0.50], 1
     if scenario == "tiny-deltas":
-        proposals = [
-            {
-                "description": f"Tiny delta {index}",
-                "patch": f"small tweak {index}\n",
-                "section": section,
-                "reasoning": "Very small change.",
-            }
-            for index in range(1, 4)
-        ]
+        proposals = (
+            [
+                {
+                    "source_name": "threatfox",
+                    "new_trust": 0.94,
+                    "reasoning": f"Tiny delta {index}",
+                    "expected_effect": "Very small change.",
+                }
+                for index in range(1, 4)
+            ]
+            if loop_type == "source"
+            else [
+                {
+                    "description": f"Tiny delta {index}",
+                    "patch": f"small tweak {index}\n",
+                    "section": section,
+                    "reasoning": "Very small change.",
+                }
+                for index in range(1, 4)
+            ]
+        )
         return [json.dumps(item) for item in proposals], [0.50, 0.5004, 0.50, 0.5002, 0.50, 0.5001], 10
     raise ValueError(f"Unsupported Karpathy validation scenario: {scenario}")
 
@@ -317,6 +377,7 @@ async def run_shadow_karpathy_validation(
         changelog_path=changelog_path,
         session_factory=session_factory,
         metric_override=metric,
+        target_source="threatfox" if loop_type == "source" else None,
     )
     repo = Repo(repo_root)
     baseline_head = repo.head.commit.hexsha
@@ -339,6 +400,10 @@ async def run_shadow_karpathy_validation(
             commit_hashes=commits,
             worktree_path=str(repo_root),
             outcomes=outcomes,
+            target_source="threatfox" if loop_type == "source" else None,
+            feedback_count=outcomes[-1].feedback_count if outcomes else None,
+            trust_before=outcomes[0].trust_before if outcomes else None,
+            trust_after=outcomes[-1].trust_after if outcomes else None,
         )
     except Exception as exc:
         return KarpathyRunReport(
@@ -368,6 +433,26 @@ async def inspect_live_karpathy_readiness(
     changelog_path = Path("skills/CHANGELOG.md")
     checks: list[KarpathyCheck] = []
     counts: dict[str, int] = {}
+    target_source: str | None = None
+    cwd_root = Path.cwd().resolve()
+
+    if loop_type != "source":
+        reason = (
+            "Live scoring optimization is disabled until scoring behavior is directly skill-driven."
+            if loop_type == "scoring"
+            else "Live detection optimization is disabled until downstream detection outcomes are meaningful."
+        )
+        checks.append(KarpathyCheck(name="live_supported", passed=False, detail=reason))
+        return KarpathyReadinessReport(
+            loop_type=loop_type,
+            ready=False,
+            skill_path=str(cwd_root / skill_path),
+            changelog_path=str(cwd_root / changelog_path),
+            checks=checks,
+            counts=counts,
+            current_branch=None,
+            target_source=None,
+        )
 
     checks.append(
         KarpathyCheck(
@@ -433,6 +518,7 @@ async def inspect_live_karpathy_readiness(
             checks=checks,
             counts=counts,
             current_branch=current_branch,
+            target_source=target_source,
         )
 
     active_session_factory = session_factory or AsyncSessionFactory
@@ -441,20 +527,38 @@ async def inspect_live_karpathy_readiness(
         if loop_type == "source":
             if hasattr(session, "feedback_rows"):
                 feedback_rows = [row for row in session.feedback_rows if row["verdict"] in {"confirmed", "false_positive"}]
-                sources = {row.get("source", "unknown") for row in feedback_rows}
-                counts["feedback_rows"] = len(feedback_rows)
-                counts["distinct_sources"] = len(sources)
             else:
                 query = (
-                    select(func.count(FeedbackRecord.id), func.count(func.distinct(IOC.source)))
+                    select(FeedbackRecord.verdict, IOC.source)
                     .select_from(FeedbackRecord)
                     .join(IOC, IOC.id == FeedbackRecord.ioc_id)
                     .where(FeedbackRecord.timestamp >= cutoff)
                     .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
                 )
-                feedback_count, source_count = (await session.execute(query)).one()
-                counts["feedback_rows"] = int(feedback_count or 0)
-                counts["distinct_sources"] = int(source_count or 0)
+                feedback_rows = [
+                    {"verdict": verdict, "source": source}
+                    for verdict, source in (await session.execute(query)).all()
+                ]
+            counts["feedback_rows"] = len(feedback_rows)
+            counts["distinct_sources"] = len({row.get("source", "unknown") for row in feedback_rows})
+            per_source: dict[str, dict[str, int]] = {}
+            for row in feedback_rows:
+                source = row.get("source") or "unknown"
+                bucket = per_source.setdefault(source, {"confirmed": 0, "false_positive": 0})
+                bucket[row["verdict"]] += 1
+            minimums = LIVE_DATA_THRESHOLDS["source"]
+            candidates: list[tuple[str, float, int]] = []
+            for source, stats in per_source.items():
+                total = stats["confirmed"] + stats["false_positive"]
+                if total < minimums["feedback_rows"]:
+                    continue
+                if not stats["confirmed"] or not stats["false_positive"]:
+                    continue
+                fp_rate = stats["false_positive"] / total
+                candidates.append((source, fp_rate, total))
+            if candidates:
+                target_source, _, feedback_count = sorted(candidates, key=lambda item: (-item[1], -item[2], item[0]))[0]
+                counts["target_source_feedback_rows"] = feedback_count
             minimums = LIVE_DATA_THRESHOLDS["source"]
             checks.append(
                 KarpathyCheck(
@@ -470,69 +574,27 @@ async def inspect_live_karpathy_readiness(
                     detail=f"Need >= {minimums['distinct_sources']} distinct sources in the 48h window.",
                 )
             )
-        elif loop_type == "scoring":
-            if hasattr(session, "iocs"):
-                count = sum(1 for row in session.iocs if getattr(row, "analyst_verdict", None))
-            else:
-                count = int(
-                    (
-                        await session.execute(
-                            select(func.count(IOC.id))
-                            .where(IOC.last_seen >= cutoff)
-                            .where(IOC.analyst_verdict.is_not(None))
-                        )
-                    ).scalar_one()
-                    or 0
-                )
-            counts["analyst_verdicts"] = count
-            minimum = LIVE_DATA_THRESHOLDS["scoring"]["analyst_verdicts"]
             checks.append(
                 KarpathyCheck(
-                    name="analyst_verdicts",
-                    passed=count >= minimum,
-                    detail=f"Need >= {minimum} recent analyst verdicts before scoring optimization.",
+                    name="target_source_selected",
+                    passed=target_source is not None,
+                    detail="Selected highest-false-positive eligible source for optimization." if target_source else "No source met the live source-loop eligibility threshold.",
                 )
             )
-        else:
-            if hasattr(session, "iocs"):
-                rows = [row for row in session.iocs if getattr(row, "sigma_rule", None)]
-                total = len(rows)
-                pushed = sum(1 for row in rows if getattr(row, "crowdstrike_pushed", False))
-            else:
-                total, pushed = (
-                    await session.execute(
-                        select(
-                            func.count(IOC.id),
-                            func.sum(case((IOC.crowdstrike_pushed.is_(True), 1), else_=0)),
-                        )
-                        .where(IOC.last_seen >= cutoff)
-                        .where(IOC.sigma_rule.is_not(None))
+            if target_source is not None:
+                skill_text = resolved_skill.read_text(encoding="utf-8") if resolved_skill.exists() else ""
+                checks.append(
+                    KarpathyCheck(
+                        name="target_source_in_skill",
+                        passed=f"- {target_source}:" in skill_text,
+                        detail=f"{target_source} exists in the Trust Scores section." if f"- {target_source}:" in skill_text else f"{target_source} is missing from Trust Scores.",
                     )
-                ).one()
-                total = int(total or 0)
-                pushed = int(pushed or 0)
-            counts["generated_rules"] = total
-            counts["pushed_rules"] = pushed
-            minimums = LIVE_DATA_THRESHOLDS["detection"]
-            checks.append(
-                KarpathyCheck(
-                    name="crowdstrike_enabled",
-                    passed=settings.crowdstrike.enabled,
-                    detail="CrowdStrike integration is enabled." if settings.crowdstrike.enabled else "CrowdStrike is disabled for MVP runtime.",
                 )
-            )
             checks.append(
                 KarpathyCheck(
-                    name="rule_volume",
-                    passed=total >= minimums["generated_rules"],
-                    detail=f"Need >= {minimums['generated_rules']} recent generated rules.",
-                )
-            )
-            checks.append(
-                KarpathyCheck(
-                    name="rule_pushes",
-                    passed=pushed >= minimums["pushed_rules"],
-                    detail=f"Need >= {minimums['pushed_rules']} pushed rules before detection optimization.",
+                    name="verdict_mix",
+                    passed=target_source is not None,
+                    detail="Target source has both confirmed and false_positive verdicts." if target_source else "Need both confirmed and false_positive verdicts for at least one source.",
                 )
             )
 
@@ -545,15 +607,16 @@ async def inspect_live_karpathy_readiness(
         checks=checks,
         counts=counts,
         current_branch=current_branch,
+        target_source=target_source,
     )
 
 
-def prepare_ephemeral_loop_workspace(*, loop_type: str) -> tuple[str, Path]:
+def prepare_ephemeral_loop_workspace(*, loop_type: str, target_source: str | None = None) -> tuple[str, Path]:
     repo = Repo(Path.cwd(), search_parent_directories=True)
     repo_root = Path(repo.working_tree_dir).resolve()
     runs_dir = repo_root / ".karpathy_runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
-    branch_name = _build_branch_name(loop_type)
+    branch_name = _build_source_branch_name(target_source, now=datetime.now(UTC)) if loop_type == "source" and target_source else _build_branch_name(loop_type)
     worktree_path = runs_dir / branch_name
     subprocess.run(
         ["git", "worktree", "add", "-b", branch_name, str(worktree_path), "HEAD"],
@@ -579,7 +642,7 @@ async def run_live_karpathy_loop(
     )
     if not readiness.ready:
         return readiness, None
-    branch_name, worktree_path = prepare_ephemeral_loop_workspace(loop_type=loop_type)
+    branch_name, worktree_path = prepare_ephemeral_loop_workspace(loop_type=loop_type, target_source=readiness.target_source)
     loop = build_karpathy_loop(
         loop_type=loop_type,
         settings=settings,
@@ -587,6 +650,7 @@ async def run_live_karpathy_loop(
         skill_path=worktree_path / LOOP_SKILL_PATHS[loop_type],
         changelog_path=worktree_path / "skills/CHANGELOG.md",
         session_factory=session_factory,
+        target_source=readiness.target_source,
     )
     outcomes = await loop.optimize(max_experiments=max_experiments or settings.thresholds.karpathy_experiments)
     repo = Repo(worktree_path)
@@ -605,6 +669,10 @@ async def run_live_karpathy_loop(
         branch_name=branch_name,
         worktree_path=str(worktree_path),
         outcomes=outcomes,
+        target_source=readiness.target_source,
+        feedback_count=readiness.counts.get("target_source_feedback_rows"),
+        trust_before=outcomes[0].trust_before if outcomes else None,
+        trust_after=outcomes[-1].trust_after if outcomes else None,
     )
     return readiness, report
 

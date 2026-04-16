@@ -97,6 +97,7 @@ class DeliveryAgent(BaseAgent):
             source=item["source"],
             risk_score=item["risk_score"],
             severity=item["severity"],
+            last_seen=item.get("last_seen"),
             source_title=item.get("source_title"),
             reference_url=item.get("reference_url"),
             related_cves=item.get("related_cves", []),
@@ -183,6 +184,7 @@ class DeliveryAgent(BaseAgent):
                         source=item["source"],
                         risk_score=float(item["risk_score"]),
                         severity=item["severity"],
+                        last_seen=item.get("last_seen"),
                         source_title=item.get("source_title"),
                         reference_url=item.get("reference_url"),
                         related_cves=item.get("related_cves", []),
@@ -222,9 +224,11 @@ class DeliveryAgent(BaseAgent):
     async def run(self, scored_iocs: list[ScoredIOC | dict[str, Any]], *args: Any, **kwargs: Any) -> DeliveryResult:
         self.reload_skill()
         items = [self._coerce_ioc(item) for item in scored_iocs]
-        immediate = [item for item in items if item["risk_score"] >= self.settings.thresholds.alert_score]
-        immediate.sort(key=lambda item: float(item["risk_score"]), reverse=True)
-        immediate = immediate[: self.settings.delivery.telegram_max_alerts_per_run]
+        immediate: list[dict[str, Any]] = []
+        if self.settings.delivery.enable_telegram_immediate_alerts:
+            immediate = [item for item in items if item["risk_score"] >= self.settings.thresholds.alert_score]
+            immediate.sort(key=lambda item: float(item["risk_score"]), reverse=True)
+            immediate = immediate[: self.settings.delivery.telegram_max_alerts_per_run]
         digest_candidates = [
             item
             for item in items

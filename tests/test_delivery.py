@@ -78,6 +78,7 @@ def build_settings() -> SentinelSettings:
             "delivery": {
                 "telegram_token": "token",
                 "telegram_chat_id": "12345",
+                "enable_telegram_immediate_alerts": True,
                 "telegram_max_alerts_per_run": 3,
                 "enable_email": False,
                 "sendgrid_key": "key",
@@ -168,6 +169,29 @@ async def test_delivery_agent_limits_telegram_alert_burst() -> None:
 
     assert result.immediate_alerts == 2
     assert len(telegram_bot.messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_can_disable_immediate_telegram_alerts() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 35
+    settings.delivery.enable_telegram_immediate_alerts = False
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {"id": str(uuid4()), "value": "a.example", "type": "domain", "source": "feed-a", "risk_score": 40, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "b.example", "type": "domain", "source": "feed-a", "risk_score": 39, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 0
+    assert len(telegram_bot.messages) == 0
 
 
 @pytest.mark.asyncio
@@ -392,6 +416,7 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
         source="feodotracker",
         risk_score=24.19,
         severity="informational",
+        last_seen="2026-04-15T07:30:00+00:00",
         source_title="Feodo IP Blocklist",
         reference_url="https://feodotracker.abuse.ch/",
         related_cves=["CVE-2026-12345"],
@@ -410,6 +435,7 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
     assert "AbuseIPDB confidence: 0%" in rendered
     assert "Shodan ports: none reported" in rendered
     assert "https://www.shodan.io/host/162.243.103.246" in rendered
+    assert "Observed In Feed: 2026-04-15 07:30 UTC" in rendered
     assert "Source Intel: Feodo IP Blocklist" in rendered
     assert "Source Link: https://feodotracker.abuse.ch/" in rendered
     assert "Related CVEs: CVE-2026-12345" in rendered
@@ -424,6 +450,7 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
         source="otx",
         risk_score=91.0,
         severity="critical",
+        last_seen="2026-04-15T08:15:00+00:00",
         source_title="Stealer Campaign Impacting SLTT macOS Users",
         reference_url="https://otx.alienvault.com/pulse/69d7ed2e323d7edb856fa161",
         related_cves=[],
@@ -441,4 +468,5 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
     assert "VirusTotal detections: 18" in rendered
     assert "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
     assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
+    assert "Observed In Feed: 2026-04-15 08:15 UTC" in rendered
     assert "Source Intel: Stealer Campaign Impacting SLTT macOS Users" in rendered

@@ -132,6 +132,9 @@ class OTXPulseAdapter:
         return None
 
     def _extract_reference_url(self, pulse: dict[str, Any], indicator: dict[str, Any]) -> str | None:
+        pulse_id = pulse.get("id")
+        if isinstance(pulse_id, str) and pulse_id.strip():
+            return f"https://otx.alienvault.com/pulse/{pulse_id.strip()}"
         for key in ("reference", "reference_url", "url"):
             value = indicator.get(key)
             if isinstance(value, str) and value.startswith(("http://", "https://")):
@@ -347,9 +350,14 @@ class ThreatFoxAdapter:
                     last_seen=last_seen,
                     tags=sorted(set(tags)),
                     description=item.get("threat_type_desc") or item.get("ioc_type_desc") or item.get("malware_printable"),
-                    reference_url=item.get("reference") or None,
+                    reference_url=(
+                        f"https://threatfox.abuse.ch/ioc/{item.get('id')}/"
+                        if item.get("id")
+                        else item.get("reference") or None
+                    ),
                     attributes={
                         "threatfox_id": item.get("id"),
+                        "reference_url_original": item.get("reference") or None,
                         "threat_type": item.get("threat_type"),
                         "malware": item.get("malware"),
                         "malware_printable": item.get("malware_printable"),

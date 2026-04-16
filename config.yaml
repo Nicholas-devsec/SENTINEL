@@ -59,6 +59,7 @@ crowdstrike:
 delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
+  enable_telegram_immediate_alerts: false
   telegram_max_alerts_per_run: 3
   telegram_daily_digest_limit: 5
   enable_email: false

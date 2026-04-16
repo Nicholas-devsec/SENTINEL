@@ -87,6 +87,7 @@ async def test_threatfox_adapter_parses_recent_iocs() -> None:
     assert records[0].type == "ipv4"
     assert records[0].attributes["port"] == 443
     assert records[0].reference_url == "https://threatfox.abuse.ch/ioc/41/"
+    assert records[0].attributes["reference_url_original"] == "https://threatfox.abuse.ch/ioc/41/"
     assert seen_headers["auth-key"] == "threatfox-key"
     assert seen_json == {"query": "get_iocs", "days": 1}
 
@@ -202,7 +203,7 @@ async def test_otx_pulse_adapter_extracts_indicators() -> None:
 
     assert len(records) == 1
     assert records[0].value == "https://otx.bad.test"
-    assert records[0].reference_url == "https://otx.alienvault.com/pulse/123"
+    assert records[0].reference_url == "https://otx.alienvault.com/pulse/pulse-123"
     assert records[0].attributes["pulse_id"] == "pulse-123"
     assert seen_params["limit"] == "50"
     assert "modified_since" in seen_params
@@ -295,7 +296,7 @@ async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(setti
 
     assert len(records) == 1
     assert records[0].attributes["related_cves"] == ["CVE-2026-12345"]
-    assert records[0].reference_url == "https://otx.alienvault.com/pulse/recent"
+    assert records[0].reference_url == "https://otx.alienvault.com/pulse/recent-pulse"
 
 
 @pytest.mark.asyncio

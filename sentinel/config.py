@@ -67,6 +67,7 @@ class CrowdStrikeSettings(BaseModel):
 class DeliverySettings(BaseModel):
     telegram_token: str = "${TELEGRAM_BOT_TOKEN}"
     telegram_chat_id: str = "${TELEGRAM_CHAT_ID}"
+    enable_telegram_immediate_alerts: bool = True
     telegram_max_alerts_per_run: int = 3
     telegram_daily_digest_limit: int = 10
     enable_email: bool = False
