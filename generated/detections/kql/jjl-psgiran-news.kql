@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "jjl.psgiran.news" or tostring(AdditionalFields) has "jjl.psgiran.news"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

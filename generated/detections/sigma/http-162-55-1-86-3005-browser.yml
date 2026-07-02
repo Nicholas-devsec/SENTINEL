@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator http://162.55.1.86:3005/browser
+id: http-162-55-1-86-3005-browser
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "http://162.55.1.86:3005/browser"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1185
+  - attack.t1176.001

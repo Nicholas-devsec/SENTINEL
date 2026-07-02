@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 157.230.237.88
+id: 157-230-237-88
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "157.230.237.88"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1036.005
+  - attack.t1562.002

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "sap.dev.rw.digital" or tostring(AdditionalFields) has "sap.dev.rw.digital"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

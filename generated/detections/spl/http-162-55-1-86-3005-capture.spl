@@ -1,0 +1,2 @@
+index=* sourcetype IN ("proxy", "bluecoat", "squid") url="http://162.55.1.86:3005/capture*"
+| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, url

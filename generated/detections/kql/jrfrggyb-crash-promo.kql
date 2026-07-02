@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "jrfrggyb.crash.promo" or tostring(AdditionalFields) has "jrfrggyb.crash.promo"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

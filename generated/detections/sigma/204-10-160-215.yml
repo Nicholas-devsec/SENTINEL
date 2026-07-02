@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 204.10.160.215
+id: 204-10-160-215
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "204.10.160.215"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1036.005
+  - attack.t1562.002

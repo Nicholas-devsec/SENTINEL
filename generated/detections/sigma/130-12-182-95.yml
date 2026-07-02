@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 130.12.182.95
+id: 130-12-182-95
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "130.12.182.95"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1136.002
+  - attack.t1087.002

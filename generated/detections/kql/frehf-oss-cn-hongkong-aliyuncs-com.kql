@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "frehf.oss-cn-hongkong.aliyuncs.com" or tostring(AdditionalFields) has "frehf.oss-cn-hongkong.aliyuncs.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

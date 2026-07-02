@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator http://midpfv.xyz:9549/
+id: http-midpfv-xyz-9549
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "http://midpfv.xyz:9549/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

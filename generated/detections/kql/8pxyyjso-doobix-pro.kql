@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "8pxyyjso.doobix.pro" or tostring(AdditionalFields) has "8pxyyjso.doobix.pro"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

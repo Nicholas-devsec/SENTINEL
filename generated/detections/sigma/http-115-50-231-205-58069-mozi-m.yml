@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator http://115.50.231.205:58069/Mozi.m
+id: http-115-50-231-205-58069-mozi-m
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "http://115.50.231.205:58069/Mozi.m"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

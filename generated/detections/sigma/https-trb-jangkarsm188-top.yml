@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://trb.jangkarsm188.top/
+id: https-trb-jangkarsm188-top
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://trb.jangkarsm188.top/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

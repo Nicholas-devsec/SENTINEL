@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 101.43.128.56
+id: 101-43-128-56
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "101.43.128.56"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1021.007
+  - attack.t1585.003
+  - attack.t1537

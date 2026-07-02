@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 118.25.187.230
+id: 118-25-187-230
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "118.25.187.230"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1027.006
+  - attack.t1218.001
+  - attack.t1559.001

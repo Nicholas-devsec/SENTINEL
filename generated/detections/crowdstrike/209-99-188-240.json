@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for 209.99.188.240",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "high",
+  "type": "ipv4",
+  "value": "209.99.188.240"
+}

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "vanman.nz" or tostring(AdditionalFields) has "vanman.nz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

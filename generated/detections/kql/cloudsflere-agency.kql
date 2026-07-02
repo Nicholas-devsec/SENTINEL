@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "cloudsflere.agency" or tostring(AdditionalFields) has "cloudsflere.agency"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

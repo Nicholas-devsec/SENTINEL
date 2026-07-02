@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "merabs.pro" or tostring(AdditionalFields) has "merabs.pro"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

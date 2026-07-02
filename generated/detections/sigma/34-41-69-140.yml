@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 34.41.69.140
+id: 34-41-69-140
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "34.41.69.140"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

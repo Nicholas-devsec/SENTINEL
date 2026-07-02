@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 47.238.136.107
+id: 47-238-136-107
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "47.238.136.107"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: medium
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

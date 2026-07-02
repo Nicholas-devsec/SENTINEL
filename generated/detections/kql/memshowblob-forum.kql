@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "memshowblob.forum" or tostring(AdditionalFields) has "memshowblob.forum"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

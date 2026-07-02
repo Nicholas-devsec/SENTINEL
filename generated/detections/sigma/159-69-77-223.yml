@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 159.69.77.223
+id: 159-69-77-223
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "159.69.77.223"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1505.003
+  - attack.t1568.001

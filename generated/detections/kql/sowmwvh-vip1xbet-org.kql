@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "sowmwvh.vip1xbet.org" or tostring(AdditionalFields) has "sowmwvh.vip1xbet.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

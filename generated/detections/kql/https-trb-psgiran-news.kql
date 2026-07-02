@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl startswith "https://trb.psgiran.news/"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

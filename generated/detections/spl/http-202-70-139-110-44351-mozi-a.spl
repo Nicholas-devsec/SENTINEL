@@ -1,0 +1,2 @@
+index=* sourcetype IN ("proxy", "bluecoat", "squid") url="http://202.70.139.110:44351/Mozi.a*"
+| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, url

@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator bfhxci6n.dancebet.net
+id: bfhxci6n-dancebet-net
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "bfhxci6n.dancebet.net"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1136.002
+  - attack.t1087.002

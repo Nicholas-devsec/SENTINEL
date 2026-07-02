@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 207.57.128.43
+id: 207-57-128-43
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "207.57.128.43"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1550.002
+  - attack.t1027.006
+  - attack.t1218.001

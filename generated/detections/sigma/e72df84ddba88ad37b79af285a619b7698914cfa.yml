@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator e72df84ddba88ad37b79af285a619b7698914cfa
+id: e72df84ddba88ad37b79af285a619b7698914cfa
+status: experimental
+description: Execution of file with known-bad SHA1 (source: threatfox)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA1=e72df84ddba88ad37b79af285a619b7698914cfa"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 119.45.12.116
+id: 119-45-12-116
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "119.45.12.116"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1036.005
+  - attack.t1562.002

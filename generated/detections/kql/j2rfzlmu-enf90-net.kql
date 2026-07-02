@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "j2rfzlmu.enf90.net" or tostring(AdditionalFields) has "j2rfzlmu.enf90.net"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "hubble-termite.com" or tostring(AdditionalFields) has "hubble-termite.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

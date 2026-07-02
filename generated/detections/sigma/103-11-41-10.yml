@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 103.11.41.10
+id: 103-11-41-10
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "103.11.41.10"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1547.010
+  - attack.t1110.004
+  - attack.t1110.001

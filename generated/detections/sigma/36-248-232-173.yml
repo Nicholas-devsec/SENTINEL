@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 36.248.232.173
+id: 36-248-232-173
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "36.248.232.173"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1550.002
+  - attack.t1027.006
+  - attack.t1003.005
