@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robuxlive.sbs" or tostring(AdditionalFields) has "robuxlive.sbs"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

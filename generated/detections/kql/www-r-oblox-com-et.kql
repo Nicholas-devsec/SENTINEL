@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "www.r.oblox.com.et" or tostring(AdditionalFields) has "www.r.oblox.com.et"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

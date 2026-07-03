@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gold-land-8.vortex-sys.in.net" or tostring(AdditionalFields) has "gold-land-8.vortex-sys.in.net"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

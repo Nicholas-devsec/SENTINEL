@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator http://api.live-updates.online/v1
+id: http-api-live-updates-online-v1
+status: experimental
+description: Web request to known-bad URL (source: otx)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "http://api.live-updates.online/v1"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

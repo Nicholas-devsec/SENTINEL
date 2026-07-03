@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "jozvedownload.com" or tostring(AdditionalFields) has "jozvedownload.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

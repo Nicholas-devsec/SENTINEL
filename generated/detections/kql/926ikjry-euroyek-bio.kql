@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "926ikjry.euroyek.bio" or tostring(AdditionalFields) has "926ikjry.euroyek.bio"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

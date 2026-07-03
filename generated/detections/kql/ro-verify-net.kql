@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "ro-verify.net" or tostring(AdditionalFields) has "ro-verify.net"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

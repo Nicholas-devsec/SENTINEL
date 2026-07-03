@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://ortopediatri.com.tr/
+id: https-ortopediatri-com-tr
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://ortopediatri.com.tr/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1546.015

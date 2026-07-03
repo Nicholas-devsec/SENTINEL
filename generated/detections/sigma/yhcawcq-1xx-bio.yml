@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator yhcawcq.1xx.bio
+id: yhcawcq-1xx-bio
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "yhcawcq.1xx.bio"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

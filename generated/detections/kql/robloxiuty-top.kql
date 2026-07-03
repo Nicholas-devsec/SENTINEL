@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robloxiuty.top" or tostring(AdditionalFields) has "robloxiuty.top"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

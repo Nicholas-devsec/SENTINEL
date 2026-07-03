@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 45.143.198.6
+id: 45-143-198-6
+status: experimental
+description: Outbound connection to known-bad IP (source: otx)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "45.143.198.6"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1666
+  - attack.t1036.004
+  - attack.t1098.001

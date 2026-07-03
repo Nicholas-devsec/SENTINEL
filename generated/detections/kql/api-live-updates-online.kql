@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "api.live-updates.online" or tostring(AdditionalFields) has "api.live-updates.online"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "great-fade.sbs" or tostring(AdditionalFields) has "great-fade.sbs"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

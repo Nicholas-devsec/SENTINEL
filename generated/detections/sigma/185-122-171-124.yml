@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 185.122.171.124
+id: 185-122-171-124
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "185.122.171.124"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1546.015

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "bloxlink.xyz" or tostring(AdditionalFields) has "bloxlink.xyz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

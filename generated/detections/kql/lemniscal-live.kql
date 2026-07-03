@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "lemniscal.live" or tostring(AdditionalFields) has "lemniscal.live"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

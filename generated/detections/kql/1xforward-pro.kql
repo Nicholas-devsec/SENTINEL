@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "1xforward.pro" or tostring(AdditionalFields) has "1xforward.pro"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

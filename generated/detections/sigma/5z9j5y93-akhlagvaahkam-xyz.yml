@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator 5z9j5y93.akhlagvaahkam.xyz
+id: 5z9j5y93-akhlagvaahkam-xyz
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "5z9j5y93.akhlagvaahkam.xyz"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

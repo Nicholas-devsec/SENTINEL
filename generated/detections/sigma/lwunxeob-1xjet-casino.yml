@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator lwunxeob.1xjet.casino
+id: lwunxeob-1xjet-casino
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "lwunxeob.1xjet.casino"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

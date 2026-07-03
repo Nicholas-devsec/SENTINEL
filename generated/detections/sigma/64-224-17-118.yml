@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 64.224.17.118
+id: 64-224-17-118
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "64.224.17.118"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1546.015
+  - attack.t1559.001
+  - attack.t1021.003

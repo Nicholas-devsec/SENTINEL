@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator r.oblox.com.et
+id: r-oblox-com-et
+status: experimental
+description: DNS resolution of known-bad domain (source: otx)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "r.oblox.com.et"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1583.001

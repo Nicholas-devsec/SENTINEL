@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robuxcity.world" or tostring(AdditionalFields) has "robuxcity.world"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

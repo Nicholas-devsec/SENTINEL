@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator 59a260716d05c20229c6a46fe0a2fb5b80fa30c9c73a850222d9d3454426a60a
+id: 59a260716d05c20229c6a46fe0a2fb5b80fa30c9c73a850222d9d3454426a60a
+status: experimental
+description: Execution of file with known-bad SHA256 (source: otx)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=59a260716d05c20229c6a46fe0a2fb5b80fa30c9c73a850222d9d3454426a60a"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

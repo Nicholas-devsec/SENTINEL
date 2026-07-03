@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 23.94.145.29
+id: 23-94-145-29
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "23.94.145.29"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

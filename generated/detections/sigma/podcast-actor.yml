@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator podcast.actor
+id: podcast-actor
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "podcast.actor"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

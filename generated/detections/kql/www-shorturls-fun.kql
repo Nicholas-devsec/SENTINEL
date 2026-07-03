@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "www.shorturls.fun" or tostring(AdditionalFields) has "www.shorturls.fun"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

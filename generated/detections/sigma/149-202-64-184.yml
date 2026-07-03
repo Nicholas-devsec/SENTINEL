@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 149.202.64.184
+id: 149-202-64-184
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "149.202.64.184"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

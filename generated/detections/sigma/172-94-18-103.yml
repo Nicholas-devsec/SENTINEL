@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 172.94.18.103
+id: 172-94-18-103
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "172.94.18.103"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1568.001
+  - attack.t1559.001

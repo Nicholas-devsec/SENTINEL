@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator 6c2f10ec18c34ea9ba423b19e6ccf228ecf47a31
+id: 6c2f10ec18c34ea9ba423b19e6ccf228ecf47a31
+status: experimental
+description: Execution of file with known-bad SHA1 (source: otx)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA1=6c2f10ec18c34ea9ba423b19e6ccf228ecf47a31"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator prozhe24.com
+id: prozhe24-com
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "prozhe24.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

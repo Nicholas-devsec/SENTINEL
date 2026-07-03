@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "httpss--roblox.co" or tostring(AdditionalFields) has "httpss--roblox.co"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

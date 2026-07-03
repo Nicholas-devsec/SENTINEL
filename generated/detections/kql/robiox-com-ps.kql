@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robiox.com.ps" or tostring(AdditionalFields) has "robiox.com.ps"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

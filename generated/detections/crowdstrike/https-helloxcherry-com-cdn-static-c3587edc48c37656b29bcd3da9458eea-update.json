@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for https://helloxcherry.com/cdn/static/c3587edc48c37656b29bcd3da9458eea/update",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "helloxcherry.com"
+}

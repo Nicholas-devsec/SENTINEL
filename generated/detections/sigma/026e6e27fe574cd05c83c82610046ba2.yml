@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator 026e6e27fe574cd05c83c82610046ba2
+id: 026e6e27fe574cd05c83c82610046ba2
+status: experimental
+description: Execution of file with known-bad MD5 (source: otx)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "MD5=026e6e27fe574cd05c83c82610046ba2"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

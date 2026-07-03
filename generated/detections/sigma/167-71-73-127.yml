@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 167.71.73.127
+id: 167-71-73-127
+status: experimental
+description: Outbound connection to known-bad IP (source: otx)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "167.71.73.127"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

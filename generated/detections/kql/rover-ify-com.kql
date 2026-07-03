@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rover-ify.com" or tostring(AdditionalFields) has "rover-ify.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

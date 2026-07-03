@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 31.57.63.78
+id: 31-57-63-78
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "31.57.63.78"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1574.014
+  - attack.t1070.005

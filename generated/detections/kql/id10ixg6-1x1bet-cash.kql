@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "id10ixg6.1x1bet.cash" or tostring(AdditionalFields) has "id10ixg6.1x1bet.cash"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

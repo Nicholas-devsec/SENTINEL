@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator mesh.sentra.cx
+id: mesh-sentra-cx
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "mesh.sentra.cx"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

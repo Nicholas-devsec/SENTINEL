@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl startswith "https://mil.loj.mybluehost.me/"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

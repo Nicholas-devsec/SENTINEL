@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gateway.beamers.si" or tostring(AdditionalFields) has "gateway.beamers.si"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

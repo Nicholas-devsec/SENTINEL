@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "revvo-online.website" or tostring(AdditionalFields) has "revvo-online.website"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

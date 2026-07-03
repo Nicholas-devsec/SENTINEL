@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "beta.splunk.me" or tostring(AdditionalFields) has "beta.splunk.me"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

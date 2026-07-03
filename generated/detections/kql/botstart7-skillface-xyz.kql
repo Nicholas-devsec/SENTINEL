@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "botstart7.skillface.xyz" or tostring(AdditionalFields) has "botstart7.skillface.xyz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

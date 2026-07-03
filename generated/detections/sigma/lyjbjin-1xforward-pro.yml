@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator lyjbjin.1xforward.pro
+id: lyjbjin-1xforward-pro
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "lyjbjin.1xforward.pro"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

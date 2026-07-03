@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "avenger-sync.live" or tostring(AdditionalFields) has "avenger-sync.live"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 143.92.43.241
+id: 143-92-43-241
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "143.92.43.241"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1552.004
+  - attack.t1505.003
+  - attack.t1596.002

@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator mlvgwjn.1xforward.pro
+id: mlvgwjn-1xforward-pro
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "mlvgwjn.1xforward.pro"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

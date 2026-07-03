@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robloxgift.live" or tostring(AdditionalFields) has "robloxgift.live"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "robloxcommunity.com" or tostring(AdditionalFields) has "robloxcommunity.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

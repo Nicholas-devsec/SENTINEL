@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "mesh.sentra.cx" or tostring(AdditionalFields) has "mesh.sentra.cx"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

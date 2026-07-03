@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator beta.splunk.me
+id: beta-splunk-me
+status: experimental
+description: DNS resolution of known-bad domain (source: otx)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "beta.splunk.me"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

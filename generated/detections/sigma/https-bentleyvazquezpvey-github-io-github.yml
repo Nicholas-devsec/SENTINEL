@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://bentleyvazquezpvey.github.io/.github/
+id: https-bentleyvazquezpvey-github-io-github
+status: experimental
+description: Web request to known-bad URL (source: otx)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://bentleyvazquezpvey.github.io/.github/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1195.001
+  - attack.t1596

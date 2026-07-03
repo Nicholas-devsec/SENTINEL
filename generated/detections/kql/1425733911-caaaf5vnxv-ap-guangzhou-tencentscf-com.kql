@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "1425733911-caaaf5vnxv.ap-guangzhou.tencentscf.com" or tostring(AdditionalFields) has "1425733911-caaaf5vnxv.ap-guangzhou.tencentscf.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

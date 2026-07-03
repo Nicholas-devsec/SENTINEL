@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rfedpuuc.falsafekonkour.site" or tostring(AdditionalFields) has "rfedpuuc.falsafekonkour.site"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

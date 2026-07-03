@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "blox.ink" or tostring(AdditionalFields) has "blox.ink"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

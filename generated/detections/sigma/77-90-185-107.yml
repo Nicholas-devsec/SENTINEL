@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 77.90.185.107
+id: 77-90-185-107
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "77.90.185.107"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1571
+  - attack.t1205.001
+  - attack.t1547.010

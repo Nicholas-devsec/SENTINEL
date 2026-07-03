@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "prozhe.computer" or tostring(AdditionalFields) has "prozhe.computer"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

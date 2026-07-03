@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "cobaltorchard.top" or tostring(AdditionalFields) has "cobaltorchard.top"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

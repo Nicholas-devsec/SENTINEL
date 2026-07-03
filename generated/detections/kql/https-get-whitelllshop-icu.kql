@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl startswith "https://get.whitelllshop.icu/"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

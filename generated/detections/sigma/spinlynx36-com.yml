@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator spinlynx36.com
+id: spinlynx36-com
+status: experimental
+description: DNS resolution of known-bad domain (source: otx)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "spinlynx36.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1583.001

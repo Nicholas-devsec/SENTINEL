@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "podcast.actor" or tostring(AdditionalFields) has "podcast.actor"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

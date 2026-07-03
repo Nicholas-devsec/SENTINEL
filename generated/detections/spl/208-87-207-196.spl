@@ -1,0 +1,2 @@
+index=* sourcetype IN ("firewall", "netflow", "pan:traffic") dest_ip="208.87.207.196"
+| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, dest_ip, dest_port

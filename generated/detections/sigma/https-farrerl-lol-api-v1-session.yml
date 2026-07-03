@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://farrerl.lol/api/v1/session
+id: https-farrerl-lol-api-v1-session
+status: experimental
+description: Web request to known-bad URL (source: threatfox)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://farrerl.lol/api/v1/session"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

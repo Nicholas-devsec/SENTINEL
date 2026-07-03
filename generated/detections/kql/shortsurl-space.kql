@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "shortsurl.space" or tostring(AdditionalFields) has "shortsurl.space"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
