@@ -1,16 +1,69 @@
-.codex/
-.codex
+# Secrets and local environment
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Python environments and caches
 .venv/
+venv/
+env/
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
+.hypothesis/
+.pyre/
+.tox/
+.nox/
+
+# Coverage and test output
 .coverage
-*.pyc
-LIVE_SETUP.local.md
-LIVE_KEYS_COSTS.local.md
-EC2_DEPLOY.local.md
-SCRAPING_OVERVIEW.local.md
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build and packaging artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+
+# IDE and local agent state
+.codex
+.codex/
+.agents/
+.claude/
 .karpathy_runs/
-data/sentinel.db
+
+# Logs and runtime files
+*.log
+*.local.log
+*.out
+*.pid
+
+# Local-only notes and deployment docs
+*.local.md
+
+# Runtime data, databases, and exports
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.sql
 data/attack-stix-data/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

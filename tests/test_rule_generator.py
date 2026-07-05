@@ -130,3 +130,122 @@ async def test_rule_generator_filters_below_threshold_and_skips_yara_for_non_has
     assert results[0].yara_rule is None
     assert len(client.payloads) == 1
     assert not (temp_repo / "generated/detections/yara").exists()
+
+
+@pytest.mark.asyncio
+async def test_rule_generator_is_type_aware_per_platform(temp_repo: Path) -> None:
+    client = FakeCrowdStrikeClient()
+    agent = RuleGeneratorAgent(
+        settings=build_settings(),
+        crowdstrike_client=client,
+        output_dir=str(temp_repo / "generated/detections"),
+        repo_path=str(temp_repo),
+    )
+
+    results = await agent.run(
+        [
+            {
+                "value": "evil-c2.example.net",
+                "type": "domain",
+                "source": "feed-a",
+                "risk_score": 80,
+                "severity": "high",
+                "mitre_techniques": ["T1071.004"],
+                "mitre_tactics": ["command and control"],
+            },
+            {
+                "value": "https://evil.example/path/gate.php",
+                "type": "url",
+                "source": "feed-a",
+                "risk_score": 75,
+                "severity": "high",
+                "mitre_techniques": ["T1566.001"],
+                "mitre_tactics": ["initial access"],
+            },
+            {
+                "value": "203.0.114.7",
+                "type": "ipv4",
+                "source": "feed-a",
+                "risk_score": 80,
+                "severity": "high",
+                "mitre_techniques": ["T1071"],
+                "mitre_tactics": ["command and control"],
+            },
+            {
+                "value": "d41d8cd98f00b204e9800998ecf8427e",
+                "type": "md5",
+                "source": "feed-a",
+                "risk_score": 90,
+                "severity": "critical",
+                "mitre_techniques": ["T1059"],
+                "mitre_tactics": ["execution"],
+            },
+        ]
+    )
+
+    by_type = {result.value: result for result in results}
+
+    # Domain: DNS-query Sigma, not a network_connection on a hostname field.
+    domain = by_type["evil-c2.example.net"]
+    assert "dns_query" in domain.sigma_rule
+    assert "QueryName|endswith" in domain.sigma_rule
+    assert "DestinationHostname" not in domain.sigma_rule
+
+    # URL: proxy Sigma; CrowdStrike degrades to a domain indicator on the hostname
+    # because the Falcon IOC API has no url type.
+    url = by_type["https://evil.example/path/gate.php"]
+    assert "proxy" in url.sigma_rule
+    assert "c-uri|contains" in url.sigma_rule
+    assert url.crowdstrike_payload is not None
+    assert url.crowdstrike_payload["type"] == "domain"
+    assert url.crowdstrike_payload["value"] == "evil.example"
+
+    # IP: network_connection with DestinationIp.
+    ip = by_type["203.0.114.7"]
+    assert "network_connection" in ip.sigma_rule
+    assert 'DestinationIp: "203.0.114.7"' in ip.sigma_rule
+    assert 'RemoteIP == "203.0.114.7"' in ip.kql_query
+
+    # Hash: process_creation Sigma with algo-prefixed Hashes match, KQL against the
+    # right column, YARA via the hash module instead of matching the hex string.
+    md5 = by_type["d41d8cd98f00b204e9800998ecf8427e"]
+    assert "process_creation" in md5.sigma_rule
+    assert "MD5=d41d8cd98f00b204e9800998ecf8427e" in md5.sigma_rule
+    assert "MD5 ==" in md5.kql_query
+    assert md5.yara_rule is not None
+    assert 'import "hash"' in md5.yara_rule
+    assert 'hash.md5(0, filesize) == "d41d8cd98f00b204e9800998ecf8427e"' in md5.yara_rule
+    assert "strings:" not in md5.yara_rule
+
+
+@pytest.mark.asyncio
+async def test_rule_generator_skips_crowdstrike_for_unsupported_types(temp_repo: Path) -> None:
+    client = FakeCrowdStrikeClient()
+    agent = RuleGeneratorAgent(
+        settings=build_settings(),
+        crowdstrike_client=client,
+        output_dir=str(temp_repo / "generated/detections"),
+        repo_path=str(temp_repo),
+    )
+
+    results = await agent.run(
+        [
+            {
+                "value": "15efe7c0a510950c753a9ec1a388d699b341a2c4",
+                "type": "sha1",
+                "source": "feed-a",
+                "risk_score": 90,
+                "severity": "critical",
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+            }
+        ]
+    )
+
+    assert len(results) == 1
+    assert results[0].crowdstrike_payload is None
+    assert "sha1" in (results[0].crowdstrike_skipped_reason or "")
+    assert client.payloads == []
+    # Sigma/KQL/SPL/YARA still generated for the sha1.
+    assert results[0].yara_rule is not None
+    assert "hash.sha1(0, filesize)" in results[0].yara_rule

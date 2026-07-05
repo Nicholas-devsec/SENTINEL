@@ -23,9 +23,11 @@ class FakeProvider:
 
 
 class FakeSession:
-    def __init__(self, *, experiment_logs=None, feedback_rows=None) -> None:
+    def __init__(self, *, experiment_logs=None, feedback_rows=None, labeled_rows=None) -> None:
         self.experiment_logs = experiment_logs if experiment_logs is not None else []
         self.feedback_rows = feedback_rows if feedback_rows is not None else []
+        if labeled_rows is not None:
+            self.labeled_rows = labeled_rows
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -35,12 +37,17 @@ class FakeSession:
 
 
 class FakeSessionFactory:
-    def __init__(self, *, feedback_rows=None) -> None:
+    def __init__(self, *, feedback_rows=None, labeled_rows=None) -> None:
         self.experiment_logs: list[dict] = []
         self.feedback_rows = feedback_rows if feedback_rows is not None else []
+        self.labeled_rows = labeled_rows
 
     def __call__(self) -> FakeSession:
-        return FakeSession(experiment_logs=self.experiment_logs, feedback_rows=self.feedback_rows)
+        return FakeSession(
+            experiment_logs=self.experiment_logs,
+            feedback_rows=self.feedback_rows,
+            labeled_rows=self.labeled_rows,
+        )
 
 
 class SequencedMetric:
@@ -265,29 +272,58 @@ async def test_karpathy_loop_rejects_missing_section_without_mutating_skill(temp
 
 
 @pytest.mark.asyncio
-async def test_source_loop_measures_precision_per_source(source_repo: Path) -> None:
+async def test_source_loop_replay_metric_responds_to_trust_changes(source_repo: Path) -> None:
+    """The live metric must move when the skill file's trust score is edited.
+
+    Labeled data: otx contributed two false positives that scored just above the
+    alert threshold (70) at trust 0.90. Lowering otx trust in the skill file
+    should suppress those FP alerts (risk drops by w_trust*100*delta) and raise
+    the replayed F0.5 — the exact mechanism the loop optimizes.
+    """
+    labeled_rows = [
+        # threatfox: real threats, comfortably above threshold.
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 85.0, "verdict": "confirmed"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 80.0, "verdict": "confirmed"},
+        # otx: noisy false positives barely above the threshold at ingest trust.
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 71.0, "verdict": "false_positive"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 70.5, "verdict": "false_positive"},
+    ]
+    skill_path = source_repo / "skills/sources.SKILL.md"
     loop = SourceQualityLoop(
         provider=FakeProvider([]),
-        skill_path=source_repo / "skills/sources.SKILL.md",
+        skill_path=skill_path,
         budget_minutes=1,
         settings=build_settings(),
-        session_factory=FakeSessionFactory(
-            feedback_rows=[
-                {"source": "threatfox", "verdict": "confirmed"},
-                {"source": "threatfox", "verdict": "false_positive"},
-                {"source": "threatfox", "verdict": "confirmed"},
-                {"source": "otx", "verdict": "false_positive"},
-                {"source": "otx", "verdict": "false_positive"},
-            ]
-        ),
+        session_factory=FakeSessionFactory(feedback_rows=[], labeled_rows=labeled_rows),
         repo_path=source_repo,
         changelog_path=str(source_repo / "skills/CHANGELOG.md"),
         target_source="threatfox",
     )
 
-    metric = await loop.measure_metric()
+    # Skill trust matches stored trust: both otx FPs still alert.
+    # tp=2 fp=2 fn=0 -> precision 0.5, recall 1.0, F0.5 = 0.5556
+    metric_before = await loop.measure_metric()
+    assert metric_before == pytest.approx(0.5556, abs=1e-3)
 
-    assert metric == pytest.approx(2 / 3)
+    # Lower otx trust by 0.05: replayed risk drops by 0.20*100*0.05 = 1.0 point.
+    content = skill_path.read_text(encoding="utf-8").replace("- otx: 0.90", "- otx: 0.85")
+    skill_path.write_text(content, encoding="utf-8")
+
+    # risk 71.0 -> 70.0 (still >= threshold, alerts), 70.5 -> 69.5 (suppressed): fp=1
+    metric_middle = await loop.measure_metric()
+    assert metric_middle > metric_before
+
+    content = skill_path.read_text(encoding="utf-8").replace("- otx: 0.85", "- otx: 0.80")
+    skill_path.write_text(content, encoding="utf-8")
+
+    # risk 71.0 -> 69.0, 70.5 -> 68.5: both FPs suppressed, precision 1.0.
+    metric_after = await loop.measure_metric()
+    assert metric_after == pytest.approx(1.0)
+    assert metric_after > metric_middle
+
+    # Audit details captured for the experiment log.
+    assert loop._last_eval_details["confusion"]["fp"] == 0
+    assert loop._last_eval_details["trust_scores"]["otx"] == 0.80
 
 
 @pytest.mark.asyncio

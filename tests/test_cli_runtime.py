@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+import uuid
 
 import pytest
 
 from sentinel import cli
 from sentinel.agents.scraper import ScrapeReport, SourceScrapeDiagnostic
 from sentinel.config import SentinelSettings, validate_runtime_settings
+from sentinel.db.models import IOC, IOCSighting, SourceMaterial
+from sentinel.runtime import load_real_sample_iocs
 
 
 def build_settings(tmp_path: Path) -> SentinelSettings:
@@ -47,6 +52,18 @@ def test_validate_runtime_settings_allows_disabled_redis_for_run_once(tmp_path: 
     settings.db.redis_url = "disabled"
 
     validate_runtime_settings(settings, command="run-once")
+
+
+def test_cli_main_configures_logging(monkeypatch) -> None:
+    seen: list[str] = []
+
+    monkeypatch.setattr(cli, "build_parser", lambda: SimpleNamespace(parse_args=lambda: SimpleNamespace(command="telegram-listen")))
+    monkeypatch.setattr(cli, "configure_logging", lambda: seen.append("configured"))
+    monkeypatch.setattr(cli.asyncio, "run", lambda coro: (coro.close(), None)[1])
+
+    cli.main()
+
+    assert seen == ["configured"]
 
 
 @pytest.mark.asyncio
@@ -210,6 +227,10 @@ async def test_cli_dispatch_sends_real_samples_from_database(monkeypatch, tmp_pa
             assert item["type"] == "ipv4"
             return True
 
+        async def send_immediate_alerts(self, items):
+            assert items[0]["type"] == "ipv4"
+            return 1
+
     sample_items = [
         {
             "id": "ioc-1",
@@ -230,3 +251,120 @@ async def test_cli_dispatch_sends_real_samples_from_database(monkeypatch, tmp_pa
     await cli._dispatch("send-real-samples", types=["ipv4"], limit=1)
 
     assert "Sent 1 real sample alerts" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_cli_dispatch_sends_discovery_samples_from_database(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = build_settings(tmp_path)
+
+    class FakeDeliveryAgent:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def send_immediate_alerts(self, items):
+            assert items[0]["type"] == "url"
+            return 1
+
+    sample_items = [
+        {
+            "id": "ioc-1",
+            "value": "https://github.com/owner/repo",
+            "type": "url",
+            "source": "discovery:arcticwolf.com",
+            "risk_score": 82.0,
+            "severity": "high",
+            "external_links": {},
+        }
+    ]
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli,
+        "load_real_sample_iocs",
+        lambda **kwargs: __import__("asyncio").sleep(0, result=sample_items),
+    )
+    monkeypatch.setattr(cli, "DeliveryAgent", FakeDeliveryAgent)
+    monkeypatch.setattr(cli, "_build_telegram_bot", lambda settings: object())
+
+    await cli._dispatch("send-discovery-samples", types=["url"], limit=1)
+
+    assert "Sent 1 discovery sample alerts" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_load_real_sample_iocs_uses_discovery_sighting_metadata(
+    monkeypatch,
+    db_session_factory,
+) -> None:
+    now = datetime(2026, 7, 5, 1, 18, tzinfo=UTC)
+    article_url = "https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/"
+
+    monkeypatch.setattr("sentinel.runtime.AsyncSessionFactory", lambda: db_session_factory())
+
+    async with db_session_factory() as session:
+        material = SourceMaterial(
+            source="discovery:arcticwolf.com",
+            url=article_url,
+            title="Security Bulletin: GitHub Impersonation Deploys Information Stealer - Arctic Wolf",
+            published_at=now,
+            fetched_at=now,
+            content_text="stub",
+            extraction_status="complete",
+            extracted_ioc_count=6,
+            metadata_json={},
+        )
+        session.add(material)
+        await session.flush()
+
+        ioc = IOC(
+            id=uuid.uuid4(),
+            value="https://github.com/Arctic-Wolf-Security",
+            dedupe_hash="dedupe-1",
+            type="url",
+            source="otx",
+            source_trust=0.6,
+            first_seen=now,
+            last_seen=now,
+            source_title="AlienVault pulse",
+            reference_url="https://otx.alienvault.com/pulse/example",
+            related_cves=[],
+            risk_score=82.0,
+            severity="high",
+            vt_detections=0,
+            shodan_ports=[],
+            abuse_confidence=None,
+            mitre_techniques=[],
+            mitre_tactics=[],
+            sigma_rule=None,
+            crowdstrike_pushed=False,
+            analyst_verdict=None,
+            campaign_id=None,
+            vt_ratio=None,
+        )
+        session.add(ioc)
+        await session.flush()
+
+        session.add(
+            IOCSighting(
+                ioc_id=ioc.id,
+                source="discovery:arcticwolf.com",
+                source_trust=0.9,
+                provenance="discovery",
+                reference_url=article_url,
+                source_material_id=material.id,
+                first_seen=now,
+                last_seen=now,
+                sighting_count=1,
+                lineage_hash="lineage-1",
+                attributes={},
+            )
+        )
+        await session.commit()
+
+    items = await load_real_sample_iocs(ioc_types=["url"], limit=10, provenance="discovery")
+
+    assert len(items) == 1
+    assert items[0]["value"] == "https://github.com/Arctic-Wolf-Security"
+    assert items[0]["source"] == "discovery:arcticwolf.com"
+    assert items[0]["reference_url"] == article_url
+    assert items[0]["source_title"] == material.title

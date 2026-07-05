@@ -50,6 +50,7 @@ class ThreatIntelLoop:
     """Provider-driven Karpathy loop that patches one skill file and keeps only improvements."""
 
     loop_type = "base"
+    eval_mode = "live"
 
     def __init__(
         self,
@@ -153,6 +154,11 @@ class ThreatIntelLoop:
         delta: float,
         kept: bool,
     ) -> None:
+        details = dict(getattr(self, "_last_eval_details", None) or {})
+        if proposal.reasoning:
+            details["reasoning"] = proposal.reasoning
+        if proposal.expected_effect:
+            details["expected_effect"] = proposal.expected_effect
         if hasattr(session, "experiment_logs"):
             session.experiment_logs.append(
                 {
@@ -165,6 +171,9 @@ class ThreatIntelLoop:
                     "delta": delta,
                     "kept": kept,
                     "timestamp": self.now_fn(),
+                    "eval_mode": self.eval_mode,
+                    "target": getattr(proposal, "source_name", None),
+                    "details": details,
                 }
             )
             return
@@ -178,6 +187,9 @@ class ThreatIntelLoop:
             delta=delta,
             kept=kept,
             timestamp=self.now_fn(),
+            eval_mode=self.eval_mode,
+            target=getattr(proposal, "source_name", None),
+            details=details,
         )
         session.add(row)
         await session.commit()

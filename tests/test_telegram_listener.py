@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -92,3 +93,30 @@ async def test_telegram_listener_boots_and_stops_cleanly() -> None:
     assert fake_app.updater.started is True
     assert fake_app.updater.stopped is True
     assert fake_app.shutdown_called is True
+
+
+@pytest.mark.asyncio
+async def test_telegram_listener_logs_lifecycle(caplog) -> None:
+    stop_event = asyncio.Event()
+    fake_app = FakeApplication()
+
+    async def fake_builder(token: str, callback_handler):
+        return fake_app
+
+    caplog.set_level(logging.INFO)
+    task = asyncio.create_task(
+        run_telegram_listener(
+            settings=build_settings(),
+            delivery_agent=FakeDeliveryAgent(),
+            application_builder=fake_builder,
+            stop_event=stop_event,
+        )
+    )
+
+    await asyncio.sleep(0)
+    stop_event.set()
+    await task
+
+    assert "Starting Telegram listener" in caplog.text
+    assert "Telegram listener polling" in caplog.text
+    assert "Telegram listener stopped" in caplog.text

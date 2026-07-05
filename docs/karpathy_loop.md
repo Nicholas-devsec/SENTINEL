@@ -31,10 +31,30 @@ The goal is to make the pipeline better over time without letting the model rewr
    - still record the experiment result in `experiment_logs`
 
 ## Metrics
-### Source Loop
-Measures the ratio of recent `confirmed` vs `false_positive` analyst verdicts over the last 48 hours.
+### Source Loop (replay evaluation)
+The source loop metric is a **replay evaluation**, not a static historical ratio.
+The old metric (confirmed/false_positive ratio per source) could not change when
+a trust score was edited, which meant the loop could never actually learn.
 
-This is the first real MVP target because it is tied directly to Telegram analyst feedback.
+The replay metric ([sentinel/loops/replay_eval.py](/mnt/storage/nichoalas/Desktop/AGENTIC_IOC_ENRICHMENT/sentinel/loops/replay_eval.py)) works like this:
+
+1. Load the feedback-labeled IOC window (analyst verdicts = ground truth, default 14 days).
+2. Recompute each labeled IOC's risk score under the trust scores **currently in
+   the skill file**. The enrichment formula is linear in source trust, so the
+   replayed score is exact:
+   `risk_new = risk_stored + w_trust * 100 * (trust_skill - trust_stored)`.
+3. Re-apply the alert threshold and score would-have-alerted against verdicts
+   with F0.5 (precision-weighted; recall still counts so the loop cannot win by
+   muting every source).
+
+Editing a trust score mechanically moves this metric: raising a noisy source's
+trust pushes its false positives back above the alert threshold (metric drops);
+lowering it suppresses them (metric rises) unless it also suppresses confirmed
+threats (recall penalty).
+
+Each experiment logs the full confusion matrix, trust table, and per-source
+breakdown to `experiment_logs.details` with `eval_mode="replay"`, so every
+kept/rejected decision is auditable.
 
 ### Scoring Loop
 Measures correlation between `risk_score` and `analyst_verdict`.

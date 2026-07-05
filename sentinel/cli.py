@@ -8,6 +8,7 @@ from sentinel.agents.scraper import ScraperAgent
 from sentinel.config import get_settings, validate_runtime_settings
 from sentinel.delivery.telegram_listener import run_telegram_listener
 from sentinel.delivery.telegram_bot import fetch_chat_candidates, format_chat_candidates
+from sentinel.logging_utils import configure_logging
 from sentinel.pipeline import _build_telegram_bot, run_daily_digest, run_pipeline_once
 from sentinel.runtime import (
     format_karpathy_readiness,
@@ -55,6 +56,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     samples_parser.add_argument("--types", nargs="+", default=["ipv4"], help="IOC types to sample, e.g. ipv4 sha256")
     samples_parser.add_argument("--limit", type=int, default=2, help="Maximum number of real alerts to send")
+    discovery_samples_parser = subcommands.add_parser(
+        "send-discovery-samples",
+        help="Send Telegram alerts using stored discovery-origin IOC rows from the database",
+    )
+    discovery_samples_parser.add_argument(
+        "--types",
+        nargs="+",
+        default=["domain", "url", "md5", "sha1", "sha256", "ipv4", "ipv6"],
+        help="IOC types to sample, e.g. domain url md5",
+    )
+    discovery_samples_parser.add_argument("--limit", type=int, default=10, help="Maximum number of discovery alerts to send")
+    discover_parser = subcommands.add_parser(
+        "discover",
+        help="Run the bounded writeup discovery profiles standalone and print triage/extraction diagnostics",
+    )
+    discover_parser.add_argument("--profile", nargs="+", default=None, help="Only run the named discovery profile(s)")
+    memory_parser = subcommands.add_parser(
+        "discovery-memory",
+        help="Show what discovery has learned from analyst feedback (optionally resync first)",
+    )
+    memory_parser.add_argument("--sync", action="store_true", help="Recompute memory from feedback before printing")
     return parser
 
 
@@ -117,6 +139,28 @@ async def _dispatch(command: str, **kwargs) -> None:
         )
         print(format_karpathy_report(report))
         return
+    if command == "discover":
+        from sentinel.agents.discovery import DiscoveryAgent, format_discovery_report
+
+        agent = DiscoveryAgent(settings=settings)
+        try:
+            report = await agent.run_with_report(profile_names=kwargs.get("profile"))
+        finally:
+            await agent.aclose()
+        print(format_discovery_report(report))
+        return
+    if command == "discovery-memory":
+        from sentinel.agents.discovery import DiscoveryMemoryStore, format_memory_rows
+        from sentinel.db.session import AsyncSessionFactory
+        from sentinel.pipeline import init_db
+
+        await init_db()
+        store = DiscoveryMemoryStore(AsyncSessionFactory)
+        if kwargs.get("sync"):
+            written = await store.sync()
+            print(f"Synced {written} discovery memory row(s) from analyst feedback.")
+        print(format_memory_rows(await store.all_rows()))
+        return
     if command == "send-real-samples":
         sample_items = await load_real_sample_iocs(
             ioc_types=list(kwargs.get("types", ["ipv4"])),
@@ -126,11 +170,35 @@ async def _dispatch(command: str, **kwargs) -> None:
             print("No matching real IOC samples found in the database.")
             return
         delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
-        sent = 0
-        for item in sample_items:
-            if await delivery.send_immediate_alert(item):
-                sent += 1
+        sender = getattr(delivery, "send_immediate_alerts", None)
+        if sender is not None:
+            sent = await sender(sample_items)
+        else:
+            sent = 0
+            for item in sample_items:
+                if await delivery.send_immediate_alert(item):
+                    sent += 1
         print(f"Sent {sent} real sample alerts from stored IOC rows.")
+        return
+    if command == "send-discovery-samples":
+        sample_items = await load_real_sample_iocs(
+            ioc_types=list(kwargs.get("types", ["domain", "url", "md5", "sha1", "sha256", "ipv4", "ipv6"])),
+            limit=int(kwargs.get("limit", 10)),
+            provenance="discovery",
+        )
+        if not sample_items:
+            print("No matching discovery IOC samples found in the database.")
+            return
+        delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
+        sender = getattr(delivery, "send_immediate_alerts", None)
+        if sender is not None:
+            sent = await sender(sample_items)
+        else:
+            sent = 0
+            for item in sample_items:
+                if await delivery.send_immediate_alert(item):
+                    sent += 1
+        print(f"Sent {sent} discovery sample alerts from stored IOC rows.")
         return
     raise ValueError(f"Unknown command: {command}")
 
@@ -140,6 +208,7 @@ def main() -> None:
     args = parser.parse_args()
     payload = vars(args).copy()
     command = payload.pop("command")
+    configure_logging()
     asyncio.run(_dispatch(command, **payload))
 
 

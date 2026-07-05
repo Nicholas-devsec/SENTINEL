@@ -13,7 +13,7 @@ from sqlalchemy import case, func, select
 
 from sentinel.agents.scorer import build_external_links_for_ioc
 from sentinel.config import SentinelSettings
-from sentinel.db.models import FeedbackRecord, IOC
+from sentinel.db.models import FeedbackRecord, IOC, IOCSighting, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory
 from sentinel.loops.detection_loop import DetectionEffectivenessLoop
 from sentinel.loops.karpathy_loop import ExperimentOutcome
@@ -681,37 +681,69 @@ async def load_real_sample_iocs(
     *,
     ioc_types: Sequence[str],
     limit: int,
+    provenance: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized_types = [ioc_type.lower() for ioc_type in ioc_types]
-    async with AsyncSessionFactory() as session:
-        rows = list(
-            (
-                await session.scalars(
-                    select(IOC)
-                    .where(IOC.type.in_(normalized_types))
-                    .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
-                    .limit(limit)
-                )
-            ).all()
-        )
     items: list[dict[str, Any]] = []
-    for row in rows:
+    async with AsyncSessionFactory() as session:
+        if provenance is None:
+            query = (
+                select(IOC)
+                .where(IOC.type.in_(normalized_types))
+                .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
+                .limit(limit)
+            )
+            rows = list((await session.scalars(query)).all())
+            for row in rows:
+                payload = {
+                    "id": str(row.id),
+                    "value": row.value,
+                    "type": row.type,
+                    "source": row.source,
+                    "risk_score": float(row.risk_score or 0.0),
+                    "severity": row.severity or "informational",
+                    "source_title": row.source_title,
+                    "reference_url": row.reference_url,
+                    "related_cves": list(row.related_cves or []),
+                    "vt_detections": row.vt_detections,
+                    "abuse_confidence": row.abuse_confidence,
+                    "shodan_ports": list(row.shodan_ports or []),
+                    "mitre_techniques": list(row.mitre_techniques or []),
+                    "mitre_tactics": list(row.mitre_tactics or []),
+                    "last_seen": row.last_seen,
+                }
+                payload["external_links"] = build_external_links_for_ioc(payload)
+                items.append(payload)
+            return items
+
+        query = (
+            select(IOCSighting, IOC, SourceMaterial)
+            .join(IOC, IOCSighting.ioc_id == IOC.id)
+            .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
+            .where(IOC.type.in_(normalized_types))
+            .where(IOCSighting.provenance == provenance)
+            .order_by(IOC.risk_score.desc().nullslast(), IOCSighting.last_seen.desc())
+            .limit(limit)
+        )
+        rows = list((await session.execute(query)).all())
+
+    for sighting, row, source_material in rows:
         payload = {
             "id": str(row.id),
             "value": row.value,
             "type": row.type,
-            "source": row.source,
+            "source": sighting.source,
             "risk_score": float(row.risk_score or 0.0),
             "severity": row.severity or "informational",
-            "source_title": row.source_title,
-            "reference_url": row.reference_url,
+            "source_title": (source_material.title if source_material else None) or row.source_title,
+            "reference_url": sighting.reference_url or row.reference_url,
             "related_cves": list(row.related_cves or []),
             "vt_detections": row.vt_detections,
             "abuse_confidence": row.abuse_confidence,
             "shodan_ports": list(row.shodan_ports or []),
             "mitre_techniques": list(row.mitre_techniques or []),
             "mitre_tactics": list(row.mitre_tactics or []),
-            "last_seen": row.last_seen,
+            "last_seen": sighting.last_seen,
         }
         payload["external_links"] = build_external_links_for_ioc(payload)
         items.append(payload)

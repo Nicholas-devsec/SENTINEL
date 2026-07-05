@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
@@ -13,6 +15,7 @@ MAX_DIGEST_LINKS_PER_ITEM = 2
 MAX_SOURCE_TITLE_CHARS = 90
 MAX_IOC_VALUE_CHARS = 120
 MAX_LINK_CHARS = 140
+MAX_GROUPED_IOCS = 12
 
 
 @dataclass(slots=True)
@@ -36,6 +39,67 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _normalize_ioc_display(value: str, ioc_type: str) -> str:
+    if ioc_type != "url":
+        return value
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value
+    display = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
+    if parsed.query:
+        display += f"?{parsed.query}"
+    return display
+
+
+def summarize_ioc(*, value: str, ioc_type: str, source_title: str | None = None, reference_url: str | None = None) -> str:
+    lowered = f"{source_title or ''} {reference_url or ''}".lower()
+    display = _normalize_ioc_display(value, ioc_type)
+    if ioc_type == "ipv4":
+        if "c2" in lowered or "command and control" in lowered:
+            return "IPv4 address of C2 server"
+        return "IPv4 infrastructure indicator"
+    if ioc_type == "ipv6":
+        if "c2" in lowered or "command and control" in lowered:
+            return "IPv6 address of C2 server"
+        return "IPv6 infrastructure indicator"
+    if ioc_type == "domain":
+        if "github.io" in display:
+            return "domain hosting attacker-controlled content"
+        if "phish" in lowered or "lure" in lowered:
+            return "domain used in phishing infrastructure"
+        if "c2" in lowered or "beacon" in lowered:
+            return "domain of C2 server"
+        return "malicious domain indicator"
+    if ioc_type == "url":
+        parsed = urlparse(display)
+        if parsed.hostname == "github.com" and (parsed.path or "").strip("/"):
+            return "GitHub repo or path used by attacker"
+        if "github.io/" in display:
+            return "GitHub Pages path serving attacker content"
+        if any(keyword in lowered for keyword in ("installer", "download", "payload")):
+            return "malicious download or payload URL"
+        if "cdn" in display.lower():
+            return "malicious hosted asset or stage URL"
+        return "malicious URL indicator"
+    if ioc_type in {"md5", "sha1", "sha256"}:
+        if "phish" in lowered or "kit" in lowered:
+            return "hash of phishing kit artifact"
+        if re.search(r"\b(installer|download|loader)\b", lowered):
+            return "malicious installer hash"
+        if any(keyword in lowered for keyword in ("beacon", "payload", "stealer", "ransomware", "malware", "sharkloader")):
+            return "malware artifact hash"
+        return "suspicious file hash"
+    if ioc_type == "cve":
+        return "referenced vulnerability identifier"
+    return "suspicious indicator"
+
+
 def format_alert_message(
     *,
     heading: str = "SENTINEL Alert",
@@ -52,6 +116,7 @@ def format_alert_message(
     abuse_confidence: int | None = None,
     shodan_ports: list[int] | None = None,
     external_links: dict[str, str] | None = None,
+    corroboration_sources: int | None = None,
     mitre_techniques: list[str],
     mitre_tactics: list[str],
 ) -> str:
@@ -74,6 +139,9 @@ def format_alert_message(
         intel_links = "- None"
     cves = ", ".join(related_cves or []) if related_cves else "None"
     source_context = source_title or "None"
+    corroboration_text = (
+        f"{corroboration_sources} source(s)" if corroboration_sources is not None else "1 source(s)"
+    )
     observed_text = "Unknown"
     if last_seen is not None:
         if isinstance(last_seen, str):
@@ -92,6 +160,7 @@ def format_alert_message(
         f"IOC: {value}\n"
         f"Type: {ioc_type}\n"
         f"Source: {source}\n"
+        f"Corroboration: {corroboration_text}\n"
         f"Observed In Feed: {observed_text}\n"
         f"Source Intel: {source_context}\n"
         f"Source Link: {reference_url or 'None'}\n"
@@ -103,6 +172,78 @@ def format_alert_message(
         f"ATT&CK Techniques: {techniques}\n"
         f"ATT&CK Tactics: {tactics}"
     )
+
+
+def format_grouped_alert_message(
+    *,
+    heading: str = "SENTINEL Alert",
+    source: str,
+    risk_score: float,
+    severity: str,
+    iocs: list[dict[str, Any]],
+    last_seen: datetime | str | None = None,
+    source_title: str | None = None,
+    reference_url: str | None = None,
+    related_cves: list[str] | None = None,
+    corroboration_sources: int | None = None,
+    mitre_techniques: list[str] | None = None,
+    mitre_tactics: list[str] | None = None,
+) -> str:
+    techniques = ", ".join(mitre_techniques or []) if mitre_techniques else "None"
+    tactics = ", ".join(mitre_tactics or []) if mitre_tactics else "None"
+    cves = ", ".join(related_cves or []) if related_cves else "None"
+    corroboration_text = (
+        f"{corroboration_sources} source(s)" if corroboration_sources is not None else "1 source(s)"
+    )
+    observed_text = "Unknown"
+    if last_seen is not None:
+        if isinstance(last_seen, str):
+            try:
+                observed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            except ValueError:
+                observed = None
+        else:
+            observed = last_seen
+        if observed is not None:
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=UTC)
+            observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+    article_line = f"Article {reference_url}" if reference_url else "Article None"
+    lines = [
+        heading,
+        f"{source_title or 'Grouped writeup alert'}",
+        f"{severity.upper()} | Score {risk_score:.2f} | {len(iocs)} IOC(s)",
+        f"Source {source}",
+        f"Observed {observed_text} | Corroboration {corroboration_text}",
+        f"CVEs {cves}",
+        article_line,
+        "",
+        "IOCs",
+    ]
+    for item in iocs[:MAX_GROUPED_IOCS]:
+        ioc_type = str(item.get("type", "unknown"))
+        value = _normalize_ioc_display(str(item.get("value", "")), ioc_type)
+        summary = summarize_ioc(
+            value=str(item.get("value", "")),
+            ioc_type=ioc_type,
+            source_title=source_title,
+            reference_url=reference_url,
+        )
+        lines.append(f"- [{ioc_type}] {_truncate(value, 140)}")
+        lines.append(f"  {summary}")
+    if len(iocs) > MAX_GROUPED_IOCS:
+        lines.append(f"- ... and {len(iocs) - MAX_GROUPED_IOCS} more")
+    lines.extend(
+        [
+            "",
+            "Context",
+            "Grouped by shared article/source link to avoid duplicate alert spam.",
+            f"ATT&CK {techniques}",
+            f"Tactics {tactics}",
+        ]
+    )
+    return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
 
 
 def format_daily_digest_intro(*, generated_at: str, count: int, limit: int) -> str:

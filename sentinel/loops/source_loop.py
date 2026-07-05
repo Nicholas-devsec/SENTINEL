@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from sentinel.db.models import FeedbackRecord, IOC
 from sentinel.loops.karpathy_loop import ExperimentProposal, ThreatIntelLoop
+from sentinel.loops.replay_eval import ReplayEvaluator
 
 
 TRUST_SCORE_LINE_RE = re.compile(r"^(-\s+)(?P<name>[a-zA-Z0-9_:-]+)(:\s*)(?P<value>[0-9]*\.?[0-9]+)\s*$", re.MULTILINE)
@@ -36,6 +37,7 @@ class SourceFeedbackStats:
 
 class SourceQualityLoop(ThreatIntelLoop):
     loop_type = "source"
+    eval_mode = "replay"
 
     def __init__(self, *args, target_source: str | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -43,6 +45,7 @@ class SourceQualityLoop(ThreatIntelLoop):
         self._last_feedback_count: int | None = None
         self._last_trust_before: float | None = None
         self._last_trust_after: float | None = None
+        self._last_eval_details: dict | None = None
 
     async def _source_feedback_stats(self) -> SourceFeedbackStats:
         if self.target_source is None:
@@ -86,11 +89,26 @@ class SourceQualityLoop(ThreatIntelLoop):
                 return float(match.group("value"))
         raise ValueError(f"Trust score for source '{target}' not found in {self.skill_path}")
 
+    def _build_replay_evaluator(self) -> ReplayEvaluator:
+        return ReplayEvaluator(
+            session_factory=self.session_factory,
+            skill_path=self.skill_path,
+            alert_threshold=float(self.settings.thresholds.alert_score),
+            trust_weight=float(self.settings.enrichment.weights.source_trust),
+            now_fn=self.now_fn,
+        )
+
     async def measure_metric(self) -> float:
         if self.metric_override is not None:
             return await self.metric_override()
-        stats = await self._source_feedback_stats()
-        return stats.precision
+        # Replay: recompute labeled-window alerting under the trust scores
+        # currently in the skill file, so a trust patch changes this number.
+        result = await self._build_replay_evaluator().evaluate()
+        self._last_eval_details = result.to_details()
+        # Keep feedback_count reporting for the run report.
+        if self.target_source is not None:
+            await self._source_feedback_stats()
+        return result.metric
 
     def _build_prompt(self, experiment_number: int, current_skill: str, history: list[dict[str, object]]) -> str:
         if self.target_source is None:

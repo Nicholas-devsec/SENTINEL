@@ -4,58 +4,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 
 from sentinel.agents.scraper import RawIOC
-from sentinel.agents.validator import ValidationAgent
-from sentinel.db.models import IOC
+from sentinel.agents.validator import ValidationAgent, get_corroboration
+from sentinel.db.models import IOC, IOCSighting
 
 
-class FakeScalarResult:
-    def __init__(self, items):
-        self._items = list(items)
-
-    def all(self):
-        return list(self._items)
-
-
-class FakeSession:
-    def __init__(self, storage: list[IOC]) -> None:
-        self.storage = storage
-        self.pending: list[IOC] = []
-
-    async def __aenter__(self) -> FakeSession:
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    async def scalar(self, statement):
-        dedupe_hash = statement.compile().params.get("dedupe_hash_1")
-        for item in self.storage:
-            if item.dedupe_hash == dedupe_hash:
-                return item
-        return None
-
-    async def scalars(self, statement):
-        return FakeScalarResult(self.storage)
-
-    def add(self, record: IOC) -> None:
-        self.pending.append(record)
-
-    async def commit(self) -> None:
-        self.storage.extend(self.pending)
-        self.pending = []
-
-    async def refresh(self, record: IOC) -> None:
-        return None
-
-
-class FakeSessionFactory:
-    def __init__(self) -> None:
-        self.storage: list[IOC] = []
-
-    def __call__(self) -> FakeSession:
-        return FakeSession(self.storage)
+def as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 @pytest.fixture
@@ -89,17 +46,17 @@ def tranco_file(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.asyncio
-async def test_validator_persists_only_valid_unique_iocs(
-    validation_skill: Path,
-    tranco_file: Path,
-) -> None:
-    session_factory = FakeSessionFactory()
-    agent = ValidationAgent(
+@pytest.fixture
+def agent(validation_skill: Path, tranco_file: Path, db_session_factory) -> ValidationAgent:
+    return ValidationAgent(
         skill_path=str(validation_skill),
         tranco_path=str(tranco_file),
-        session_factory=session_factory,
+        session_factory=db_session_factory,
     )
+
+
+@pytest.mark.asyncio
+async def test_validator_persists_only_valid_unique_iocs(agent: ValidationAgent, db_session_factory) -> None:
     inputs = [
         RawIOC(
             value="8.8.8.8",
@@ -161,21 +118,112 @@ async def test_validator_persists_only_valid_unique_iocs(
         "d41d8cd98f00b204e9800998ecf8427e",
         "CVE-2026-12345",
     }
-    assert len(session_factory.storage) == 5
-    assert len({ioc.dedupe_hash for ioc in session_factory.storage}) == 5
+    async with db_session_factory() as session:
+        rows = list((await session.scalars(select(IOC))).all())
+        assert len(rows) == 5
+        assert len({ioc.dedupe_hash for ioc in rows}) == 5
 
 
 @pytest.mark.asyncio
-async def test_validator_rejects_false_positives_and_private_ranges(
-    validation_skill: Path,
-    tranco_file: Path,
+async def test_validator_preserves_lineage_for_corroborated_iocs(agent: ValidationAgent, db_session_factory) -> None:
+    """Same IOC from two sources: one canonical row, two sightings, corroboration=2."""
+    inputs = [
+        RawIOC(
+            value="8.8.8.8",
+            type="ipv4",
+            source="feed-a",
+            source_trust=0.9,
+            first_seen=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+            last_seen=datetime(2026, 4, 8, 10, 5, tzinfo=UTC),
+        ),
+        RawIOC(
+            value="8.8.8.8",
+            type="ipv4",
+            source="feed-b",
+            source_trust=0.7,
+            first_seen=datetime(2026, 4, 8, 11, 0, tzinfo=UTC),
+            last_seen=datetime(2026, 4, 8, 11, 5, tzinfo=UTC),
+        ),
+    ]
+
+    report = await agent.run_with_report(inputs)
+
+    assert len(report.new_iocs) == 1
+    assert report.sightings_recorded == 2
+    row = report.new_iocs[0]
+    # Canonical row's last_seen extends to the later source's observation.
+    assert as_utc(row.last_seen) == datetime(2026, 4, 8, 11, 5, tzinfo=UTC)
+    async with db_session_factory() as session:
+        sightings = list((await session.scalars(select(IOCSighting))).all())
+        assert {sighting.source for sighting in sightings} == {"feed-a", "feed-b"}
+        assert all(sighting.ioc_id == row.id for sighting in sightings)
+        corroboration = await get_corroboration(session, [row.id])
+        assert corroboration[row.id] == 2
+
+
+@pytest.mark.asyncio
+async def test_validator_repeat_run_updates_sighting_not_duplicate(agent: ValidationAgent, db_session_factory) -> None:
+    def make_input(last_seen: datetime) -> RawIOC:
+        return RawIOC(
+            value="evil.example.net",
+            type="domain",
+            source="feed-a",
+            source_trust=0.9,
+            first_seen=datetime(2026, 4, 8, 10, 0, tzinfo=UTC),
+            last_seen=last_seen,
+        )
+
+    first_report = await agent.run_with_report([make_input(datetime(2026, 4, 8, 10, 5, tzinfo=UTC))])
+    second_report = await agent.run_with_report([make_input(datetime(2026, 4, 9, 10, 5, tzinfo=UTC))])
+
+    assert len(first_report.new_iocs) == 1
+    assert second_report.new_iocs == []
+    assert len(second_report.corroborated_iocs) == 1
+    async with db_session_factory() as session:
+        sightings = list((await session.scalars(select(IOCSighting))).all())
+        assert len(sightings) == 1
+        assert sightings[0].sighting_count == 2
+        assert as_utc(sightings[0].last_seen) == datetime(2026, 4, 9, 10, 5, tzinfo=UTC)
+        rows = list((await session.scalars(select(IOC))).all())
+        assert len(rows) == 1
+        assert as_utc(rows[0].last_seen) == datetime(2026, 4, 9, 10, 5, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_validator_records_writeup_provenance_and_material_link(
+    agent: ValidationAgent, db_session_factory
 ) -> None:
-    session_factory = FakeSessionFactory()
-    agent = ValidationAgent(
-        skill_path=str(validation_skill),
-        tranco_path=str(tranco_file),
-        session_factory=session_factory,
+    import uuid
+
+    material_id = uuid.uuid4()
+    inputs = [
+        {
+            "value": "203.0.114.7",
+            "type": "ipv4",
+            "source": "talos_blog",
+            "source_trust": 0.6,
+            "first_seen": "2026-04-08T10:00:00+00:00",
+            "last_seen": "2026-04-08T10:00:00+00:00",
+            "reference_url": "https://blog.example/campaign-writeup",
+            "provenance": "writeup",
+        }
+    ]
+
+    persisted = await agent.run(
+        inputs, source_material_ids={"https://blog.example/campaign-writeup": material_id}
     )
+
+    assert len(persisted) == 1
+    async with db_session_factory() as session:
+        sighting = await session.scalar(select(IOCSighting))
+        assert sighting is not None
+        assert sighting.provenance == "writeup"
+        assert sighting.reference_url == "https://blog.example/campaign-writeup"
+        assert sighting.source_material_id == material_id
+
+
+@pytest.mark.asyncio
+async def test_validator_rejects_false_positives_and_private_ranges(agent: ValidationAgent, db_session_factory) -> None:
     inputs = [
         {"value": "10.1.2.3", "type": "ipv4", "source": "feed", "source_trust": 0.5},
         {"value": "localhost", "type": "domain", "source": "feed", "source_trust": 0.5},
@@ -189,20 +237,12 @@ async def test_validator_rejects_false_positives_and_private_ranges(
     persisted = await agent.run(inputs)
 
     assert persisted == []
-    assert session_factory.storage == []
+    async with db_session_factory() as session:
+        assert list((await session.scalars(select(IOC))).all()) == []
 
 
 @pytest.mark.asyncio
-async def test_validator_deduplicates_against_existing_database_rows(
-    validation_skill: Path,
-    tranco_file: Path,
-) -> None:
-    session_factory = FakeSessionFactory()
-    agent = ValidationAgent(
-        skill_path=str(validation_skill),
-        tranco_path=str(tranco_file),
-        session_factory=session_factory,
-    )
+async def test_validator_deduplicates_against_existing_database_rows(agent: ValidationAgent, db_session_factory) -> None:
     first_batch = [
         {"value": "example.net", "type": "domain", "source": "feed-a", "source_trust": 0.5},
     ]
@@ -215,20 +255,16 @@ async def test_validator_deduplicates_against_existing_database_rows(
 
     assert len(first_persisted) == 1
     assert second_persisted == []
-    assert len(session_factory.storage) == 1
+    async with db_session_factory() as session:
+        rows = list((await session.scalars(select(IOC))).all())
+        assert len(rows) == 1
+        # Lineage from the second source is preserved as a sighting.
+        sightings = list((await session.scalars(select(IOCSighting))).all())
+        assert {sighting.source for sighting in sightings} == {"feed-a", "feed-b"}
 
 
 @pytest.mark.asyncio
-async def test_validator_accepts_ipv6_and_sha256_iocs(
-    validation_skill: Path,
-    tranco_file: Path,
-) -> None:
-    session_factory = FakeSessionFactory()
-    agent = ValidationAgent(
-        skill_path=str(validation_skill),
-        tranco_path=str(tranco_file),
-        session_factory=session_factory,
-    )
+async def test_validator_accepts_ipv6_and_sha256_iocs(agent: ValidationAgent) -> None:
     inputs = [
         {
             "value": "2606:4700:4700::1111",
@@ -254,18 +290,23 @@ async def test_validator_accepts_ipv6_and_sha256_iocs(
     }
 
 
-@pytest.mark.asyncio
-async def test_validator_persists_source_link_title_and_related_cves(
-    validation_skill: Path,
-    tranco_file: Path,
-) -> None:
-    session_factory = FakeSessionFactory()
-    agent = ValidationAgent(
-        skill_path=str(validation_skill),
-        tranco_path=str(tranco_file),
-        session_factory=session_factory,
+def test_validator_rejects_generic_github_root_urls(agent: ValidationAgent) -> None:
+    assert agent.normalize_ioc("url", "https://github.com/") is None
+    assert agent.normalize_ioc("url", "https://bentleyvazquezpvey.github.io/") is None
+    assert (
+        agent.normalize_ioc("url", "https://github.com/antivirus-free-bitdefender")
+        == "https://github.com/antivirus-free-bitdefender"
     )
 
+
+def test_validator_allows_specific_paths_on_allowlisted_hosts(agent: ValidationAgent) -> None:
+    assert agent.normalize_ioc("domain", "trusted-site.com") is None
+    assert agent.normalize_ioc("url", "https://trusted-site.com/") is None
+    assert agent.normalize_ioc("url", "https://trusted-site.com/malicious/path") == "https://trusted-site.com/malicious/path"
+
+
+@pytest.mark.asyncio
+async def test_validator_persists_source_link_title_and_related_cves(agent: ValidationAgent, db_session_factory) -> None:
     persisted = await agent.run(
         [
             RawIOC(
@@ -283,7 +324,8 @@ async def test_validator_persists_source_link_title_and_related_cves(
     )
 
     assert len(persisted) == 1
-    row = session_factory.storage[0]
-    assert row.source_title == "Stealer pulse referencing CVE-2026-12345"
-    assert row.reference_url == "https://otx.alienvault.com/pulse/123"
-    assert row.related_cves == ["CVE-2026-12345"]
+    async with db_session_factory() as session:
+        row = await session.scalar(select(IOC))
+        assert row.source_title == "Stealer pulse referencing CVE-2026-12345"
+        assert row.reference_url == "https://otx.alienvault.com/pulse/123"
+        assert row.related_cves == ["CVE-2026-12345"]

@@ -11,6 +11,13 @@ updated_by: human
 - AlienVault OTX TAXII 2.1 feed
 - abuse.ch URLhaus CSV and recent URL API
 - abuse.ch FeodoTracker JSON
+- Cisco Talos blog RSS
+- Palo Alto Unit 42 blog RSS
+- Kaspersky Securelist blog RSS
+- CrowdStrike blog RSS
+- SentinelOne blog RSS
+- Rapid7 blog RSS
+- GBHackers blog RSS
 - Generic RSS security news feeds
 
 ## Trust Scores
@@ -18,7 +25,13 @@ updated_by: human
 - urlhaus: 0.91
 - feodotracker: 0.93
 - otx: 0.90
-- rss_default: 0.60
+- talos_blog: 0.68
+- unit42_blog: 0.68
+- securelist_blog: 0.67
+- crowdstrike_blog: 0.67
+- sentinelone_blog: 0.66
+- rapid7_blog: 0.66
+- gbhackers_blog: 0.64
 
 ## Rate Limits
 - Respect provider-specific API limits and use per-source throttling.

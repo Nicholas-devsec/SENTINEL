@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime
 from typing import Any
@@ -53,6 +54,94 @@ class IOC(Base, TimestampMixin):
     crowdstrike_pushed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     analyst_verdict: Mapped[str | None] = mapped_column(String(64), nullable=True)
     campaign_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vt_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class SourceMaterial(Base, TimestampMixin):
+    """A writeup, blog post, advisory, or report that IOCs can be extracted from.
+
+    Articles are source material, not indicators. IOCs extracted from an article
+    link back here through IOCSighting.source_material_id.
+    """
+
+    __tablename__ = "source_materials"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), unique=True, index=True, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    extracted_ioc_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class IOCSighting(Base, TimestampMixin):
+    """One source observing one canonical IOC.
+
+    The IOC row stays canonical (unique dedupe_hash); every source occurrence
+    lands here instead of being discarded, so lineage and corroboration survive
+    deduplication. lineage_hash makes (ioc, source, provenance, reference)
+    idempotent across pipeline runs; repeats bump sighting_count/last_seen.
+    """
+
+    __tablename__ = "ioc_sightings"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
+    ioc_id: Mapped[uuid.UUID] = mapped_column(Uuid(), ForeignKey("iocs.id"), index=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    source_trust: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="feed")
+    reference_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    source_material_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(), ForeignKey("source_materials.id"), nullable=True
+    )
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sighting_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    lineage_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    @staticmethod
+    def build_lineage_hash(
+        *, ioc_id: uuid.UUID, source: str, provenance: str, reference_url: str | None
+    ) -> str:
+        raw = f"{ioc_id}|{source.lower()}|{provenance}|{reference_url or ''}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class DiscoveryMemory(Base, TimestampMixin):
+    """What the discovery pipeline has learned from analyst verdicts.
+
+    One row per (kind, key, profile) aggregate — e.g. kind="source",
+    key="gbhackers_blog", profile="crimeware-fresh" — with TP/FP counts folded
+    in from Telegram feedback on discovery-derived alerts. `score` is the
+    Laplace-smoothed precision used as a triage weight and as a surface the
+    Karpathy loop can optimize against.
+    """
+
+    __tablename__ = "discovery_memory"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    key: Mapped[str] = mapped_column(String(512), index=True, nullable=False)
+    profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confirmed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    false_positive: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    needs_review: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    score: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    memory_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+
+    @staticmethod
+    def build_memory_hash(*, kind: str, key: str, profile: str | None) -> str:
+        raw = f"{kind}|{key.lower()}|{profile or ''}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def laplace_score(confirmed: int, false_positive: int) -> float:
+        return (confirmed + 1) / (confirmed + false_positive + 2)
 
 
 class Source(Base, TimestampMixin):
@@ -75,6 +164,9 @@ class FeedbackRecord(Base, TimestampMixin):
     verdict: Mapped[str] = mapped_column(String(64), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     channel: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Snapshot of the IOC's originating source at feedback time; survives later
+    # corroboration by additional sources.
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class ExperimentLog(Base, TimestampMixin):
@@ -90,3 +182,6 @@ class ExperimentLog(Base, TimestampMixin):
     delta: Mapped[float] = mapped_column(Float, nullable=False)
     kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    eval_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

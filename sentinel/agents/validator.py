@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sentinel.agents.base import BaseAgent
 from sentinel.agents.scraper import RawIOC
-from sentinel.db.models import IOC
+from sentinel.db.models import IOC, IOCSighting
 
 
 PATTERN_LINE = re.compile(r"^- pattern:\s*(.+?)\s*$", re.IGNORECASE)
@@ -43,6 +43,20 @@ class ValidatedIOC:
     reference_url: str | None
     related_cves: list[str]
     attributes: dict[str, Any]
+    provenance: str = "feed"
+
+
+@dataclass(slots=True)
+class ValidationReport:
+    """Canonical rows persisted this run, plus lineage bookkeeping."""
+
+    new_iocs: list[IOC]
+    corroborated_iocs: list[IOC]
+    sightings_recorded: int
+
+    @property
+    def all_iocs(self) -> list[IOC]:
+        return [*self.new_iocs, *self.corroborated_iocs]
 
 
 class ValidationAgent(BaseAgent):
@@ -132,7 +146,10 @@ class ValidationAgent(BaseAgent):
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
             return None
         host = parsed.hostname or ""
-        normalized_host = self._normalize_domain(host)
+        raw_host = host.strip().rstrip(".").lower()
+        normalized_host = None
+        if raw_host not in LOCAL_HOSTS and DOMAIN_RE.fullmatch(raw_host):
+            normalized_host = raw_host
         if normalized_host is None:
             ipv4 = self._normalize_ipv4(host)
             ipv6 = self._normalize_ipv6(host)
@@ -143,6 +160,12 @@ class ValidationAgent(BaseAgent):
         path = parsed.path or "/"
         query = f"?{parsed.query}" if parsed.query else ""
         fragment = f"#{parsed.fragment}" if parsed.fragment else ""
+        if normalized_host in self._load_tranco_allowlist() and path == "/" and not query and not fragment:
+            return None
+        if normalized_host == "github.com" and path == "/" and not query and not fragment:
+            return None
+        if normalized_host.endswith(".github.io") and path == "/" and not query and not fragment:
+            return None
         return f"{parsed.scheme.lower()}://{normalized_host}{port}{path}{query}{fragment}"
 
     def _normalize_hash(self, value: str, expected_length: int) -> str | None:
@@ -191,6 +214,7 @@ class ValidationAgent(BaseAgent):
             description=item.get("description"),
             reference_url=item.get("reference_url"),
             attributes=dict(item.get("attributes", {})),
+            provenance=str(item.get("provenance", "feed")),
         )
 
     def _validate_item(self, item: RawIOC) -> ValidatedIOC | None:
@@ -234,6 +258,7 @@ class ValidationAgent(BaseAgent):
                 "reference_url": item.reference_url,
                 **item.attributes,
             },
+            provenance=item.provenance,
         )
 
     @asynccontextmanager
@@ -241,41 +266,147 @@ class ValidationAgent(BaseAgent):
         async with self.session_factory() as session:
             yield session
 
-    async def _persist_validated(self, session: AsyncSession, validated: Iterable[ValidatedIOC]) -> list[IOC]:
-        persisted: list[IOC] = []
-        for item in validated:
-            existing = await session.scalar(select(IOC).where(IOC.dedupe_hash == item.dedupe_hash))
-            if existing is not None:
-                continue
-            record = IOC(
-                value=item.normalized_value,
-                dedupe_hash=item.dedupe_hash,
-                type=item.type,
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        # sqlite round-trips timezone-aware datetimes as naive; treat naive as UTC.
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+    async def _record_sighting(
+        self,
+        session: AsyncSession,
+        *,
+        ioc_row: IOC,
+        item: ValidatedIOC,
+        source_material_ids: dict[str, Any] | None,
+    ) -> bool:
+        lineage_hash = IOCSighting.build_lineage_hash(
+            ioc_id=ioc_row.id,
+            source=item.source,
+            provenance=item.provenance,
+            reference_url=item.reference_url,
+        )
+        existing = await session.scalar(select(IOCSighting).where(IOCSighting.lineage_hash == lineage_hash))
+        if existing is not None:
+            existing.last_seen = max(self._as_utc(existing.last_seen), item.last_seen)
+            existing.sighting_count += 1
+            return False
+        material_id = None
+        if source_material_ids and item.reference_url:
+            material_id = source_material_ids.get(item.reference_url)
+        sighting_attributes: dict[str, Any] = {"tags": item.attributes.get("tags", [])}
+        # Discovery attribution rides along so analyst feedback can be credited
+        # back to the search profile / extraction mode that produced the alert.
+        from sentinel.agents.discovery import ATTRIBUTION_KEYS
+
+        for key in ATTRIBUTION_KEYS:
+            if key in item.attributes:
+                sighting_attributes[key] = item.attributes[key]
+        session.add(
+            IOCSighting(
+                ioc_id=ioc_row.id,
                 source=item.source,
                 source_trust=item.source_trust,
+                provenance=item.provenance,
+                reference_url=item.reference_url,
+                source_material_id=material_id,
                 first_seen=item.first_seen,
                 last_seen=item.last_seen,
-                source_title=item.source_title,
-                reference_url=item.reference_url,
-                related_cves=item.related_cves,
+                sighting_count=1,
+                lineage_hash=lineage_hash,
+                attributes=sighting_attributes,
             )
-            session.add(record)
-            persisted.append(record)
-        await session.commit()
-        for record in persisted:
-            await session.refresh(record)
-        return persisted
+        )
+        return True
 
-    async def run(self, raw_iocs: Iterable[RawIOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[IOC]:
+    async def _persist_validated(
+        self,
+        session: AsyncSession,
+        validated: Iterable[ValidatedIOC],
+        *,
+        source_material_ids: dict[str, Any] | None = None,
+    ) -> ValidationReport:
+        new_rows: list[IOC] = []
+        corroborated: list[IOC] = []
+        sightings = 0
+        batch_rows: dict[str, IOC] = {}
+        for item in validated:
+            row = batch_rows.get(item.dedupe_hash)
+            if row is None:
+                row = await session.scalar(select(IOC).where(IOC.dedupe_hash == item.dedupe_hash))
+            if row is None:
+                row = IOC(
+                    value=item.normalized_value,
+                    dedupe_hash=item.dedupe_hash,
+                    type=item.type,
+                    source=item.source,
+                    source_trust=item.source_trust,
+                    first_seen=item.first_seen,
+                    last_seen=item.last_seen,
+                    source_title=item.source_title,
+                    reference_url=item.reference_url,
+                    related_cves=item.related_cves,
+                )
+                session.add(row)
+                await session.flush()
+                new_rows.append(row)
+            else:
+                row.first_seen = min(self._as_utc(row.first_seen), item.first_seen)
+                row.last_seen = max(self._as_utc(row.last_seen), item.last_seen)
+                merged_cves = sorted({*(row.related_cves or []), *item.related_cves})
+                if merged_cves != (row.related_cves or []):
+                    row.related_cves = merged_cves
+                if row not in new_rows and row not in corroborated:
+                    corroborated.append(row)
+            batch_rows[item.dedupe_hash] = row
+            if await self._record_sighting(
+                session, ioc_row=row, item=item, source_material_ids=source_material_ids
+            ):
+                sightings += 1
+        await session.commit()
+        for record in new_rows:
+            await session.refresh(record)
+        return ValidationReport(
+            new_iocs=new_rows,
+            corroborated_iocs=corroborated,
+            sightings_recorded=sightings,
+        )
+
+    async def run_with_report(
+        self,
+        raw_iocs: Iterable[RawIOC | dict[str, Any]],
+        *,
+        source_material_ids: dict[str, Any] | None = None,
+    ) -> ValidationReport:
         self.reload_skill()
         candidate_items = [self._coerce_raw_ioc(item) for item in raw_iocs]
-        seen_hashes: set[str] = set()
         validated: list[ValidatedIOC] = []
         for item in candidate_items:
             result = self._validate_item(item)
-            if result is None or result.dedupe_hash in seen_hashes:
+            if result is None:
                 continue
-            seen_hashes.add(result.dedupe_hash)
             validated.append(result)
         async with self._session_scope() as session:
-            return await self._persist_validated(session, validated)
+            return await self._persist_validated(
+                session, validated, source_material_ids=source_material_ids
+            )
+
+    async def run(self, raw_iocs: Iterable[RawIOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[IOC]:
+        report = await self.run_with_report(
+            raw_iocs, source_material_ids=kwargs.get("source_material_ids")
+        )
+        return report.new_iocs
+
+
+async def get_corroboration(session: AsyncSession, ioc_ids: Iterable[Any]) -> dict[Any, int]:
+    """Distinct observing sources per IOC id, from the sightings table."""
+    from sqlalchemy import func
+
+    ids = list(ioc_ids)
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(IOCSighting.ioc_id, func.count(func.distinct(IOCSighting.source)))
+        .where(IOCSighting.ioc_id.in_(ids))
+        .group_by(IOCSighting.ioc_id)
+    )
+    return {ioc_id: count for ioc_id, count in rows.all()}

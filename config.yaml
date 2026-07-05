@@ -16,7 +16,27 @@ sources:
   otx_api_key: ${OTX_API_KEY}
   threatfox_api_key: ${THREATFOX_API_KEY}
   max_item_age_hours: 24
+  writeup_max_item_age_hours: 72
   http_timeout_seconds: 60
+  writeup_search:
+    enabled: true
+    terms:
+      - phishing
+      - malware
+      - stealer
+      - ransomware
+      - loader
+      - backdoor
+      - campaign
+      - c2
+      - ioc
+      - iocs
+      - indicator
+      - indicators
+      - hash
+      - payload
+    max_candidates_per_source: 5
+    fetch_budget_seconds: 60
   feeds:
     - name: threatfox
       url: https://threatfox-api.abuse.ch/api/v1/
@@ -34,10 +54,93 @@ sources:
       url: https://otx.alienvault.com/api/v1/pulses/subscribed
       trust: 0.90
       enabled: true
-    - name: rss_default
+    - name: talos_blog
       url: https://blog.talosintelligence.com/feed/
-      trust: 0.60
-      enabled: false
+      trust: 0.68
+      enabled: true
+    - name: unit42_blog
+      url: https://unit42.paloaltonetworks.com/feed/
+      trust: 0.68
+      enabled: true
+    - name: securelist_blog
+      url: https://securelist.com/feed/
+      trust: 0.67
+      enabled: true
+    - name: crowdstrike_blog
+      url: https://www.crowdstrike.com/blog/feed/
+      trust: 0.67
+      enabled: true
+    - name: sentinelone_blog
+      url: https://www.sentinelone.com/blog/feed/
+      trust: 0.66
+      enabled: true
+    - name: rapid7_blog
+      url: https://www.rapid7.com/blog/rss/
+      trust: 0.66
+      enabled: true
+    - name: gbhackers_blog
+      url: https://gbhackers.com/feed/
+      trust: 0.64
+      enabled: true
+
+discovery:
+  # Additive analyst-style discovery pass. Runs inside the pipeline only when
+  # enabled; `sentinel discover` runs it standalone for tuning either way.
+  enabled: true
+  profiles:
+    - name: crimeware-fresh
+      enabled: true
+      keywords:
+        - ioc
+        - iocs
+        - indicators of compromise
+        - c2
+        - stealer
+        - loader
+        - ransomware
+        - phishing
+        - backdoor
+        - malware
+        - payload
+        - hash
+        - cve
+      feeds:
+        - https://blog.talosintelligence.com/feed/
+        - https://unit42.paloaltonetworks.com/feed/
+        - https://securelist.com/feed/
+        - https://www.sentinelone.com/blog/feed/
+        - https://gbhackers.com/feed/
+      search_providers:
+        - name: open_web_recent
+          enabled: true
+          provider: gdelt_doc
+          base_url: https://api.gdeltproject.org/api/v2/doc/doc
+          query_terms:
+            - indicators of compromise
+            - phishing
+            - stealer
+            - malware
+          max_queries: 4
+          max_records: 15
+          sort: datedesc
+        - name: open_web_google_news
+          enabled: true
+          provider: google_news_rss
+          base_url: https://news.google.com/rss/search
+          query_terms:
+            - indicators of compromise
+            - phishing
+            - stealer
+          max_queries: 3
+          max_records: 10
+      freshness_hours: 96
+      max_candidates_per_source: 15
+      max_pages_per_run: 6
+      time_budget_seconds: 90
+      per_page_timeout_seconds: 20
+      require_ioc_section: true
+      deny_hosts: []
+      source_trust: 0.60
 
 enrichment:
   virustotal_key: ${VT_API_KEY}
@@ -59,7 +162,7 @@ crowdstrike:
 delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
-  enable_telegram_immediate_alerts: false
+  enable_telegram_immediate_alerts: true
   telegram_max_alerts_per_run: 3
   telegram_daily_digest_limit: 5
   enable_email: false

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from sentinel.agents.scraper import ScrapeReport
+from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
 from sentinel.pipeline import PipelineResult, build_agents, run_pipeline_once
 
@@ -18,6 +20,18 @@ class FakeAgent:
 
     async def aclose(self):
         self.closed = True
+
+
+class FakeScraperAgent(FakeAgent):
+    async def run_with_diagnostics(self, *args, **kwargs):
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return ScrapeReport(items=self.result, diagnostics=[], writeups=[])
+
+
+class FakeValidatorAgent(FakeAgent):
+    async def run_with_report(self, *args, **kwargs):
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return ValidationReport(new_iocs=self.result, corroborated_iocs=[], sightings_recorded=len(self.result))
 
 
 @pytest.mark.asyncio
@@ -68,8 +82,8 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
     delivery = type("DeliveryResult", (), {"immediate_alerts": 1, "digest_candidates": 1})()
 
     agents = {
-        "scraper": FakeAgent(scraped),
-        "validator": FakeAgent([validated_row]),
+        "scraper": FakeScraperAgent(scraped),
+        "validator": FakeValidatorAgent([validated_row]),
         "enricher": FakeAgent(enriched),
         "scorer": FakeAgent(scored),
         "rule_generator": FakeAgent(generated),
@@ -78,9 +92,24 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=[validated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=[validated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
+
+    async def fake_corroboration(session, ioc_ids):
+        return {}
+
+    monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    class NullSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: NullSession())
 
     result = await run_pipeline_once(
         SentinelSettings.model_validate(
@@ -99,6 +128,9 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
         generated=1,
         immediate_alerts=1,
         digest_candidates=1,
+        writeups=0,
+        sightings=1,
+        corroborated=0,
     )
     assert agents["scraper"].closed is True
     assert agents["enricher"].closed is True
@@ -179,8 +211,8 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
     delivery = type("DeliveryResult", (), {"immediate_alerts": 2, "digest_candidates": 2})()
 
     agents = {
-        "scraper": FakeAgent([{"value": "8.8.8.8"}, {"value": "deadbeef"}]),
-        "validator": FakeAgent(validated_rows),
+        "scraper": FakeScraperAgent([{"value": "8.8.8.8"}, {"value": "deadbeef"}]),
+        "validator": FakeValidatorAgent(validated_rows),
         "enricher": FakeAgent(enriched),
         "scorer": FakeAgent(scored),
         "rule_generator": FakeAgent(generated),
@@ -189,9 +221,24 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=validated_rows))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=validated_rows))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
+
+    async def fake_corroboration(session, ioc_ids):
+        return {}
+
+    monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    class NullSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: NullSession())
 
     await run_pipeline_once(
         SentinelSettings.model_validate(

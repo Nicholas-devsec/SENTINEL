@@ -36,6 +36,7 @@ class RawIOC:
     description: str | None = None
     reference_url: str | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
+    provenance: str = "feed"
 
     def to_queue_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -45,24 +46,49 @@ class RawIOC:
 
 
 @dataclass(slots=True)
+class RawWriteup:
+    """An article/blog post treated as source material, never as an IOC itself."""
+
+    source: str
+    source_trust: float
+    url: str
+    title: str | None
+    published_at: datetime
+    summary: str | None = None
+    tags: list[str] = field(default_factory=list)
+    content_text: str | None = None
+    fetch_error: str | None = None
+
+
+@dataclass(slots=True)
 class SourceScrapeDiagnostic:
     source: str
     fetched: int = 0
     kept: int = 0
     stale_dropped: int = 0
     error: str | None = None
+    writeups_fetched: int = 0
+    iocs_extracted: int = 0
 
 
 @dataclass(slots=True)
 class ScrapeReport:
     items: list[RawIOC]
     diagnostics: list[SourceScrapeDiagnostic]
+    writeups: list[RawWriteup] = field(default_factory=list)
 
 
 class SourceAdapter(Protocol):
     source_name: str
 
     async def fetch(self) -> list[RawIOC]:
+        ...
+
+
+class WriteupAdapter(Protocol):
+    source_name: str
+
+    async def fetch_writeups(self) -> list[RawWriteup]:
         ...
 
 
@@ -452,38 +478,49 @@ class FeodoTrackerAdapter:
 
 
 class RSSAdapter:
+    """RSS/Atom feeds yield writeups (source material), not IOCs.
+
+    Article links are never emitted as indicators; IOCs come from extracting
+    the fetched article body downstream.
+    """
+
     source_name = "rss_default"
 
-    def __init__(self, feed_url: str, *, trust_score: float, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        feed_url: str,
+        *,
+        trust_score: float,
+        source_name: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.feed_url = feed_url
         self.trust_score = trust_score
+        if source_name is not None:
+            self.source_name = source_name
         self.client = client or httpx.AsyncClient(timeout=30.0)
 
-    async def fetch(self) -> list[RawIOC]:
+    async def fetch_writeups(self) -> list[RawWriteup]:
         response = await self.client.get(self.feed_url)
         response.raise_for_status()
         parsed = feedparser.parse(response.text)
-        records: list[RawIOC] = []
+        records: list[RawWriteup] = []
         for entry in parsed.entries:
             link = getattr(entry, "link", None) or entry.get("link")
             title = getattr(entry, "title", None) or entry.get("title")
             published = getattr(entry, "published", None) or entry.get("published")
             summary = getattr(entry, "summary", None) or entry.get("summary")
-            value = link or title
-            if not value:
+            if not link:
                 continue
             records.append(
-                RawIOC(
-                    value=value.strip(),
-                    type="url" if link else "domain",
+                RawWriteup(
                     source=self.source_name,
                     source_trust=self.trust_score,
-                    first_seen=_normalize_timestamp(published),
-                    last_seen=_normalize_timestamp(published),
+                    url=link.strip(),
+                    title=title,
+                    published_at=_normalize_timestamp(published),
+                    summary=summary,
                     tags=[tag.get("term") for tag in entry.get("tags", []) if tag.get("term")],
-                    description=title or summary,
-                    reference_url=link,
-                    attributes={"summary": summary},
                 )
             )
         return records
@@ -527,6 +564,28 @@ class ScraperAgent(BaseAgent):
         cutoff = _now_utc() - timedelta(hours=self.settings.sources.max_item_age_hours)
         return max(item.first_seen, item.last_seen) >= cutoff
 
+    def _writeup_cutoff(self) -> datetime:
+        return _now_utc() - timedelta(hours=self.settings.sources.writeup_max_item_age_hours)
+
+    def _writeup_search_terms(self) -> list[str]:
+        return [term.strip().lower() for term in self.settings.sources.writeup_search.terms if term.strip()]
+
+    def _matches_writeup_search(self, writeup: RawWriteup) -> bool:
+        search_settings = self.settings.sources.writeup_search
+        if not search_settings.enabled:
+            return True
+        terms = self._writeup_search_terms()
+        if not terms:
+            return True
+        haystack = "\n".join(
+            [
+                writeup.title or "",
+                writeup.summary or "",
+                " ".join(writeup.tags),
+            ]
+        ).lower()
+        return any(term in haystack for term in terms)
+
     def _decorate_item(self, item: RawIOC) -> RawIOC:
         attributes = dict(item.attributes)
         attributes["related_cves"] = self._extract_related_cves(item)
@@ -541,6 +600,7 @@ class ScraperAgent(BaseAgent):
             description=item.description,
             reference_url=item.reference_url,
             attributes=attributes,
+            provenance=item.provenance,
         )
 
     def get_source_trust_scores(self) -> dict[str, float]:
@@ -554,20 +614,21 @@ class ScraperAgent(BaseAgent):
                 trust_scores[match.group(1).lower()] = float(match.group(2))
         return trust_scores
 
-    def _build_adapters(self) -> list[SourceAdapter]:
+    def _build_adapters(self) -> tuple[list[SourceAdapter], list[WriteupAdapter]]:
         trust_scores = self.get_source_trust_scores()
-        adapters: list[SourceAdapter] = []
+        ioc_adapters: list[SourceAdapter] = []
+        writeup_adapters: list[WriteupAdapter] = []
         for feed in self.settings.sources.feeds:
             if not feed.enabled:
                 continue
             source_name = feed.name.lower()
             trust_score = trust_scores.get(source_name, feed.trust)
             if source_name == "urlhaus":
-                adapters.append(URLHausAdapter(feed.url, trust_score=trust_score, client=self.http_client))
+                ioc_adapters.append(URLHausAdapter(feed.url, trust_score=trust_score, client=self.http_client))
             elif source_name == "feodotracker":
-                adapters.append(FeodoTrackerAdapter(feed.url, trust_score=trust_score, client=self.http_client))
+                ioc_adapters.append(FeodoTrackerAdapter(feed.url, trust_score=trust_score, client=self.http_client))
             elif source_name == "otx":
-                adapters.append(
+                ioc_adapters.append(
                     OTXPulseAdapter(
                         feed.url,
                         trust_score=trust_score,
@@ -577,7 +638,7 @@ class ScraperAgent(BaseAgent):
                     )
                 )
             elif source_name == "threatfox":
-                adapters.append(
+                ioc_adapters.append(
                     ThreatFoxAdapter(
                         feed.url,
                         trust_score=trust_score,
@@ -587,8 +648,100 @@ class ScraperAgent(BaseAgent):
                     )
                 )
             else:
-                adapters.append(RSSAdapter(feed.url, trust_score=trust_score, client=self.http_client))
-        return adapters
+                writeup_adapters.append(
+                    RSSAdapter(
+                        feed.url,
+                        trust_score=trust_score,
+                        source_name=source_name,
+                        client=self.http_client,
+                    )
+                )
+        return ioc_adapters, writeup_adapters
+
+    async def _fetch_article_body(self, writeup: RawWriteup) -> None:
+        from sentinel.agents.ioc_extract import html_to_text
+
+        try:
+            response = await asyncio.wait_for(
+                self.http_client.get(writeup.url),
+                timeout=float(self.settings.sources.http_timeout_seconds),
+            )
+            response.raise_for_status()
+            # Cap body size so a pathological page cannot balloon memory.
+            writeup.content_text = html_to_text(response.text[:1_500_000])[:200_000]
+        except Exception as exc:
+            writeup.fetch_error = f"{type(exc).__name__}: {exc}"
+
+    def _extract_iocs_from_writeup(self, writeup: RawWriteup) -> list[RawIOC]:
+        from urllib.parse import urlparse
+
+        from sentinel.agents.ioc_extract import extract_iocs_from_text
+
+        text_parts = [writeup.title or "", writeup.summary or "", writeup.content_text or ""]
+        own_host = (urlparse(writeup.url).hostname or "").lower()
+        exclude = {own_host} if own_host else set()
+        extracted = extract_iocs_from_text("\n".join(text_parts), exclude_hostnames=exclude)
+        records: list[RawIOC] = []
+        for candidate in extracted:
+            records.append(
+                RawIOC(
+                    value=candidate.value,
+                    type=candidate.type,
+                    source=writeup.source,
+                    source_trust=writeup.source_trust,
+                    first_seen=writeup.published_at,
+                    last_seen=writeup.published_at,
+                    tags=list(writeup.tags),
+                    description=writeup.title,
+                    reference_url=writeup.url,
+                    attributes={
+                        "article_title": writeup.title,
+                        "article_url": writeup.url,
+                        "extraction": "regex-v1",
+                    },
+                    provenance="writeup",
+                )
+            )
+        return records
+
+    async def _process_writeups(
+        self, adapter: WriteupAdapter
+    ) -> tuple[list[RawWriteup], list[RawIOC], SourceScrapeDiagnostic]:
+        timeout_seconds = float(self.settings.sources.http_timeout_seconds)
+        writeups = await asyncio.wait_for(adapter.fetch_writeups(), timeout=timeout_seconds)
+        cutoff = self._writeup_cutoff()
+        fresh = [writeup for writeup in writeups if writeup.published_at >= cutoff]
+        stale = len(writeups) - len(fresh)
+        matching = [writeup for writeup in fresh if self._matches_writeup_search(writeup)]
+        limited = sorted(matching, key=lambda writeup: writeup.published_at, reverse=True)[
+            : self.settings.sources.writeup_search.max_candidates_per_source
+        ]
+        deadline = asyncio.get_running_loop().time() + max(
+            1, int(self.settings.sources.writeup_search.fetch_budget_seconds)
+        )
+        processed: list[RawWriteup] = []
+        for writeup in limited:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                writeup.fetch_error = "budget_exhausted"
+                continue
+            try:
+                await asyncio.wait_for(self._fetch_article_body(writeup), timeout=min(timeout_seconds, remaining))
+            except TimeoutError:
+                writeup.fetch_error = "budget_exhausted"
+            processed.append(writeup)
+        extracted: list[RawIOC] = []
+        for writeup in processed:
+            extracted.extend(self._extract_iocs_from_writeup(writeup))
+        diagnostic = SourceScrapeDiagnostic(
+            source=adapter.source_name,
+            fetched=len(writeups),
+            kept=len(extracted),
+            stale_dropped=stale,
+            writeups_fetched=len(processed),
+            iocs_extracted=len(extracted),
+        )
+        return processed, extracted, diagnostic
 
     async def publish_to_queue(self, iocs: Iterable[RawIOC]) -> int:
         redis_url = self.settings.db.redis_url
@@ -617,11 +770,13 @@ class ScraperAgent(BaseAgent):
 
     async def run_with_diagnostics(self, *args: Any, **kwargs: Any) -> ScrapeReport:
         self.reload_skill()
-        adapters = self._build_adapters()
-        results = await asyncio.gather(*(self._fetch_adapter(adapter) for adapter in adapters), return_exceptions=True)
+        ioc_adapters, writeup_adapters = self._build_adapters()
+        results = await asyncio.gather(
+            *(self._fetch_adapter(adapter) for adapter in ioc_adapters), return_exceptions=True
+        )
         collected: list[RawIOC] = []
         diagnostics: list[SourceScrapeDiagnostic] = []
-        for adapter, result in zip(adapters, results, strict=True):
+        for adapter, result in zip(ioc_adapters, results, strict=True):
             if isinstance(result, Exception):
                 self.logger.exception("Scrape failed for source %s", adapter.source_name, exc_info=result)
                 diagnostics.append(
@@ -654,8 +809,34 @@ class ScraperAgent(BaseAgent):
                     stale_dropped=stale,
                 )
             )
+
+        all_writeups: list[RawWriteup] = []
+        writeup_results = await asyncio.gather(
+            *(self._process_writeups(adapter) for adapter in writeup_adapters), return_exceptions=True
+        )
+        for adapter, result in zip(writeup_adapters, writeup_results, strict=True):
+            if isinstance(result, Exception):
+                self.logger.exception("Writeup scrape failed for source %s", adapter.source_name, exc_info=result)
+                diagnostics.append(
+                    SourceScrapeDiagnostic(
+                        source=adapter.source_name,
+                        error=f"{type(result).__name__}: {result}",
+                    )
+                )
+                continue
+            writeups, extracted, diagnostic = result
+            all_writeups.extend(writeups)
+            collected.extend(self._decorate_item(item) for item in extracted)
+            self.logger.info(
+                "Processed %s fresh writeup(s) from %s; extracted %s IOC(s)",
+                diagnostic.writeups_fetched,
+                adapter.source_name,
+                diagnostic.iocs_extracted,
+            )
+            diagnostics.append(diagnostic)
+
         await self.publish_to_queue(collected)
-        return ScrapeReport(items=collected, diagnostics=diagnostics)
+        return ScrapeReport(items=collected, diagnostics=diagnostics, writeups=all_writeups)
 
     async def aclose(self) -> None:
         if self._owns_http_client:

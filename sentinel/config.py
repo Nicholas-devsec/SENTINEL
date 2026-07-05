@@ -34,12 +34,81 @@ class FeedConfig(BaseModel):
     enabled: bool = True
 
 
+class WriteupSearchSettings(BaseModel):
+    enabled: bool = True
+    terms: list[str] = Field(
+        default_factory=lambda: [
+            "phishing",
+            "malware",
+            "stealer",
+            "ransomware",
+            "loader",
+            "backdoor",
+            "campaign",
+            "c2",
+            "ioc",
+            "iocs",
+            "indicator",
+            "indicators",
+            "hash",
+            "payload",
+        ]
+    )
+    max_candidates_per_source: int = 5
+    fetch_budget_seconds: int = 60
+
+
 class SourceSettings(BaseModel):
     otx_api_key: str = "${OTX_API_KEY}"
     threatfox_api_key: str = "${THREATFOX_API_KEY}"
     max_item_age_hours: int = 24
+    writeup_max_item_age_hours: int = 72
     http_timeout_seconds: int = 60
+    writeup_search: WriteupSearchSettings = Field(default_factory=WriteupSearchSettings)
     feeds: list[FeedConfig] = Field(default_factory=list)
+
+
+class DiscoverySearchProvider(BaseModel):
+    """Optional open-web candidate source layered beside RSS discovery."""
+
+    name: str
+    enabled: bool = True
+    provider: str = "gdelt_doc"
+    base_url: str = "https://api.gdeltproject.org/api/v2/doc/doc"
+    query_terms: list[str] = Field(default_factory=list)
+    max_queries: int = 4
+    max_records: int = 20
+    sort: str = "datedesc"
+    language: str | None = "English"
+    source_country: str | None = None
+
+
+class DiscoveryProfile(BaseModel):
+    """One bounded search-and-curation pass: what to look for, where, how hard."""
+
+    name: str
+    enabled: bool = True
+    keywords: list[str] = Field(default_factory=list)
+    feeds: list[str] = Field(default_factory=list)
+    search_providers: list[DiscoverySearchProvider] = Field(default_factory=list)
+    freshness_hours: int = 72
+    max_candidates_per_source: int = 15
+    max_pages_per_run: int = 6
+    time_budget_seconds: int = 90
+    per_page_timeout_seconds: int = 20
+    # Strict profiles skip pages without an explicit IOC/indicators section;
+    # lenient ones fall back to whole-body precision extraction.
+    require_ioc_section: bool = True
+    allow_hosts: list[str] = Field(default_factory=list)
+    deny_hosts: list[str] = Field(default_factory=list)
+    source_trust: float = 0.55
+
+
+class DiscoverySettings(BaseModel):
+    # Off by default: the discovery stage only joins run_pipeline_once when
+    # explicitly enabled. `sentinel discover` can always run it standalone.
+    enabled: bool = False
+    profiles: list[DiscoveryProfile] = Field(default_factory=list)
 
 
 class WeightSettings(BaseModel):
@@ -106,6 +175,7 @@ class SentinelSettings(BaseModel):
     schedule: ScheduleSettings = Field(default_factory=ScheduleSettings)
     thresholds: ThresholdSettings = Field(default_factory=ThresholdSettings)
     sources: SourceSettings = Field(default_factory=SourceSettings)
+    discovery: DiscoverySettings = Field(default_factory=DiscoverySettings)
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
     crowdstrike: CrowdStrikeSettings = Field(default_factory=CrowdStrikeSettings)
     delivery: DeliverySettings = Field(default_factory=DeliverySettings)
@@ -139,7 +209,7 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
     if command == "scheduler":
         commands.update({"run-once", "telegram-listen"})
 
-    if commands & {"run-once", "daily-digest", "scheduler", "telegram-listen", "send-real-samples"}:
+    if commands & {"run-once", "daily-digest", "scheduler", "telegram-listen", "send-real-samples", "send-discovery-samples"}:
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("TELEGRAM_BOT_TOKEN", settings.delivery.telegram_token)
         _validate_required_value("TELEGRAM_CHAT_ID", settings.delivery.telegram_chat_id)
@@ -156,6 +226,9 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
     if commands & {"karpathy-run"}:
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("OPENAI_API_KEY", settings.openai.api_key)
+
+    if commands & {"discovery-memory"}:
+        _validate_required_value("DATABASE_URL", settings.db.url)
 
 
 def _interpolate_env(data: Any, env: dict[str, str]) -> Any:

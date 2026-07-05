@@ -7,8 +7,9 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from sentinel.config import get_settings, validate_runtime_settings
+from sentinel.logging_utils import configure_logging
 from sentinel.pipeline import run_daily_digest, run_pipeline_once
-from sentinel.runtime import build_karpathy_loop
+from sentinel.runtime import format_karpathy_readiness, format_karpathy_report, run_live_karpathy_loop
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,17 @@ async def karpathy_loop_job() -> None:
     if not settings.schedule.enable_karpathy_job:
         return
     validate_runtime_settings(settings, command="karpathy-run")
-    loop = build_karpathy_loop(loop_type=settings.schedule.karpathy_loop_type, settings=settings)
-    await loop.optimize(max_experiments=settings.thresholds.karpathy_experiments)
+    # Route through the readiness-gated live runner so scheduled runs get the
+    # same preflight checks, target-source selection, and worktree isolation
+    # as `sentinel karpathy-run`.
+    readiness, report = await run_live_karpathy_loop(
+        loop_type=settings.schedule.karpathy_loop_type,
+        settings=settings,
+        max_experiments=settings.thresholds.karpathy_experiments,
+    )
+    logger.info("Scheduled karpathy readiness:\n%s", format_karpathy_readiness(readiness))
+    if report is not None:
+        logger.info("Scheduled karpathy run:\n%s", format_karpathy_report(report))
 
 
 def build_scheduler() -> AsyncIOScheduler:
@@ -72,7 +82,7 @@ def build_scheduler() -> AsyncIOScheduler:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     scheduler = build_scheduler()
     scheduler.start()
     for job in scheduler.get_jobs():

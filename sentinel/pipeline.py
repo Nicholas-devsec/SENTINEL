@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,10 +12,11 @@ from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.enricher import EnrichedIOC, EnrichmentAgent
 from sentinel.agents.rule_generator import GeneratedArtifacts, RuleGeneratorAgent
 from sentinel.agents.scorer import ScoredIOC, ScoringAgent, build_external_links_for_ioc
-from sentinel.agents.scraper import RawIOC, ScraperAgent
-from sentinel.agents.validator import ValidationAgent
+from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent
+from sentinel.agents.validator import ValidationAgent, get_corroboration
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
-from sentinel.db.models import Base, IOC
+from sentinel.db.migrations import ensure_schema
+from sentinel.db.models import IOC, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory, get_engine
 from sentinel.integrations.mitre_attack import MitreAttackRepository
 from telegram import Bot
@@ -29,22 +31,57 @@ class PipelineResult:
     generated: int
     immediate_alerts: int
     digest_candidates: int
+    writeups: int = 0
+    sightings: int = 0
+    corroborated: int = 0
+    discovered: int = 0
 
 
 async def init_db() -> None:
-    async with get_engine().begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    await ensure_schema(get_engine())
+
+
+async def _persist_writeups(writeups: list[RawWriteup]) -> dict[str, Any]:
+    """Get-or-create SourceMaterial rows; returns article url -> row id."""
+    if not writeups:
+        return {}
+    url_to_id: dict[str, Any] = {}
+    async with AsyncSessionFactory() as session:
+        for writeup in writeups:
+            row = await session.scalar(select(SourceMaterial).where(SourceMaterial.url == writeup.url))
+            if row is None:
+                row = SourceMaterial(
+                    source=writeup.source,
+                    url=writeup.url,
+                    title=writeup.title,
+                    published_at=writeup.published_at,
+                    fetched_at=datetime.now(UTC) if writeup.content_text is not None else None,
+                    content_text=writeup.content_text,
+                    extraction_status="failed" if writeup.fetch_error else "extracted",
+                    metadata_json={
+                        "summary": writeup.summary,
+                        "tags": writeup.tags,
+                        "fetch_error": writeup.fetch_error,
+                    },
+                )
+                session.add(row)
+                await session.flush()
+            url_to_id[writeup.url] = row.id
+        await session.commit()
+    return url_to_id
 
 
 async def _persist_enrichment(enriched_items: list[EnrichedIOC]) -> list[IOC]:
     async with AsyncSessionFactory() as session:
         persisted: list[IOC] = []
         for enriched in enriched_items:
-            row = await session.scalar(select(IOC).where(IOC.dedupe_hash == __import__("hashlib").sha256(enriched.value.encode("utf-8")).hexdigest()))
+            dedupe_hash = hashlib.sha256(enriched.value.encode("utf-8")).hexdigest()
+            row = await session.scalar(select(IOC).where(IOC.dedupe_hash == dedupe_hash))
             if row is None:
                 continue
             row.risk_score = enriched.risk_score
             row.vt_detections = enriched.vt_detections
+            row.vt_ratio = enriched.vt_ratio
             row.shodan_ports = enriched.shodan_ports
             row.abuse_confidence = enriched.abuse_confidence
             persisted.append(row)
@@ -108,17 +145,38 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
     await init_db()
     agents = build_agents(settings)
     try:
-        raw_items: list[RawIOC] = await agents["scraper"].run()
-        validated_rows: list[IOC] = await agents["validator"].run(raw_items)
+        scrape_report: ScrapeReport = await agents["scraper"].run_with_diagnostics()
+        raw_items = scrape_report.items
+        all_writeups = list(scrape_report.writeups)
+        discovered_count = 0
+        if settings.discovery.enabled and settings.discovery.profiles:
+            from sentinel.agents.discovery import DiscoveryAgent
+
+            discovery = DiscoveryAgent(settings=settings)
+            try:
+                discovery_report = await discovery.run_with_report()
+            finally:
+                await discovery.aclose()
+            raw_items = [*raw_items, *discovery_report.items]
+            all_writeups.extend(discovery_report.writeups)
+            discovered_count = len(discovery_report.items)
+        source_material_ids = await _persist_writeups(all_writeups)
+        validation_report = await agents["validator"].run_with_report(
+            raw_items, source_material_ids=source_material_ids
+        )
+        validated_rows: list[IOC] = validation_report.new_iocs
         enriched_items: list[EnrichedIOC] = await agents["enricher"].run(validated_rows)
         await _persist_enrichment(enriched_items)
         scored_items: list[ScoredIOC] = await agents["scorer"].run(enriched_items)
         persisted_scored = await _persist_scoring(scored_items)
+        async with AsyncSessionFactory() as session:
+            corroboration = await get_corroboration(session, [row.id for row in persisted_scored])
         delivery_payload = []
         for row, scored in zip(persisted_scored, scored_items, strict=False):
             payload = asdict(scored) if hasattr(scored, "__dataclass_fields__") else dict(scored)
             payload["id"] = str(row.id)
             payload["last_seen"] = row.last_seen
+            payload["corroboration_sources"] = corroboration.get(row.id, 1)
             delivery_payload.append(payload)
         generated = await agents["rule_generator"].run(delivery_payload)
         await _persist_generated(generated)
@@ -131,6 +189,10 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             generated=len(generated),
             immediate_alerts=delivery_result.immediate_alerts,
             digest_candidates=delivery_result.digest_candidates,
+            writeups=len(all_writeups),
+            sightings=validation_report.sightings_recorded,
+            corroborated=len(validation_report.corroborated_iocs),
+            discovered=discovered_count,
         )
     finally:
         for key in ("scraper", "enricher", "rule_generator", "delivery"):

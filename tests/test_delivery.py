@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -66,9 +65,18 @@ class FakeQuery:
         self.data = data
         self.from_user = type("User", (), {"id": user_id})
         self.answered = False
+        self.answer_text = None
+        self.show_alert = None
 
-    async def answer(self) -> None:
+    async def answer(self, text: str | None = None, show_alert: bool | None = None) -> None:
         self.answered = True
+        self.answer_text = text
+        self.show_alert = show_alert
+
+
+class BrokenSessionFactory:
+    def __call__(self):
+        raise RuntimeError("db unavailable")
 
 
 def build_settings() -> SentinelSettings:
@@ -172,6 +180,59 @@ async def test_delivery_agent_limits_telegram_alert_burst() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 35
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "c559cc68986933200fd5d9e4388e2f58",
+            "type": "md5",
+            "source": "crimeware-fresh",
+            "risk_score": 84,
+            "severity": "high",
+            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
+            "source_title": "CyberPress SharkLoader in-memory beacon attack",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "b3352b42432dedc4a519f011dc8b5d5a",
+            "type": "md5",
+            "source": "crimeware-fresh",
+            "risk_score": 84,
+            "severity": "high",
+            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
+            "source_title": "CyberPress SharkLoader in-memory beacon attack",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert len(telegram_bot.messages) == 1
+    assert "CyberPress SharkLoader in-memory beacon attack" in telegram_bot.messages[0]["text"]
+    assert "HIGH | Score 84.00 | 2 IOC(s)" in telegram_bot.messages[0]["text"]
+    assert "[md5] c559cc68986933200fd5d9e4388e2f58" in telegram_bot.messages[0]["text"]
+    assert "[md5] b3352b42432dedc4a519f011dc8b5d5a" in telegram_bot.messages[0]["text"]
+    assert "malware artifact hash" in telegram_bot.messages[0]["text"]
+    assert telegram_bot.messages[0]["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_can_disable_immediate_telegram_alerts() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
@@ -209,9 +270,54 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     record = await agent.handle_callback_query(query)
 
     assert query.answered is True
+    assert query.answer_text == "Recorded: false positive"
+    assert query.show_alert is True
     assert str(record.ioc_id) == ioc_id
     assert record.verdict == "false_positive"
     assert session_factory.storage[0].analyst_id == "42"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_acknowledges_duplicate_feedback_without_duplicating_row() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+
+    first = FakeQuery(data=f"confirmed:{ioc_id}", user_id="42")
+    second = FakeQuery(data=f"confirmed:{ioc_id}", user_id="42")
+
+    await agent.handle_callback_query(first)
+    record = await agent.handle_callback_query(second)
+
+    assert first.answer_text == "Recorded: confirmed"
+    assert first.show_alert is True
+    assert second.answer_text == "Already recorded: confirmed"
+    assert second.show_alert is True
+    assert len(session_factory.storage) == 1
+    assert record.verdict == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_acknowledges_callback_failure() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=BrokenSessionFactory(),
+    )
+    query = FakeQuery(data=f"confirmed:{uuid4()}", user_id="42")
+
+    with pytest.raises(RuntimeError, match="db unavailable"):
+        await agent.handle_callback_query(query)
+
+    assert query.answered is True
+    assert query.answer_text == "Failed to record feedback"
+    assert query.show_alert is True
 
 
 @pytest.mark.asyncio
@@ -470,3 +576,37 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
     assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
     assert "Observed In Feed: 2026-04-15 08:15 UTC" in rendered
     assert "Source Intel: Stealer Campaign Impacting SLTT macOS Users" in rendered
+
+
+def test_grouped_alert_message_renders_clean_sections_and_ioc_summaries() -> None:
+    from sentinel.delivery.telegram_bot import format_grouped_alert_message
+
+    rendered = format_grouped_alert_message(
+        source="discovery:arcticwolf.com",
+        risk_score=78.0,
+        severity="high",
+        iocs=[
+            {"type": "url", "value": "https://github.com/antivirus-free-bitdefender"},
+            {"type": "domain", "value": "bentleyvazquezpvey.github.io"},
+            {"type": "sha256", "value": "a" * 64},
+        ],
+        last_seen="2026-07-05T00:58:00+00:00",
+        source_title="Security Bulletin: GitHub Impersonation Deploys Information Stealer - Arctic Wolf",
+        reference_url="https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/",
+        related_cves=[],
+        corroboration_sources=1,
+        mitre_techniques=["T1583.001"],
+        mitre_tactics=["resource development"],
+    )
+
+    assert "HIGH | Score 78.00 | 3 IOC(s)" in rendered
+    assert "Observed 2026-07-05 00:58 UTC | Corroboration 1 source(s)" in rendered
+    assert "Article https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/" in rendered
+    assert "\nIOCs\n" in rendered
+    assert "- [url] https://github.com/antivirus-free-bitdefender" in rendered
+    assert "GitHub repo or path used by attacker" in rendered
+    assert "- [domain] bentleyvazquezpvey.github.io" in rendered
+    assert "domain hosting attacker-controlled content" in rendered
+    assert "- [sha256] " in rendered
+    assert "malware artifact hash" in rendered
+    assert "\nContext\n" in rendered
