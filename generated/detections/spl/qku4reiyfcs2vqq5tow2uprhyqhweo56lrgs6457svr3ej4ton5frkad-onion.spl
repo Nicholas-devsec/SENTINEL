@@ -1,0 +1,2 @@
+index=* sourcetype IN ("dns", "stream:dns") query="*qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad.onion"
+| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, query

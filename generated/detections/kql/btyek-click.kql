@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "btyek.click" or tostring(AdditionalFields) has "btyek.click"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

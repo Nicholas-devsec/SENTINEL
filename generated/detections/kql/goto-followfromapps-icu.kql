@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "goto.followfromapps.icu" or tostring(AdditionalFields) has "goto.followfromapps.icu"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

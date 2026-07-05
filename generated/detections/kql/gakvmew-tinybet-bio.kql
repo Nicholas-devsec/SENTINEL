@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gakvmew.tinybet.bio" or tostring(AdditionalFields) has "gakvmew.tinybet.bio"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

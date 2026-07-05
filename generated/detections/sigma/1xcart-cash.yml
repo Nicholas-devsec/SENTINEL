@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator 1xcart.cash
+id: 1xcart-cash
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "1xcart.cash"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

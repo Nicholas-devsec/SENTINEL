@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for bashei5oy4zvmf2letnupwhgprdkjyssm3zxj2oyr6wfezkf3elehzqd.onion",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "bashei5oy4zvmf2letnupwhgprdkjyssm3zxj2oyr6wfezkf3elehzqd.onion"
+}

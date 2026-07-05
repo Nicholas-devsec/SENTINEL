@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator lot.terangsm188.top
+id: lot-terangsm188-top
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "lot.terangsm188.top"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

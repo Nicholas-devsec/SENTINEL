@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 119.29.91.172
+id: 119-29-91-172
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "119.29.91.172"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1505.003
+  - attack.t1596.002
+  - attack.t1559.001

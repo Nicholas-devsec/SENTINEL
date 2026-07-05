@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator cxs9e097.vip1xbet.org
+id: cxs9e097-vip1xbet-org
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "cxs9e097.vip1xbet.org"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

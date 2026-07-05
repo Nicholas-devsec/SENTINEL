@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 154.220.95.107
+id: 154-220-95-107
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "154.220.95.107"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1136.002
+  - attack.t1596.002
+  - attack.t1559.001

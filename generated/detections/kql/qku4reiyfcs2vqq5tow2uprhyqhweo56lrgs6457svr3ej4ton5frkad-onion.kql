@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad.onion" or tostring(AdditionalFields) has "qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad.onion"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

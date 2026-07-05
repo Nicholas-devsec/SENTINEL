@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rucuxpv.acbet.poker" or tostring(AdditionalFields) has "rucuxpv.acbet.poker"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

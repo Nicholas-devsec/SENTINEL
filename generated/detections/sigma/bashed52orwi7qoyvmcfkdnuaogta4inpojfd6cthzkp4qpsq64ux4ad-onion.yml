@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator bashed52orwi7qoyvmcfkdnuaogta4inpojfd6cthzkp4qpsq64ux4ad.onion
+id: bashed52orwi7qoyvmcfkdnuaogta4inpojfd6cthzkp4qpsq64ux4ad-onion
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "bashed52orwi7qoyvmcfkdnuaogta4inpojfd6cthzkp4qpsq64ux4ad.onion"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

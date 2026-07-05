@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator b7ec650df72dc36580fdf68d9ccbbbc4e91286c9389064570c9e61d6b1dd8bca
+id: b7ec650df72dc36580fdf68d9ccbbbc4e91286c9389064570c9e61d6b1dd8bca
+status: experimental
+description: Execution of file with known-bad SHA256 (source: threatfox)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=b7ec650df72dc36580fdf68d9ccbbbc4e91286c9389064570c9e61d6b1dd8bca"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

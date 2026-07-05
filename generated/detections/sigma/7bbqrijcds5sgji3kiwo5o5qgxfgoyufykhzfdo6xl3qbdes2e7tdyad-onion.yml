@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator 7bbqrijcds5sgji3kiwo5o5qgxfgoyufykhzfdo6xl3qbdes2e7tdyad.onion
+id: 7bbqrijcds5sgji3kiwo5o5qgxfgoyufykhzfdo6xl3qbdes2e7tdyad-onion
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "7bbqrijcds5sgji3kiwo5o5qgxfgoyufykhzfdo6xl3qbdes2e7tdyad.onion"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

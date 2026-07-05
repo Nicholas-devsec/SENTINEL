@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gtm-tracker.xyz" or tostring(AdditionalFields) has "gtm-tracker.xyz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

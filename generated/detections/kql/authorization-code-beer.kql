@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "authorization-code.beer" or tostring(AdditionalFields) has "authorization-code.beer"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

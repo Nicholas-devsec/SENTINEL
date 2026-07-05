@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "airtech-energie.fr" or tostring(AdditionalFields) has "airtech-energie.fr"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

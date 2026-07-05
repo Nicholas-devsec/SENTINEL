@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for bashefe5uezp2jtxpk24b2pyfnnfyguicgrgqufgu57mfluegotbeayd.onion",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "bashefe5uezp2jtxpk24b2pyfnnfyguicgrgqufgu57mfluegotbeayd.onion"
+}

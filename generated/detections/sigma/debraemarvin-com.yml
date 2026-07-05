@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator debraemarvin.com
+id: debraemarvin-com
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "debraemarvin.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1583.001

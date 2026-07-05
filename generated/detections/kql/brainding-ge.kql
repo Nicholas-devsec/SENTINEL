@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "brainding.ge" or tostring(AdditionalFields) has "brainding.ge"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

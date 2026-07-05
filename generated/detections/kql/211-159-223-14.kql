@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteIP == "211.159.223.14"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteIP, RemotePort

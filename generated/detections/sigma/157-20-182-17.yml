@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 157.20.182.17
+id: 157-20-182-17
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "157.20.182.17"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1082
+  - attack.t1564.007
+  - attack.t1601.002

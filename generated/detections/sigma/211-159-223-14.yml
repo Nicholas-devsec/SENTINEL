@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 211.159.223.14
+id: 211-159-223-14
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "211.159.223.14"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1588.004
+  - attack.t1027.006
+  - attack.t1499.002

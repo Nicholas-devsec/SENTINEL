@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "flpquwu.enfejar-site.bet" or tostring(AdditionalFields) has "flpquwu.enfejar-site.bet"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

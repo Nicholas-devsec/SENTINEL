@@ -1,0 +1,3 @@
+DeviceFileEvents
+| where MD5 == "3dec0c4966559f2471c4c03dad2b3d4d"
+| project Timestamp, DeviceName, FileName, FolderPath, MD5, InitiatingProcessFileName

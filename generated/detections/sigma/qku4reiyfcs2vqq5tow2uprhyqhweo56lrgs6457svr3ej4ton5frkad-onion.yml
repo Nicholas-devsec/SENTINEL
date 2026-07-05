@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad.onion
+id: qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad-onion
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "qku4reiyfcs2vqq5tow2uprhyqhweo56lrgs6457svr3ej4ton5frkad.onion"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1583.001
+  - attack.t1136.002

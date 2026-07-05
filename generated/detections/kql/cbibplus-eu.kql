@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "cbibplus.eu" or tostring(AdditionalFields) has "cbibplus.eu"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
