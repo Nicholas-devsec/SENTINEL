@@ -58,9 +58,9 @@ cp .env.example .env                # fill in keys (see below)
 .venv/bin/pytest                    # 99 tests, no network or database needed
 ```
 
-Runtime dependencies: PostgreSQL and Redis (`docker-compose up postgres redis`),
-plus a local MITRE ATT&CK enterprise STIX bundle pointed at by
-`MITRE_STIX_PATH`. SQLite works for local experiments
+Runtime dependencies: PostgreSQL and Redis, plus a local MITRE ATT&CK
+enterprise STIX bundle pointed at by `MITRE_STIX_PATH`. SQLite works for local
+experiments
 (`DATABASE_URL=sqlite+aiosqlite:///./data/sentinel.db`).
 
 Required env keys per command are validated at startup; the minimum for the

@@ -29,6 +29,7 @@ class ScoredIOC:
     mitre_tactics: list[str] = field(default_factory=list)
     match_scores: dict[str, float] = field(default_factory=dict)
     enrichment_text: str = ""
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 def build_external_links_for_ioc(ioc: dict[str, Any]) -> dict[str, str]:
@@ -81,6 +82,7 @@ class ScoringAgent(BaseAgent):
                 "shodan_ports": item.shodan_ports,
                 "provider_results": item.provider_results,
                 "external_links": {},
+                "attributes": dict(item.attributes),
             }
         if isinstance(item, IOC):
             return {
@@ -97,6 +99,7 @@ class ScoringAgent(BaseAgent):
                 "shodan_ports": item.shodan_ports,
                 "provider_results": {},
                 "external_links": {},
+                "attributes": {},
             }
         return {
             "value": item["value"],
@@ -112,6 +115,7 @@ class ScoringAgent(BaseAgent):
             "shodan_ports": list(item.get("shodan_ports", [])),
             "provider_results": item.get("provider_results", {}),
             "external_links": dict(item.get("external_links", {})),
+            "attributes": dict(item.get("attributes", {})),
         }
 
     def _build_context(self, ioc: dict[str, Any]) -> str:
@@ -158,6 +162,7 @@ class ScoringAgent(BaseAgent):
             mitre_tactics=tactics,
             match_scores={match.attack_id: round(match.score, 4) for match in matches},
             enrichment_text=ioc.get("enrichment_text", ""),
+            attributes=dict(ioc.get("attributes", {})),
         )
 
     async def run(self, enriched_iocs: list[EnrichedIOC | IOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[ScoredIOC]:

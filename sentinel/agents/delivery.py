@@ -79,6 +79,7 @@ class DeliveryAgent(BaseAgent):
             "mitre_techniques": list(item.get("mitre_techniques", [])),
             "mitre_tactics": list(item.get("mitre_tactics", [])),
             "last_seen": item.get("last_seen"),
+            "attributes": dict(item.get("attributes", {})),
         }
 
     def _within_last_24_hours(self, value: Any) -> bool:
@@ -193,6 +194,7 @@ class DeliveryAgent(BaseAgent):
                 corroboration_sources=item.get("corroboration_sources"),
                 mitre_techniques=item.get("mitre_techniques", []),
                 mitre_tactics=item.get("mitre_tactics", []),
+                attributes=item.get("attributes", {}),
             )
         else:
             message = format_alert_message(
@@ -212,6 +214,7 @@ class DeliveryAgent(BaseAgent):
                 corroboration_sources=item.get("corroboration_sources"),
                 mitre_techniques=item.get("mitre_techniques", []),
                 mitre_tactics=item.get("mitre_tactics", []),
+                attributes=item.get("attributes", {}),
             )
         try:
             await self.telegram_bot.send_message(

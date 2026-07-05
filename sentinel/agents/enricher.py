@@ -40,6 +40,7 @@ class EnrichedIOC:
     enrichment_text: str = ""
     provider_results: dict[str, Any] = field(default_factory=dict)
     provider_errors: dict[str, str] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 class EnrichmentAgent(BaseAgent):
@@ -102,6 +103,7 @@ class EnrichmentAgent(BaseAgent):
                 "source_title": item.source_title,
                 "reference_url": item.reference_url,
                 "related_cves": list(item.related_cves or []),
+                "attributes": {},
             }
         return {
             "value": item["value"],
@@ -113,6 +115,7 @@ class EnrichmentAgent(BaseAgent):
             "source_title": item.get("source_title"),
             "reference_url": item.get("reference_url"),
             "related_cves": list(item.get("related_cves", [])),
+            "attributes": dict(item.get("attributes", {})),
         }
 
     async def _bounded(self, semaphore_name: str, coro) -> Any:
@@ -270,6 +273,7 @@ class EnrichmentAgent(BaseAgent):
             ),
             provider_results=provider_results,
             provider_errors=provider_errors,
+            attributes=dict(ioc.get("attributes", {})),
         )
 
     async def run(self, validated_iocs: list[IOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[EnrichedIOC]:

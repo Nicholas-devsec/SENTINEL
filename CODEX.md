@@ -168,8 +168,6 @@ sentinel/
 │   └── blog_post_draft.md    # LinkedIn / Medium article
 ├── config.yaml               # all keys and settings (never commit secrets)
 ├── .env.example              # env var template
-├── docker-compose.yml
-├── Dockerfile
 ├── requirements.txt
 ├── CODEX.md                  # this file
 └── README.md
@@ -234,8 +232,8 @@ Run these prompts in order. Each one is a self-contained task.
 Read CODEX.md. Create the full project scaffold: all directories,
 config.yaml with placeholder keys for every integration, BaseAgent
 class in agents/base.py with skill-loading and async run() method,
-all SQLAlchemy models in db/models.py, APScheduler cron setup in
-scheduler/cron.py, and docker-compose.yml with Redis + Postgres.
+all SQLAlchemy models in db/models.py, and APScheduler cron setup in
+scheduler/cron.py.
 ```
 
 ### Prompt 2 — Scraper agent
@@ -336,9 +334,9 @@ Log to ExperimentLog. Stop if delta < 0.001 for 3 consecutive experiments.
 Read CODEX.md and all agents/. Write pytest suite using respx to mock all HTTP
 calls, fakeredis for Redis, and SQLite for DB. Test each agent with real fixture
 IOCs. Write README.md with: one-para pitch, mermaid architecture diagram,
-feature list, quickstart (docker-compose up), config reference, "How the
-Karpathy Loop works" section, example Telegram alert screenshot placeholder,
-example Sigma rule output block, and contributing guide.
+feature list, quickstart, config reference, "How the Karpathy Loop works"
+section, example Telegram alert screenshot placeholder, example Sigma rule
+output block, and contributing guide.
 ```
 
 ---
@@ -409,7 +407,6 @@ git:
 ## Portfolio checklist
 
 - [ ] All 10 Codex prompts completed and tested
-- [ ] `docker-compose up` starts full stack in < 5 minutes
 - [ ] README.md has Mermaid architecture diagram
 - [ ] README.md has example Sigma rule output
 - [ ] README.md has Telegram alert screenshot

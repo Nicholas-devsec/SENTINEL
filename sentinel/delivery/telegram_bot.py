@@ -57,10 +57,40 @@ def _normalize_ioc_display(value: str, ioc_type: str) -> str:
     return display
 
 
-def summarize_ioc(*, value: str, ioc_type: str, source_title: str | None = None, reference_url: str | None = None) -> str:
+def _format_source_context(source: str, attributes: dict[str, Any] | None = None) -> str:
+    attrs = attributes or {}
+    if source.lower() == "threatfox":
+        parts: list[str] = ["ThreatFox"]
+        threat_type = str(attrs.get("threat_type") or "").strip()
+        malware = str(attrs.get("malware_printable") or attrs.get("malware") or "").strip()
+        alias = str(attrs.get("malware") or "").strip()
+        if threat_type:
+            parts.append(threat_type)
+        if malware:
+            if alias and alias.lower() != malware.lower():
+                parts.append(f"{malware} ({alias})")
+            else:
+                parts.append(malware)
+        return " | ".join(parts)
+    return source
+
+
+def summarize_ioc(
+    *,
+    value: str,
+    ioc_type: str,
+    source_title: str | None = None,
+    reference_url: str | None = None,
+    attributes: dict[str, Any] | None = None,
+) -> str:
     lowered = f"{source_title or ''} {reference_url or ''}".lower()
     display = _normalize_ioc_display(value, ioc_type)
+    attrs = attributes or {}
+    threat_type = str(attrs.get("threat_type") or "").strip().lower()
+    malware = str(attrs.get("malware_printable") or attrs.get("malware") or "").strip()
     if ioc_type == "ipv4":
+        if threat_type == "botnet_cc":
+            return f"botnet C2 IP tied to {malware}" if malware else "botnet command-and-control IP"
         if "c2" in lowered or "command and control" in lowered:
             return "IPv4 address of C2 server"
         return "IPv4 infrastructure indicator"
@@ -119,6 +149,7 @@ def format_alert_message(
     corroboration_sources: int | None = None,
     mitre_techniques: list[str],
     mitre_tactics: list[str],
+    attributes: dict[str, Any] | None = None,
 ) -> str:
     techniques = ", ".join(mitre_techniques) if mitre_techniques else "None"
     tactics = ", ".join(mitre_tactics) if mitre_tactics else "None"
@@ -142,6 +173,14 @@ def format_alert_message(
     corroboration_text = (
         f"{corroboration_sources} source(s)" if corroboration_sources is not None else "1 source(s)"
     )
+    summary = summarize_ioc(
+        value=value,
+        ioc_type=ioc_type,
+        source_title=source_title,
+        reference_url=reference_url,
+        attributes=attributes,
+    )
+    source_line = _format_source_context(source, attributes)
     observed_text = "Unknown"
     if last_seen is not None:
         if isinstance(last_seen, str):
@@ -155,23 +194,27 @@ def format_alert_message(
             if observed.tzinfo is None:
                 observed = observed.replace(tzinfo=UTC)
             observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    return (
-        f"{heading}\n"
-        f"IOC: {value}\n"
-        f"Type: {ioc_type}\n"
-        f"Source: {source}\n"
-        f"Corroboration: {corroboration_text}\n"
-        f"Observed In Feed: {observed_text}\n"
-        f"Source Intel: {source_context}\n"
-        f"Source Link: {reference_url or 'None'}\n"
-        f"Related CVEs: {cves}\n"
-        f"Score: {risk_score:.2f}\n"
-        f"Severity: {severity}\n"
-        f"Findings: {findings_text}\n"
-        f"Intel Links:\n{intel_links}\n"
-        f"ATT&CK Techniques: {techniques}\n"
-        f"ATT&CK Tactics: {tactics}"
-    )
+    lines = [
+        heading,
+        f"{source_context}",
+        f"{severity.upper()} | Score {risk_score:.2f} | 1 IOC",
+        f"Source {source_line}",
+        f"Observed {observed_text} | Corroboration {corroboration_text}",
+        f"CVEs {cves}",
+        f"Article {reference_url or 'None'}",
+        "",
+        "IOC",
+        f"- [{ioc_type}] {_truncate(_normalize_ioc_display(value, ioc_type), 140)}",
+        f"  {summary}",
+        "",
+        "Context",
+        f"Findings {findings_text}",
+        "Intel Links",
+        intel_links,
+        f"ATT&CK {techniques}",
+        f"Tactics {tactics}",
+    ]
+    return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
 
 
 def format_grouped_alert_message(

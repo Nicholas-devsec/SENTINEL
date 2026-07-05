@@ -538,13 +538,18 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
         mitre_tactics=[],
     )
 
+    assert "INFORMATIONAL | Score 24.19 | 1 IOC" in rendered
+    assert "Source feodotracker" in rendered
     assert "AbuseIPDB confidence: 0%" in rendered
     assert "Shodan ports: none reported" in rendered
     assert "https://www.shodan.io/host/162.243.103.246" in rendered
-    assert "Observed In Feed: 2026-04-15 07:30 UTC" in rendered
-    assert "Source Intel: Feodo IP Blocklist" in rendered
-    assert "Source Link: https://feodotracker.abuse.ch/" in rendered
-    assert "Related CVEs: CVE-2026-12345" in rendered
+    assert "Observed 2026-04-15 07:30 UTC | Corroboration 1 source(s)" in rendered
+    assert "Feodo IP Blocklist" in rendered
+    assert "Article https://feodotracker.abuse.ch/" in rendered
+    assert "CVEs CVE-2026-12345" in rendered
+    assert "\nIOC\n" in rendered
+    assert "- [ipv4] 162.243.103.246" in rendered
+    assert "IPv4 infrastructure indicator" in rendered
 
 
 def test_format_alert_message_shows_hash_intel_links() -> None:
@@ -571,11 +576,50 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
         mitre_tactics=["execution"],
     )
 
+    assert "CRITICAL | Score 91.00 | 1 IOC" in rendered
     assert "VirusTotal detections: 18" in rendered
     assert "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
     assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
-    assert "Observed In Feed: 2026-04-15 08:15 UTC" in rendered
-    assert "Source Intel: Stealer Campaign Impacting SLTT macOS Users" in rendered
+    assert "Observed 2026-04-15 08:15 UTC | Corroboration 1 source(s)" in rendered
+    assert "Stealer Campaign Impacting SLTT macOS Users" in rendered
+    assert "- [sha256] deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
+    assert "malware artifact hash" in rendered
+
+
+def test_format_alert_message_uses_threatfox_metadata_for_single_ioc_summary() -> None:
+    from sentinel.delivery.telegram_bot import format_alert_message
+
+    rendered = format_alert_message(
+        value="94.154.43.12",
+        ioc_type="ipv4",
+        source="threatfox",
+        risk_score=63.8,
+        severity="medium",
+        last_seen="2026-07-05T02:18:00+00:00",
+        source_title="Indicator that identifies a botnet command&control server (C&C)",
+        reference_url="https://threatfox.abuse.ch/ioc/1844378/",
+        related_cves=[],
+        vt_detections=None,
+        abuse_confidence=100,
+        shodan_ports=[80],
+        external_links={
+            "VirusTotal": "https://www.virustotal.com/gui/ip-address/94.154.43.12",
+            "AbuseIPDB": "https://www.abuseipdb.com/check/94.154.43.12",
+            "Shodan": "https://www.shodan.io/host/94.154.43.12",
+        },
+        mitre_techniques=["T1559.001"],
+        mitre_tactics=["execution"],
+        attributes={
+            "threat_type": "botnet_cc",
+            "malware": "Katana",
+            "malware_printable": "Mirai",
+        },
+    )
+
+    assert "MEDIUM | Score 63.80 | 1 IOC" in rendered
+    assert "Source ThreatFox | botnet_cc | Mirai (Katana)" in rendered
+    assert "- [ipv4] 94.154.43.12" in rendered
+    assert "botnet C2 IP tied to Mirai" in rendered
 
 
 def test_grouped_alert_message_renders_clean_sections_and_ioc_summaries() -> None:
