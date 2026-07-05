@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator man745va.takbetkade.com
+id: man745va-takbetkade-com
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "man745va.takbetkade.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1583.001
