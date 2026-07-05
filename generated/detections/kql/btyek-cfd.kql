@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "btyek.cfd" or tostring(AdditionalFields) has "btyek.cfd"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 104.168.0.147
+id: 104-168-0-147
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "104.168.0.147"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1564.007
+  - attack.t1601.002
+  - attack.t1082

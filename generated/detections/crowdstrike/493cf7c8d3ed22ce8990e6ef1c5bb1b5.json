@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for 493cf7c8d3ed22ce8990e6ef1c5bb1b5",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "medium",
+  "type": "md5",
+  "value": "493cf7c8d3ed22ce8990e6ef1c5bb1b5"
+}

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "hgdiucl.iranwp.ai" or tostring(AdditionalFields) has "hgdiucl.iranwp.ai"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

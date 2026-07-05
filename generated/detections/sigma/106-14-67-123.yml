@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 106.14.67.123
+id: 106-14-67-123
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "106.14.67.123"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

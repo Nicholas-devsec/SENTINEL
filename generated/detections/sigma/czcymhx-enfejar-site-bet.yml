@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator czcymhx.enfejar-site.bet
+id: czcymhx-enfejar-site-bet
+status: experimental
+description: DNS resolution of known-bad domain (source: threatfox)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "czcymhx.enfejar-site.bet"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 51.77.134.122
+id: 51-77-134-122
+status: experimental
+description: Outbound connection to known-bad IP (source: threatfox)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "51.77.134.122"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1030
+  - attack.t1027.017
+  - attack.t1567.003

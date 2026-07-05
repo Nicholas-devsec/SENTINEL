@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator 67e5faa2e8bdb1776ca9ba9614ed1573
+id: 67e5faa2e8bdb1776ca9ba9614ed1573
+status: experimental
+description: Execution of file with known-bad MD5 (source: threatfox)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "MD5=67e5faa2e8bdb1776ca9ba9614ed1573"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: medium
+tags:
+  - attack.t1593.002
+  - attack.t1036.004
+  - attack.t1036.005
