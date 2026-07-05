@@ -175,6 +175,136 @@ async def test_enrichment_agent_handles_partial_provider_failures(enrichment_ski
     assert result.risk_score >= 0
 
 
+@pytest.fixture
+def default_weight_skill(tmp_path: Path) -> Path:
+    """Skill file with no Scoring Weights section, so the agent uses the current
+    config defaults (the rebalanced, evidence-driven weights)."""
+    skill_path = tmp_path / "SKILL_default.md"
+    skill_path.write_text(
+        "---\nversion: 1.0.0\n---\n\n# Enrichment Skill\n\n"
+        "## Enrichment Rules\n- Partial enrichment is acceptable.\n",
+        encoding="utf-8",
+    )
+    return skill_path
+
+
+def _no_evidence_agent(skill: Path) -> EnrichmentAgent:
+    """Agent whose providers return nothing, so score is driven by trust/context."""
+    return EnrichmentAgent(
+        skill_path=str(skill),
+        settings=build_settings(),
+        virustotal_client=FakeVirusTotalClient({}),
+        shodan_client=FakeShodanClient({}),
+        abuseipdb_client=FakeAbuseIPDBClient({}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_high_trust_feed_without_evidence_stays_below_detection_bar(default_weight_skill: Path) -> None:
+    """The core anti-bias guarantee: a ThreatFox-trust IOC with no VT/abuse
+    evidence and no curation must NOT clear the rule threshold on trust alone."""
+    now = datetime.now(UTC)
+    agent = _no_evidence_agent(default_weight_skill)
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "45.155.204.1",
+                "type": "ipv4",
+                "source": "threatfox",
+                "source_trust": 0.94,
+                "first_seen": now - timedelta(hours=1),
+                "last_seen": now - timedelta(hours=1),
+            }
+        ]
+    )
+
+    # trust 0.10*0.94 + recency 0.10*~1.0 ~= 19, comfortably under rule_score=30.
+    assert enriched[0].risk_score < 30
+
+
+@pytest.mark.asyncio
+async def test_curated_writeup_ioc_clears_bar_without_api_evidence(default_weight_skill: Path) -> None:
+    """A writeup IOC hand-listed in an IOC section clears the rule threshold on
+    curation context even though it has lower feed trust and no VT/abuse."""
+    now = datetime.now(UTC)
+    agent = _no_evidence_agent(default_weight_skill)
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "malicious-c2.badcorp.top",
+                "type": "domain",
+                "source": "discovery:securelist.com",
+                "source_trust": 0.67,
+                "first_seen": now - timedelta(hours=1),
+                "last_seen": now - timedelta(hours=1),
+            }
+        ],
+        context_by_value={
+            "malicious-c2.badcorp.top": {
+                "provenance": "writeup",
+                "extraction_mode": "ioc_section",
+                "corroboration_sources": 1,
+            }
+        },
+    )
+
+    result = enriched[0]
+    assert result.context_score == 1.0
+    # 0.10*0.67 + 0.10*recency + 0.15*1.0 ~= 31, above rule_score=30.
+    assert result.risk_score >= 30
+
+
+@pytest.mark.asyncio
+async def test_corroboration_raises_score(default_weight_skill: Path) -> None:
+    now = datetime.now(UTC)
+    agent = _no_evidence_agent(default_weight_skill)
+    base = {
+        "value": "45.155.204.9",
+        "type": "ipv4",
+        "source": "threatfox",
+        "source_trust": 0.94,
+        "first_seen": now - timedelta(hours=1),
+        "last_seen": now - timedelta(hours=1),
+    }
+
+    single = await agent.run([base], context_by_value={"45.155.204.9": {"corroboration_sources": 1}})
+    multi = await agent.run([base], context_by_value={"45.155.204.9": {"corroboration_sources": 3}})
+
+    # Three independent sources add 0.10*1.0*100 = 10 points over a single source.
+    assert multi[0].corroboration_sources == 3
+    assert multi[0].risk_score > single[0].risk_score
+    assert round(multi[0].risk_score - single[0].risk_score, 1) == 10.0
+
+
+def test_rescore_from_stored_is_deterministic_and_local(default_weight_skill: Path) -> None:
+    now = datetime.now(UTC)
+    agent = _no_evidence_agent(default_weight_skill)
+    weights = agent.get_scoring_weights()
+
+    feed_no_evidence = agent.rescore_from_stored(
+        weights=weights,
+        vt_ratio=None,
+        abuse_confidence=None,
+        source_trust=0.94,
+        first_seen=now,
+        last_seen=now,
+        context={"provenance": "feed", "corroboration_sources": 1},
+    )
+    curated = agent.rescore_from_stored(
+        weights=weights,
+        vt_ratio=None,
+        abuse_confidence=None,
+        source_trust=0.67,
+        first_seen=now,
+        last_seen=now,
+        context={"provenance": "writeup", "extraction_mode": "ioc_section", "corroboration_sources": 1},
+    )
+
+    assert feed_no_evidence < 30 <= curated
+
+
 @pytest.mark.asyncio
 async def test_enrichment_agent_respects_provider_semaphore_limits(enrichment_skill: Path) -> None:
     whois_client = FakeWhoisClient({"registrar": "Example"}, delay=0.05)

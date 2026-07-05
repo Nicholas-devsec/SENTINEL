@@ -74,6 +74,9 @@ def build_settings() -> SentinelSettings:
                 "author_name": "SENTINEL Learner",
                 "author_email": "sentinel@bot",
             },
+            # Pin the replay trust weight so the source-loop math below is
+            # independent of the production default.
+            "enrichment": {"weights": {"source_trust": 0.20}},
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
         }
     )

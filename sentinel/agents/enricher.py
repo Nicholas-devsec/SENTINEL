@@ -19,6 +19,28 @@ from sentinel.integrations.whois import WhoisClient
 WEIGHTS_SECTION = re.compile(r"## Scoring Weights\s+(.*?)(?:\n## |\Z)", re.DOTALL)
 WEIGHT_LINE = re.compile(r"^- ([a-zA-Z0-9_:-]+):\s*([0-9]*\.?[0-9]+)\s*$")
 
+# Provenance/curation values that carry evidential weight. An indicator hand-
+# listed in a writeup's IOC section is treated as strong evidence; a whole-body
+# extraction from a writeup/discovery page is weaker; a direct feed carries no
+# context evidence on its own (its evidence must come from VT/AbuseIPDB).
+CONTEXT_CURATED = 1.0
+CONTEXT_WRITEUP = 0.6
+CONTEXT_FEED = 0.0
+
+
+def context_evidence_score(provenance: str | None, extraction_mode: str | None) -> float:
+    if extraction_mode == "ioc_section":
+        return CONTEXT_CURATED
+    if provenance in {"writeup", "discovery"}:
+        return CONTEXT_WRITEUP
+    return CONTEXT_FEED
+
+
+def corroboration_component(distinct_sources: int | None) -> float:
+    """0.0 for a single source, 0.5 for two, 1.0 for three or more."""
+    sources = distinct_sources or 1
+    return max(0.0, min(1.0, (sources - 1) / 2.0))
+
 
 @dataclass(slots=True)
 class EnrichedIOC:
@@ -41,6 +63,8 @@ class EnrichedIOC:
     provider_results: dict[str, Any] = field(default_factory=dict)
     provider_errors: dict[str, str] = field(default_factory=dict)
     attributes: dict[str, Any] = field(default_factory=dict)
+    context_score: float = 0.0
+    corroboration_sources: int = 1
 
 
 class EnrichmentAgent(BaseAgent):
@@ -211,6 +235,8 @@ class EnrichmentAgent(BaseAgent):
         abuse_confidence: int | None,
         source_trust: float,
         recency_score: float,
+        context_score: float = 0.0,
+        corroboration: float = 0.0,
     ) -> float:
         abuse_score = (abuse_confidence or 0) / 100
         raw_score = (
@@ -218,11 +244,31 @@ class EnrichmentAgent(BaseAgent):
             + weights.get("abuse_confidence", 0.0) * abuse_score
             + weights.get("source_trust", 0.0) * source_trust
             + weights.get("recency", 0.0) * recency_score
+            + weights.get("context", 0.0) * context_score
+            + weights.get("corroboration", 0.0) * corroboration
         )
         return round(max(0.0, min(100.0, raw_score * 100)), 2)
 
-    async def enrich_one(self, item: IOC | dict[str, Any], *, weights: dict[str, float]) -> EnrichedIOC:
+    @staticmethod
+    def _context_from(context: dict[str, Any] | None) -> tuple[float, int]:
+        """(context_evidence, distinct_sources) from a per-IOC context dict."""
+        if not context:
+            return 0.0, 1
+        context_score = context_evidence_score(
+            context.get("provenance"), context.get("extraction_mode")
+        )
+        sources = int(context.get("corroboration_sources") or 1)
+        return context_score, sources
+
+    async def enrich_one(
+        self,
+        item: IOC | dict[str, Any],
+        *,
+        weights: dict[str, float],
+        context: dict[str, Any] | None = None,
+    ) -> EnrichedIOC:
         ioc = self._coerce_ioc(item)
+        context_score, corroboration_sources = self._context_from(context)
         first_seen = self._coerce_datetime(ioc["first_seen"])
         last_seen = self._coerce_datetime(ioc["last_seen"])
         tasks = {
@@ -248,6 +294,8 @@ class EnrichmentAgent(BaseAgent):
             abuse_confidence=abuse_confidence,
             source_trust=float(ioc["source_trust"]),
             recency_score=self._compute_recency_score(first_seen, last_seen),
+            context_score=context_score,
+            corroboration=corroboration_component(corroboration_sources),
         )
         return EnrichedIOC(
             value=ioc["value"],
@@ -274,13 +322,58 @@ class EnrichmentAgent(BaseAgent):
             provider_results=provider_results,
             provider_errors=provider_errors,
             attributes=dict(ioc.get("attributes", {})),
+            context_score=context_score,
+            corroboration_sources=corroboration_sources,
         )
 
-    async def run(self, validated_iocs: list[IOC | dict[str, Any]], *args: Any, **kwargs: Any) -> list[EnrichedIOC]:
+    def rescore_from_stored(
+        self,
+        *,
+        weights: dict[str, float],
+        vt_ratio: float | None,
+        abuse_confidence: int | None,
+        source_trust: float,
+        first_seen: datetime,
+        last_seen: datetime,
+        context: dict[str, Any] | None = None,
+    ) -> float:
+        """Recompute a risk score from already-stored evidence, no API calls.
+
+        Used to re-level existing rows under the current weights/context without
+        re-hitting VirusTotal/AbuseIPDB (and without burning their quota).
+        """
+        context_score, corroboration_sources = self._context_from(context)
+        return self._score_ioc(
+            weights=weights,
+            vt_ratio=vt_ratio or 0.0,
+            abuse_confidence=abuse_confidence,
+            source_trust=source_trust,
+            recency_score=self._compute_recency_score(
+                self._coerce_datetime(first_seen), self._coerce_datetime(last_seen)
+            ),
+            context_score=context_score,
+            corroboration=corroboration_component(corroboration_sources),
+        )
+
+    async def run(
+        self,
+        validated_iocs: list[IOC | dict[str, Any]],
+        *args: Any,
+        context_by_value: dict[str, dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> list[EnrichedIOC]:
         self.reload_skill()
         weights = self.get_scoring_weights()
+        context_by_value = context_by_value or {}
         started = time.perf_counter()
-        enriched = await asyncio.gather(*(self.enrich_one(ioc, weights=weights) for ioc in validated_iocs))
+
+        def context_for(ioc: IOC | dict[str, Any]) -> dict[str, Any] | None:
+            value = ioc.value if isinstance(ioc, IOC) else ioc.get("value")
+            return context_by_value.get(value)
+
+        enriched = await asyncio.gather(
+            *(self.enrich_one(ioc, weights=weights, context=context_for(ioc)) for ioc in validated_iocs)
+        )
         elapsed = time.perf_counter() - started
         self.logger.info(
             "Enrichment completed for %s IOC(s) in %.2fs (whois=%s)",

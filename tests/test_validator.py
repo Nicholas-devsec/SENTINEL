@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from sentinel.agents.scraper import RawIOC
-from sentinel.agents.validator import ValidationAgent, get_corroboration
+from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
 from sentinel.db.models import IOC, IOCSighting
 
 
@@ -329,3 +329,59 @@ async def test_validator_persists_source_link_title_and_related_cves(agent: Vali
         assert row.source_title == "Stealer pulse referencing CVE-2026-12345"
         assert row.reference_url == "https://otx.alienvault.com/pulse/123"
         assert row.related_cves == ["CVE-2026-12345"]
+
+
+@pytest.mark.asyncio
+async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources(
+    db_session_factory,
+) -> None:
+    """An IOC seen by a plain feed and a curated writeup section should report
+    the curated provenance and a corroboration count of 2."""
+    import uuid
+
+    ioc_id = uuid.uuid4()
+    async with db_session_factory() as session:
+        session.add(
+            IOC(
+                id=ioc_id,
+                value="45.155.204.9",
+                dedupe_hash="hash-ctx",
+                type="ipv4",
+                source="threatfox",
+                source_trust=0.94,
+                first_seen=datetime(2026, 7, 1, tzinfo=UTC),
+                last_seen=datetime(2026, 7, 1, tzinfo=UTC),
+            )
+        )
+        session.add(
+            IOCSighting(
+                ioc_id=ioc_id,
+                source="threatfox",
+                source_trust=0.94,
+                provenance="feed",
+                first_seen=datetime(2026, 7, 1, tzinfo=UTC),
+                last_seen=datetime(2026, 7, 1, tzinfo=UTC),
+                lineage_hash="lineage-feed",
+                attributes={},
+            )
+        )
+        session.add(
+            IOCSighting(
+                ioc_id=ioc_id,
+                source="discovery:securelist.com",
+                source_trust=0.67,
+                provenance="writeup",
+                first_seen=datetime(2026, 7, 1, tzinfo=UTC),
+                last_seen=datetime(2026, 7, 1, tzinfo=UTC),
+                lineage_hash="lineage-writeup",
+                attributes={"extraction_mode": "ioc_section"},
+            )
+        )
+        await session.commit()
+
+        context = await get_scoring_context(session, [ioc_id])
+
+    entry = context[ioc_id]
+    assert entry["corroboration_sources"] == 2
+    assert entry["provenance"] == "writeup"
+    assert entry["extraction_mode"] == "ioc_section"

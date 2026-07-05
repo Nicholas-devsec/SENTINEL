@@ -151,7 +151,7 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
     assert result.digest_candidates == 2
     assert len(telegram_bot.messages) == 1
     assert "SENTINEL Alert" in telegram_bot.messages[0]["text"]
-    assert "Intel Links:" in telegram_bot.messages[0]["text"]
+    assert "\nIntel Links\n" in telegram_bot.messages[0]["text"]
     assert telegram_bot.messages[0]["reply_markup"] is not None
 
 

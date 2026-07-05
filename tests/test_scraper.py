@@ -662,3 +662,50 @@ async def test_scraper_agent_reports_diagnostics_for_kept_stale_and_errors(setti
         SourceScrapeDiagnostic(source="working", fetched=2, kept=1, stale_dropped=1, error=None),
         SourceScrapeDiagnostic(source="broken", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_writeup_extraction_marks_ioc_section_for_curation_credit(settings: SentinelSettings) -> None:
+    """A writeup whose body has an explicit IOC section is tagged
+    extraction_mode=ioc_section so its indicators earn full scoring context;
+    a writeup without one falls back."""
+    from sentinel.agents.scraper import RawWriteup
+
+    agent = ScraperAgent(settings=settings)
+    try:
+        curated = RawWriteup(
+            source="securelist_blog",
+            source_trust=0.67,
+            url="https://securelist.com/campaign",
+            title="Stealer campaign",
+            published_at=__import__("sentinel.agents.scraper", fromlist=["_now_utc"])._now_utc(),
+            content_text=(
+                "Our team analysed a stealer campaign.\n"
+                "Indicators of Compromise\n"
+                "malicious-c2.badcorp.top\n"
+                "45.155.204.99\n"
+                "d41d8cd98f00b204e9800998ecf8427e\n"
+                "Conclusion\n"
+                "Block the above."
+            ),
+        )
+        prose_only = RawWriteup(
+            source="securelist_blog",
+            source_trust=0.67,
+            url="https://securelist.com/thoughts",
+            title="Threat landscape musings",
+            published_at=__import__("sentinel.agents.scraper", fromlist=["_now_utc"])._now_utc(),
+            content_text="A long reflection on the evolving threat landscape with no indicators.",
+        )
+
+        curated_items = agent._extract_iocs_from_writeup(curated)
+        prose_items = agent._extract_iocs_from_writeup(prose_only)
+    finally:
+        await agent.aclose()
+
+    assert curated_items
+    assert all(item.attributes["extraction_mode"] == "ioc_section" for item in curated_items)
+    assert all(item.provenance == "writeup" for item in curated_items)
+    assert {"malicious-c2.badcorp.top", "45.155.204.99"} <= {item.value for item in curated_items}
+    # No section -> fallback labeling (may still find defanged/urls, but not curated).
+    assert all(item.attributes["extraction_mode"] == "fallback" for item in prose_items)

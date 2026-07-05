@@ -148,10 +148,12 @@ enrichment:
   abuseipdb_key: ${ABUSEIPDB_API_KEY}
   enable_whois: false
   weights:
-    vt_ratio: 0.35
-    abuse_confidence: 0.30
-    source_trust: 0.20
-    recency: 0.15
+    vt_ratio: 0.30
+    abuse_confidence: 0.25
+    source_trust: 0.10
+    recency: 0.10
+    context: 0.15
+    corroboration: 0.10
 
 crowdstrike:
   enabled: false

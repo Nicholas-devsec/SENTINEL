@@ -32,6 +32,16 @@ class ScoredIOC:
     attributes: dict[str, Any] = field(default_factory=dict)
 
 
+def map_severity(risk_score: float) -> str:
+    if risk_score >= 90:
+        return "critical"
+    if risk_score >= 70:
+        return "high"
+    if risk_score >= 50:
+        return "medium"
+    return "informational"
+
+
 def build_external_links_for_ioc(ioc: dict[str, Any]) -> dict[str, str]:
     value = str(ioc["value"])
     ioc_type = str(ioc["type"]).lower()
@@ -128,13 +138,7 @@ class ScoringAgent(BaseAgent):
         return "\n".join(part for part in parts if part)
 
     def _map_severity(self, risk_score: float) -> str:
-        if risk_score >= 90:
-            return "critical"
-        if risk_score >= 70:
-            return "high"
-        if risk_score >= 50:
-            return "medium"
-        return "informational"
+        return map_severity(risk_score)
 
     def score_one(self, item: EnrichedIOC | IOC | dict[str, Any]) -> ScoredIOC:
         ioc = self._coerce_ioc(item)

@@ -112,10 +112,19 @@ class DiscoverySettings(BaseModel):
 
 
 class WeightSettings(BaseModel):
-    vt_ratio: float = 0.35
-    abuse_confidence: float = 0.30
-    source_trust: float = 0.20
-    recency: float = 0.15
+    # Evidence-driven weighting. Trust and recency are deliberately small so a
+    # feed's configured trust can no longer clear the detection threshold on its
+    # own — that behaviour let ThreatFox (trust 0.94) auto-generate detections
+    # for indicators with no corroborating evidence while analyst-curated
+    # writeup IOCs (trust ~0.67) never passed. `context` rewards indicators
+    # pulled from an explicit writeup IOC section; `corroboration` rewards
+    # indicators seen by multiple independent sources.
+    vt_ratio: float = 0.30
+    abuse_confidence: float = 0.25
+    source_trust: float = 0.10
+    recency: float = 0.10
+    context: float = 0.15
+    corroboration: float = 0.10
 
 
 class EnrichmentSettings(BaseModel):
@@ -227,7 +236,7 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("OPENAI_API_KEY", settings.openai.api_key)
 
-    if commands & {"discovery-memory"}:
+    if commands & {"discovery-memory", "rescore"}:
         _validate_required_value("DATABASE_URL", settings.db.url)
 
 

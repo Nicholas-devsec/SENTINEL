@@ -65,7 +65,7 @@ def test_build_agents_requires_mitre_stix_path() -> None:
 @pytest.mark.asyncio
 async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
     scraped = [{"value": "1.1.1.1"}]
-    validated_row = type("Row", (), {"id": "ioc-1", "last_seen": "2026-04-08T12:00:00+00:00"})
+    validated_row = type("Row", (), {"id": "ioc-1", "value": "1.1.1.1", "last_seen": "2026-04-08T12:00:00+00:00"})
     enriched = [type("Enriched", (), {"value": "1.1.1.1"})]
     scored = [
         {
@@ -101,6 +101,11 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
         return {}
 
     monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    async def fake_scoring_context(session, ioc_ids):
+        return {}
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
 
     class NullSession:
         async def __aenter__(self):
@@ -141,8 +146,8 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatch) -> None:
     validated_rows = [
-        type("Row", (), {"id": "ioc-ip", "last_seen": "2026-04-08T12:00:00+00:00"}),
-        type("Row", (), {"id": "ioc-hash", "last_seen": "2026-04-08T12:00:00+00:00"}),
+        type("Row", (), {"id": "ioc-ip", "value": "8.8.8.8", "last_seen": "2026-04-08T12:00:00+00:00"}),
+        type("Row", (), {"id": "ioc-hash", "value": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "last_seen": "2026-04-08T12:00:00+00:00"}),
     ]
     enriched = [
         type(
@@ -230,6 +235,11 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
         return {}
 
     monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    async def fake_scoring_context(session, ioc_ids):
+        return {}
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
 
     class NullSession:
         async def __aenter__(self):

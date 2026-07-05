@@ -231,6 +231,7 @@ def format_grouped_alert_message(
     corroboration_sources: int | None = None,
     mitre_techniques: list[str] | None = None,
     mitre_tactics: list[str] | None = None,
+    attributes: dict[str, Any] | None = None,
 ) -> str:
     techniques = ", ".join(mitre_techniques or []) if mitre_techniques else "None"
     tactics = ", ".join(mitre_tactics or []) if mitre_tactics else "None"

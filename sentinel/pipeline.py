@@ -11,9 +11,9 @@ from sqlalchemy import select
 from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.enricher import EnrichedIOC, EnrichmentAgent
 from sentinel.agents.rule_generator import GeneratedArtifacts, RuleGeneratorAgent
-from sentinel.agents.scorer import ScoredIOC, ScoringAgent, build_external_links_for_ioc
+from sentinel.agents.scorer import ScoredIOC, ScoringAgent, build_external_links_for_ioc, map_severity
 from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent
-from sentinel.agents.validator import ValidationAgent, get_corroboration
+from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.migrations import ensure_schema
 from sentinel.db.models import IOC, SourceMaterial
@@ -165,7 +165,22 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             raw_items, source_material_ids=source_material_ids
         )
         validated_rows: list[IOC] = validation_report.new_iocs
-        enriched_items: list[EnrichedIOC] = await agents["enricher"].run(validated_rows)
+        # Build per-IOC scoring context (provenance, curation, corroboration) so
+        # the score reflects evidence and analyst curation, not feed identity.
+        async with AsyncSessionFactory() as session:
+            context_by_id = await get_scoring_context(session, [row.id for row in validated_rows])
+        context_by_value = {
+            row.value: context_by_id[row.id] for row in validated_rows if row.id in context_by_id
+        }
+        # Enrich non-feed (writeup/discovery) indicators first so a flood of feed
+        # IOCs cannot exhaust the VirusTotal/AbuseIPDB budget before them.
+        ordered_rows = sorted(
+            validated_rows,
+            key=lambda row: 0 if (context_by_value.get(row.value, {}).get("provenance") in {"writeup", "discovery"}) else 1,
+        )
+        enriched_items: list[EnrichedIOC] = await agents["enricher"].run(
+            ordered_rows, context_by_value=context_by_value
+        )
         await _persist_enrichment(enriched_items)
         scored_items: list[ScoredIOC] = await agents["scorer"].run(enriched_items)
         persisted_scored = await _persist_scoring(scored_items)
@@ -199,6 +214,65 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             closer = getattr(agents[key], "aclose", None)
             if closer is not None:
                 await closer()
+
+
+@dataclass(slots=True)
+class RescoreResult:
+    rescored: int
+    changed: int
+    by_source_before: dict[str, float]
+    by_source_after: dict[str, float]
+
+
+async def rescore_existing_iocs(settings: SentinelSettings | None = None) -> RescoreResult:
+    """Re-level every stored IOC under the current weights + scoring context.
+
+    Uses only already-stored evidence (vt_ratio, abuse_confidence, trust,
+    recency) plus freshly aggregated sighting context — no external API calls,
+    so it is safe to run repeatedly and cannot burn VirusTotal/AbuseIPDB quota.
+    """
+    settings = settings or get_settings()
+    await init_db()
+    enricher = EnrichmentAgent(settings=settings)
+    try:
+        weights = enricher.get_scoring_weights()
+        before_sum: dict[str, list[float]] = {}
+        after_sum: dict[str, list[float]] = {}
+        rescored = 0
+        changed = 0
+        async with AsyncSessionFactory() as session:
+            rows = list((await session.scalars(select(IOC))).all())
+            context_by_id = await get_scoring_context(session, [row.id for row in rows])
+            for row in rows:
+                before = float(row.risk_score or 0.0)
+                new_score = enricher.rescore_from_stored(
+                    weights=weights,
+                    vt_ratio=row.vt_ratio,
+                    abuse_confidence=row.abuse_confidence,
+                    source_trust=float(row.source_trust or 0.0),
+                    first_seen=row.first_seen,
+                    last_seen=row.last_seen,
+                    context=context_by_id.get(row.id),
+                )
+                before_sum.setdefault(row.source, []).append(before)
+                after_sum.setdefault(row.source, []).append(new_score)
+                if abs(new_score - before) > 1e-6:
+                    changed += 1
+                row.risk_score = new_score
+                row.severity = map_severity(new_score)
+                rescored += 1
+            await session.commit()
+        avg = lambda values: round(sum(values) / len(values), 2) if values else 0.0
+        return RescoreResult(
+            rescored=rescored,
+            changed=changed,
+            by_source_before={src: avg(vals) for src, vals in sorted(before_sum.items())},
+            by_source_after={src: avg(vals) for src, vals in sorted(after_sum.items())},
+        )
+    finally:
+        closer = getattr(enricher, "aclose", None)
+        if closer is not None:
+            await closer()
 
 
 async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:

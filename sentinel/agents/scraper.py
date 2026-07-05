@@ -675,12 +675,26 @@ class ScraperAgent(BaseAgent):
     def _extract_iocs_from_writeup(self, writeup: RawWriteup) -> list[RawIOC]:
         from urllib.parse import urlparse
 
-        from sentinel.agents.ioc_extract import extract_iocs_from_text
+        from sentinel.agents.ioc_extract import (
+            extract_iocs_from_section,
+            extract_iocs_from_text,
+            find_ioc_section,
+        )
 
         text_parts = [writeup.title or "", writeup.summary or "", writeup.content_text or ""]
+        full_text = "\n".join(text_parts)
         own_host = (urlparse(writeup.url).hostname or "").lower()
         exclude = {own_host} if own_host else set()
-        extracted = extract_iocs_from_text("\n".join(text_parts), exclude_hostnames=exclude)
+        # Prefer an explicit IOC/indicators section when the article has one, so
+        # analyst-curated indicators earn full scoring context (parity with the
+        # discovery path). Fall back to whole-body extraction otherwise.
+        section = find_ioc_section(full_text)
+        if section is not None:
+            extracted = extract_iocs_from_section(section.text, exclude_hostnames=exclude)
+            extraction_mode = "ioc_section"
+        else:
+            extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
+            extraction_mode = "fallback"
         records: list[RawIOC] = []
         for candidate in extracted:
             records.append(
@@ -698,6 +712,7 @@ class ScraperAgent(BaseAgent):
                         "article_title": writeup.title,
                         "article_url": writeup.url,
                         "extraction": "regex-v1",
+                        "extraction_mode": extraction_mode,
                     },
                     provenance="writeup",
                 )

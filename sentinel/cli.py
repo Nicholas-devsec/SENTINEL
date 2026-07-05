@@ -9,7 +9,7 @@ from sentinel.config import get_settings, validate_runtime_settings
 from sentinel.delivery.telegram_listener import run_telegram_listener
 from sentinel.delivery.telegram_bot import fetch_chat_candidates, format_chat_candidates
 from sentinel.logging_utils import configure_logging
-from sentinel.pipeline import _build_telegram_bot, run_daily_digest, run_pipeline_once
+from sentinel.pipeline import _build_telegram_bot, rescore_existing_iocs, run_daily_digest, run_pipeline_once
 from sentinel.runtime import (
     format_karpathy_readiness,
     format_karpathy_report,
@@ -26,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("run-once", help="Run the full live MVP pipeline once")
     subcommands.add_parser("scraper-diagnose", help="Fetch live sources and print per-feed scrape diagnostics")
     subcommands.add_parser("daily-digest", help="Send the daily digest for the last 24 hours")
+    subcommands.add_parser(
+        "rescore",
+        help="Re-level every stored IOC under current scoring weights + context (no API calls)",
+    )
     subcommands.add_parser("scheduler", help="Run the APScheduler service loop")
     subcommands.add_parser("telegram-listen", help="Start Telegram polling to capture analyst callback feedback")
     telegram_parser = subcommands.add_parser(
@@ -105,6 +109,15 @@ async def _dispatch(command: str, **kwargs) -> None:
     if command == "daily-digest":
         result = await run_daily_digest(settings=settings)
         print(result)
+        return
+    if command == "rescore":
+        result = await rescore_existing_iocs(settings=settings)
+        print(f"Rescored {result.rescored} IOC(s); {result.changed} changed.")
+        print("Average risk_score by source (before -> after):")
+        for source in sorted({*result.by_source_before, *result.by_source_after}):
+            before = result.by_source_before.get(source, 0.0)
+            after = result.by_source_after.get(source, 0.0)
+            print(f"  {source:32s} {before:6.2f} -> {after:6.2f}")
         return
     if command == "scheduler":
         await scheduler_main()

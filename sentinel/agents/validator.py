@@ -410,3 +410,50 @@ async def get_corroboration(session: AsyncSession, ioc_ids: Iterable[Any]) -> di
         .group_by(IOCSighting.ioc_id)
     )
     return {ioc_id: count for ioc_id, count in rows.all()}
+
+
+# Provenance strength ranking for choosing the best context per IOC. An IOC
+# hand-listed in a writeup IOC section outranks a whole-body writeup extraction,
+# which outranks a plain feed sighting.
+_PROVENANCE_RANK = {"feed": 0, "manual": 1, "discovery": 2, "writeup": 2}
+
+
+async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> dict[Any, dict[str, Any]]:
+    """Per-IOC scoring context aggregated from sightings.
+
+    Returns {ioc_id: {"provenance", "extraction_mode", "corroboration_sources"}}
+    where provenance/extraction_mode reflect the strongest sighting (curated
+    IOC-section beats fallback beats plain feed) and corroboration_sources is
+    the count of distinct observing sources.
+    """
+    ids = list(ioc_ids)
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(
+            IOCSighting.ioc_id,
+            IOCSighting.source,
+            IOCSighting.provenance,
+            IOCSighting.attributes,
+        ).where(IOCSighting.ioc_id.in_(ids))
+    )
+    context: dict[Any, dict[str, Any]] = {}
+    distinct_sources: dict[Any, set[str]] = {}
+    for ioc_id, source, provenance, attributes in rows.all():
+        distinct_sources.setdefault(ioc_id, set()).add(source)
+        extraction_mode = (attributes or {}).get("extraction_mode")
+        # Curated IOC-section extractions get promoted to the strongest rank.
+        rank = _PROVENANCE_RANK.get(provenance or "feed", 0)
+        if extraction_mode == "ioc_section":
+            rank = max(rank, 3)
+        current = context.get(ioc_id)
+        if current is None or rank > current["_rank"]:
+            context[ioc_id] = {
+                "provenance": provenance,
+                "extraction_mode": extraction_mode,
+                "_rank": rank,
+            }
+    for ioc_id, entry in context.items():
+        entry.pop("_rank", None)
+        entry["corroboration_sources"] = len(distinct_sources.get(ioc_id, {""}))
+    return context
