@@ -8,13 +8,13 @@ from sentinel.logging_utils import RedactingFormatter, configure_logging, redact
 def test_redact_secrets_hides_telegram_bot_token_in_url() -> None:
     text = (
         'HTTP Request: POST '
-        'https://api.telegram.org/bot8748231986:FAKE_TOKEN_FRAGMENT_FOR_REDACTION_TEST/sendMessage '
+        'https://api.telegram.org/bot1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx/sendMessage '
         '"HTTP/1.1 200 OK"'
     )
 
     redacted = redact_secrets(text)
 
-    assert "8748231986:FAKE_TOKEN_FRAGMENT_FOR_REDACTION_TEST" not in redacted
+    assert "1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx" not in redacted
     assert "https://api.telegram.org/bot<redacted>/sendMessage" in redacted
 
 
@@ -38,7 +38,7 @@ def test_redacting_formatter_sanitizes_logged_message() -> None:
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
-        msg="POST https://api.telegram.org/bot8748231986:FAKE_TOKEN_FRAGMENT_FOR_REDACTION_TEST/sendMessage",
+        msg="POST https://api.telegram.org/bot1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx/sendMessage",
         args=(),
         exc_info=None,
     )
