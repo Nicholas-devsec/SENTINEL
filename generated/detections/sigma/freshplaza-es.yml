@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator freshplaza.es
+id: freshplaza-es
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.floraldaily.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "freshplaza.es"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

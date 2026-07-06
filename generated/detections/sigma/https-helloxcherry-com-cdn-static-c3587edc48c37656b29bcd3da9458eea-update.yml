@@ -1,7 +1,7 @@
 title: SENTINEL URL indicator https://helloxcherry.com/cdn/static/c3587edc48c37656b29bcd3da9458eea/update
 id: https-helloxcherry-com-cdn-static-c3587edc48c37656b29bcd3da9458eea-update
 status: experimental
-description: Web request to known-bad URL (source: otx)
+description: Web request to known-bad URL (source: discovery:cyberpress.org)
 logsource:
   category: proxy
 detection:
@@ -13,6 +13,6 @@ fields:
   - src_ip
 level: informational
 tags:
-  - attack.t1596.002
-  - attack.t1596.004
-  - attack.t1559.001
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001
