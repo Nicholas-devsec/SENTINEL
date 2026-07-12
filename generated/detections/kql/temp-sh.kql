@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "temp.sh" or tostring(AdditionalFields) has "temp.sh"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
