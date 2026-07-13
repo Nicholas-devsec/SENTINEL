@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "main.unallocatedrive" or tostring(AdditionalFields) has "main.unallocatedrive"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
