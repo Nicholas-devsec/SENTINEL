@@ -291,6 +291,83 @@ async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_articl
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_allows_curated_ioc_section_items_below_global_immediate_threshold() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 70
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "loader-cdn.badcorp.top",
+            "type": "domain",
+            "source": "discovery:publisher.example",
+            "risk_score": 62.0,
+            "severity": "medium",
+            "reference_url": "https://publisher.example/report",
+            "source_title": "Publisher report with IOCs",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+            "provenance": "discovery",
+            "extraction_mode": "ioc_section",
+            "corroboration_sources": 1,
+            "attributes": {"provenance": "discovery", "extraction_mode": "ioc_section"},
+        }
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert result.digest_candidates == 1
+    assert len(telegram_bot.messages) == 1
+    assert "Publisher report with IOCs" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_allows_corroborated_curated_context_at_intermediate_threshold() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 70
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "https://bad.example/dropper",
+            "type": "url",
+            "source": "securelist_blog",
+            "risk_score": 66.0,
+            "severity": "medium",
+            "reference_url": "https://securelist.example/report",
+            "source_title": "Writeup with corroborated infrastructure",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": datetime.now(UTC),
+            "provenance": "writeup",
+            "extraction_mode": "fallback",
+            "corroboration_sources": 2,
+            "attributes": {"provenance": "writeup", "extraction_mode": "fallback"},
+        }
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert len(telegram_bot.messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_discovery() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
@@ -314,6 +391,10 @@ async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_disco
             "mitre_techniques": [],
             "mitre_tactics": [],
             "last_seen": datetime.now(UTC),
+            "provenance": "discovery",
+            "extraction_mode": "fallback",
+            "corroboration_sources": 1,
+            "attributes": {"provenance": "discovery", "extraction_mode": "fallback"},
         }
     ]
 
@@ -608,6 +689,9 @@ async def test_delivery_agent_requires_digest_threshold_for_web_discovery() -> N
             "related_cves": [],
             "external_links": {},
             "last_seen": now,
+            "provenance": "discovery",
+            "extraction_mode": "fallback",
+            "attributes": {"provenance": "discovery", "extraction_mode": "fallback"},
         },
         {
             "value": "stale-discovery.example",
@@ -618,6 +702,9 @@ async def test_delivery_agent_requires_digest_threshold_for_web_discovery() -> N
             "related_cves": [],
             "external_links": {},
             "last_seen": now - timedelta(days=2),
+            "provenance": "discovery",
+            "extraction_mode": "fallback",
+            "attributes": {"provenance": "discovery", "extraction_mode": "fallback"},
         },
     ]
 

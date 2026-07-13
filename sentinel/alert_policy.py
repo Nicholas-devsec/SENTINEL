@@ -8,23 +8,66 @@ from sentinel.config import SentinelSettings
 
 HIGH_SEVERITY_MIN_SCORE = 70.0
 MEDIUM_SEVERITY_MIN_SCORE = 50.0
+CURATED_IMMEDIATE_MIN_SCORE = 60.0
+CORROBORATED_CONTEXT_MIN_SCORE = 65.0
+CURATED_DIGEST_MIN_SCORE = 45.0
 
 
 @dataclass(frozen=True, slots=True)
 class AlertPolicy:
     immediate_min_score: float
+    curated_immediate_min_score: float
+    corroborated_context_min_score: float
     digest_min_score: float
 
+    def _provenance(self, item: dict[str, Any]) -> str:
+        return str(item.get("provenance") or item.get("attributes", {}).get("provenance") or "").strip().lower()
+
+    def _extraction_mode(self, item: dict[str, Any]) -> str:
+        return str(item.get("extraction_mode") or item.get("attributes", {}).get("extraction_mode") or "").strip().lower()
+
+    def _corroboration_sources(self, item: dict[str, Any]) -> int:
+        try:
+            return int(item.get("corroboration_sources", 1) or 1)
+        except (TypeError, ValueError):
+            return 1
+
+    def _is_curated_context(self, item: dict[str, Any]) -> bool:
+        return (
+            self._provenance(item) in {"writeup", "discovery"}
+            and self._extraction_mode(item) == "ioc_section"
+        )
+
+    def _is_corroborated_context(self, item: dict[str, Any]) -> bool:
+        return (
+            self._provenance(item) in {"writeup", "discovery"}
+            and self._corroboration_sources(item) >= 2
+        )
+
     def qualifies_immediate(self, item: dict[str, Any], *, is_web_discovery: bool = False) -> bool:
-        return float(item.get("risk_score", 0.0)) >= self.immediate_min_score
+        score = float(item.get("risk_score", 0.0))
+        if score >= self.immediate_min_score:
+            return True
+        if self._is_curated_context(item) and score >= self.curated_immediate_min_score:
+            return True
+        if self._is_corroborated_context(item) and score >= self.corroborated_context_min_score:
+            return True
+        return False
 
     def qualifies_digest(self, item: dict[str, Any], *, is_web_discovery: bool = False) -> bool:
-        return float(item.get("risk_score", 0.0)) >= self.digest_min_score
+        score = float(item.get("risk_score", 0.0))
+        if score >= self.digest_min_score:
+            return True
+        if self._is_curated_context(item) and score >= CURATED_DIGEST_MIN_SCORE:
+            return True
+        return False
 
 
 def build_alert_policy(settings: SentinelSettings) -> AlertPolicy:
     immediate_min_score = max(float(settings.thresholds.alert_score), HIGH_SEVERITY_MIN_SCORE)
     return AlertPolicy(
         immediate_min_score=immediate_min_score,
+        curated_immediate_min_score=CURATED_IMMEDIATE_MIN_SCORE,
+        corroborated_context_min_score=CORROBORATED_CONTEXT_MIN_SCORE,
         digest_min_score=MEDIUM_SEVERITY_MIN_SCORE,
     )

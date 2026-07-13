@@ -225,7 +225,15 @@ async def test_cli_dispatch_prints_scraper_diagnostics(monkeypatch, tmp_path: Pa
             return ScrapeReport(
                 items=[{"value": "example.test"}],
                 diagnostics=[
-                    SourceScrapeDiagnostic(source="urlhaus", fetched=5, kept=2, stale_dropped=2, balance_dropped=1, error=None),
+                    SourceScrapeDiagnostic(
+                        source="urlhaus",
+                        fetched=5,
+                        pre_balance_kept=3,
+                        kept=2,
+                        stale_dropped=2,
+                        balance_dropped=1,
+                        error=None,
+                    ),
                     SourceScrapeDiagnostic(source="otx", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
                 ],
             )
@@ -239,9 +247,9 @@ async def test_cli_dispatch_prints_scraper_diagnostics(monkeypatch, tmp_path: Pa
     await cli._dispatch("scraper-diagnose")
 
     output = capsys.readouterr().out
-    assert "Scrape diagnostics: kept_total=1 balance_dropped_total=1" in output
-    assert "source=urlhaus fetched=5 kept=2 stale_dropped=2 balance_dropped=1 error=none" in output
-    assert "source=otx fetched=0 kept=0 stale_dropped=0 balance_dropped=0 error=ReadTimeout: timed out" in output
+    assert "Scrape diagnostics: pre_balance_kept_total=3 final_kept_total=1 balance_dropped_total=1" in output
+    assert "source=urlhaus fetched=5 pre_balance_kept=3 kept=2 stale_dropped=2 balance_dropped=1 error=none" in output
+    assert "source=otx fetched=0 pre_balance_kept=0 kept=0 stale_dropped=0 balance_dropped=0 error=ReadTimeout: timed out" in output
 
 
 @pytest.mark.asyncio

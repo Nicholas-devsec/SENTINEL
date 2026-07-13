@@ -872,7 +872,7 @@ async def test_scraper_agent_reports_diagnostics_for_kept_stale_and_errors(setti
 
     assert [item.value for item in report.items] == ["recent.example"]
     assert report.diagnostics == [
-        SourceScrapeDiagnostic(source="working", fetched=2, kept=1, stale_dropped=1, error=None),
+        SourceScrapeDiagnostic(source="working", fetched=2, pre_balance_kept=1, kept=1, stale_dropped=1, error=None),
         SourceScrapeDiagnostic(source="broken", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
     ]
 
@@ -936,10 +936,13 @@ async def test_scraper_agent_caps_dominant_sources_and_records_balance_drop(sett
 
     assert [item.source for item in report.items] == ["urlhaus", "threatfox", "otx", "urlhaus", "threatfox"]
     by_source = {diagnostic.source: diagnostic for diagnostic in report.diagnostics}
+    assert by_source["urlhaus"].pre_balance_kept == 3
     assert by_source["urlhaus"].kept == 2
     assert by_source["urlhaus"].balance_dropped == 1
+    assert by_source["threatfox"].pre_balance_kept == 3
     assert by_source["threatfox"].kept == 2
     assert by_source["threatfox"].balance_dropped == 1
+    assert by_source["otx"].pre_balance_kept == 1
     assert by_source["otx"].kept == 1
     assert by_source["otx"].balance_dropped == 0
 

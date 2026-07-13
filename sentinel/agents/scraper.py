@@ -78,6 +78,7 @@ class RawWriteup:
 class SourceScrapeDiagnostic:
     source: str
     fetched: int = 0
+    pre_balance_kept: int = 0
     kept: int = 0
     stale_dropped: int = 0
     balance_dropped: int = 0
@@ -959,6 +960,7 @@ class ScraperAgent(BaseAgent):
             extracted.extend(self._extract_iocs_from_writeup(writeup))
         diagnostic = SourceScrapeDiagnostic(
             source=adapter.source_name,
+            pre_balance_kept=len(extracted),
             fetched=len(writeups),
             kept=len(extracted),
             stale_dropped=stale,
@@ -1073,7 +1075,7 @@ class ScraperAgent(BaseAgent):
                 else:
                     stale += 1
             self.logger.info(
-                "Scraped %s indicators from %s; kept=%s stale_dropped=%s",
+                "Scraped %s indicators from %s; pre_balance_kept=%s stale_dropped=%s",
                 len(result),
                 adapter.source_name,
                 kept,
@@ -1083,6 +1085,7 @@ class ScraperAgent(BaseAgent):
                 SourceScrapeDiagnostic(
                     source=adapter.source_name,
                     fetched=len(result),
+                    pre_balance_kept=kept,
                     kept=kept,
                     stale_dropped=stale,
                 )
@@ -1114,6 +1117,15 @@ class ScraperAgent(BaseAgent):
             diagnostics.append(diagnostic)
 
         collected = self._rebalance_source_mix(collected, diagnostics)
+        for diagnostic in diagnostics:
+            if diagnostic.balance_dropped > 0:
+                self.logger.info(
+                    "Balanced source mix for %s; pre_balance_kept=%s final_kept=%s balance_dropped=%s",
+                    diagnostic.source,
+                    diagnostic.pre_balance_kept,
+                    diagnostic.kept,
+                    diagnostic.balance_dropped,
+                )
         await self.publish_to_queue(collected)
         return ScrapeReport(items=collected, diagnostics=diagnostics, writeups=all_writeups)
 

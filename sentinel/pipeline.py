@@ -235,7 +235,15 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
                 continue
             payload["id"] = str(row.id)
             payload["last_seen"] = row.last_seen
+            context = context_by_id.get(row.id, {})
             payload["corroboration_sources"] = corroboration.get(row.id, 1)
+            payload["provenance"] = context.get("provenance")
+            payload["extraction_mode"] = context.get("extraction_mode")
+            payload.setdefault("attributes", {})
+            if payload["provenance"] is not None:
+                payload["attributes"]["provenance"] = payload["provenance"]
+            if payload["extraction_mode"] is not None:
+                payload["attributes"]["extraction_mode"] = payload["extraction_mode"]
             delivery_payload.append(payload)
         generated = await agents["rule_generator"].run(delivery_payload)
         await _persist_generated(generated)
@@ -358,6 +366,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                     )
                 ).all()
             )
+            context_by_id = await get_scoring_context(session, [row.id for row in rows])
         items = [
             {
                 "id": str(row.id),
@@ -376,6 +385,13 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                 "mitre_techniques": row.mitre_techniques,
                 "mitre_tactics": row.mitre_tactics,
                 "last_seen": row.last_seen,
+                "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
+                "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
+                "corroboration_sources": (context_by_id.get(row.id) or {}).get("corroboration_sources", 1),
+                "attributes": {
+                    "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
+                    "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
+                },
             }
             for row in rows
         ]

@@ -109,12 +109,19 @@ async def _dispatch(command: str, **kwargs) -> None:
             report = await scraper.run_with_diagnostics()
         finally:
             await scraper.aclose()
+        pre_balance_kept_total = sum(diagnostic.pre_balance_kept for diagnostic in report.diagnostics)
         balance_dropped_total = sum(diagnostic.balance_dropped for diagnostic in report.diagnostics)
-        print(f"Scrape diagnostics: kept_total={len(report.items)} balance_dropped_total={balance_dropped_total}")
+        print(
+            "Scrape diagnostics: "
+            f"pre_balance_kept_total={pre_balance_kept_total} "
+            f"final_kept_total={len(report.items)} "
+            f"balance_dropped_total={balance_dropped_total}"
+        )
         for diagnostic in report.diagnostics:
             error = diagnostic.error or "none"
             print(
-                f"- source={diagnostic.source} fetched={diagnostic.fetched} kept={diagnostic.kept} "
+                f"- source={diagnostic.source} fetched={diagnostic.fetched} "
+                f"pre_balance_kept={diagnostic.pre_balance_kept} kept={diagnostic.kept} "
                 f"stale_dropped={diagnostic.stale_dropped} balance_dropped={diagnostic.balance_dropped} error={error}"
             )
         return

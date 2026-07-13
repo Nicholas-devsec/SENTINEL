@@ -533,6 +533,15 @@ async def test_run_daily_digest_uses_same_digest_policy_as_delivery(monkeypatch)
 
     monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: FakeSession())
 
+    async def fake_scoring_context(session, ioc_ids):
+        return {
+            "ioc-low": {"provenance": "feed", "extraction_mode": "feed", "corroboration_sources": 1},
+            "ioc-discovery": {"provenance": "discovery", "extraction_mode": "fallback", "corroboration_sources": 1},
+            "ioc-high": {"provenance": "feed", "extraction_mode": "feed", "corroboration_sources": 1},
+        }
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
+
     captured: dict[str, list[dict]] = {}
 
     class FakeDeliveryAgent:
@@ -567,8 +576,8 @@ async def test_run_daily_digest_uses_same_digest_policy_as_delivery(monkeypatch)
 
     result = await run_daily_digest(settings)
 
-    assert result == {"count": 2}
-    assert {item["id"] for item in captured["items"]} == {"ioc-high", "ioc-discovery"}
+    assert result == {"count": 1}
+    assert {item["id"] for item in captured["items"]} == {"ioc-high"}
 
 
 @pytest.mark.asyncio
@@ -662,6 +671,15 @@ async def test_run_daily_digest_uses_candidate_pool_before_policy_filter(monkeyp
 
     monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: FakeSession())
 
+    async def fake_scoring_context(session, ioc_ids):
+        return {
+            "ioc-high": {"provenance": "feed", "extraction_mode": "feed", "corroboration_sources": 1},
+            "ioc-medium": {"provenance": "writeup", "extraction_mode": "ioc_section", "corroboration_sources": 1},
+            "ioc-discovery": {"provenance": "discovery", "extraction_mode": "fallback", "corroboration_sources": 1},
+        }
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
+
     captured: dict[str, list[dict]] = {}
 
     class FakeDeliveryAgent:
@@ -701,5 +719,5 @@ async def test_run_daily_digest_uses_candidate_pool_before_policy_filter(monkeyp
 
     result = await run_daily_digest(settings)
 
-    assert result == {"count": 3}
-    assert {item["id"] for item in captured["items"]} == {"ioc-high", "ioc-medium", "ioc-discovery"}
+    assert result == {"count": 2}
+    assert {item["id"] for item in captured["items"]} == {"ioc-high", "ioc-medium"}
