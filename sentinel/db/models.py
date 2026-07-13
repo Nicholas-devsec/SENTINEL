@@ -185,3 +185,13 @@ class ExperimentLog(Base, TimestampMixin):
     eval_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     target: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class ServiceLease(Base, TimestampMixin):
+    __tablename__ = "service_leases"
+
+    lease_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    holder_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

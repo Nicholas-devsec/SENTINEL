@@ -8,15 +8,16 @@ from typing import Any
 from uuid import UUID
 
 from sendgrid import SendGridAPIClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from telegram.error import TelegramError
 from telegram import InlineKeyboardMarkup
 
+from sentinel.alert_policy import build_alert_policy
 from sentinel.agents.base import BaseAgent
 from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
-from sentinel.db.models import FeedbackRecord, IOC
+from sentinel.db.models import FeedbackRecord, IOC, IOCSighting
 from sentinel.delivery.email_digest import render_daily_digest, send_daily_digest
 from sentinel.delivery.telegram_bot import (
     build_feedback_markup,
@@ -177,6 +178,53 @@ class DeliveryAgent(BaseAgent):
         cards.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
         return cards
 
+    def _is_web_discovery_item(self, item: dict[str, Any]) -> bool:
+        return str(item.get("source") or "").strip().lower().startswith("discovery:")
+
+    def _alert_policy(self):
+        return build_alert_policy(self.settings)
+
+    def _select_immediate_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        policy = self._alert_policy()
+        qualified = [
+            item
+            for item in items
+            if policy.qualifies_immediate(item, is_web_discovery=self._is_web_discovery_item(item))
+        ]
+        if not qualified:
+            return []
+
+        qualifying_urls = {
+            str(item.get("reference_url") or "").strip()
+            for item in qualified
+            if str(item.get("reference_url") or "").strip()
+        }
+        selected: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in items:
+            item_id = str(item.get("id") or "")
+            reference_url = str(item.get("reference_url") or "").strip()
+            include = policy.qualifies_immediate(item, is_web_discovery=self._is_web_discovery_item(item))
+            if not include and reference_url and reference_url in qualifying_urls:
+                include = True
+            if not include:
+                continue
+            dedupe_key = item_id or f"{item.get('type')}|{item.get('value')}|{reference_url}"
+            if dedupe_key in seen_ids:
+                continue
+            seen_ids.add(dedupe_key)
+            selected.append(item)
+        return selected
+
+    def _select_digest_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        policy = self._alert_policy()
+        return [
+            item
+            for item in items
+            if self._within_last_24_hours(item.get("last_seen"))
+            and policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
+        ]
+
     async def send_immediate_alert(self, item: dict[str, Any]) -> bool:
         if self.telegram_bot is None:
             return False
@@ -259,13 +307,11 @@ class DeliveryAgent(BaseAgent):
             if getter is not None and isinstance(parsed_ioc_id, UUID):
                 row = await getter(IOC, parsed_ioc_id)
             if existing is not None:
-                existing.verdict = normalized
-                existing.timestamp = datetime.now(UTC)
-                if row is not None:
-                    row.analyst_verdict = normalized
-                    existing.source = row.source
-                await session.commit()
-                return existing
+                if existing.verdict == normalized:
+                    if row is not None:
+                        row.analyst_verdict = normalized
+                    await session.commit()
+                    return existing
             record = FeedbackRecord(
                 ioc_id=parsed_ioc_id,
                 analyst_id=analyst_id,
@@ -280,11 +326,24 @@ class DeliveryAgent(BaseAgent):
             await session.commit()
             return record
 
-    async def handle_callback_query(self, query: Any) -> FeedbackRecord:
+    async def handle_callback_query(self, query: Any) -> FeedbackRecord | bool:
         verdict, ioc_id = query.data.split(":", 1)
         analyst_id = str(query.from_user.id)
         logger.info("Received Telegram feedback callback verdict=%s ioc_id=%s analyst_id=%s", verdict, ioc_id, analyst_id)
         try:
+            if verdict == "remove_ioc":
+                removed = await self.remove_ioc_from_db(ioc_id=ioc_id)
+                await query.answer(
+                    "Removed IOC from database" if removed else "IOC was already absent",
+                    show_alert=True,
+                )
+                logger.info(
+                    "Processed Telegram IOC removal ioc_id=%s analyst_id=%s removed=%s",
+                    ioc_id,
+                    analyst_id,
+                    removed,
+                )
+                return removed
             existing = await self._feedback_exists(
                 ioc_id=ioc_id,
                 analyst_id=analyst_id,
@@ -316,6 +375,29 @@ class DeliveryAgent(BaseAgent):
             except Exception:
                 logger.exception("Failed to acknowledge Telegram feedback error to analyst_id=%s", analyst_id)
             raise
+
+    async def remove_ioc_from_db(self, *, ioc_id: str) -> bool:
+        try:
+            parsed_ioc_id: UUID | str = UUID(str(ioc_id))
+        except ValueError:
+            parsed_ioc_id = ioc_id
+        async with self.session_factory() as session:
+            if hasattr(session, "remove_ioc"):
+                return await session.remove_ioc(parsed_ioc_id)
+            getter = getattr(session, "get", None)
+            row = None
+            if getter is not None and isinstance(parsed_ioc_id, UUID):
+                row = await getter(IOC, parsed_ioc_id)
+            if row is None:
+                result = await session.execute(select(IOC).where(IOC.id == parsed_ioc_id).limit(1))
+                row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.execute(delete(IOCSighting).where(IOCSighting.ioc_id == parsed_ioc_id))
+            await session.execute(delete(FeedbackRecord).where(FeedbackRecord.ioc_id == parsed_ioc_id))
+            await session.delete(row)
+            await session.commit()
+            return True
 
     async def _find_existing_feedback(
         self,
@@ -445,16 +527,10 @@ class DeliveryAgent(BaseAgent):
         items = [self._coerce_ioc(item) for item in scored_iocs]
         immediate: list[dict[str, Any]] = []
         if self.settings.delivery.enable_telegram_immediate_alerts:
-            immediate_candidates = [
-                item for item in items if item["risk_score"] >= self.settings.thresholds.alert_score
-            ]
+            immediate_candidates = self._select_immediate_candidates(items)
             immediate = self._group_immediate_alerts(immediate_candidates)
             immediate = immediate[: self.settings.delivery.telegram_max_alerts_per_run]
-        digest_candidates = [
-            item
-            for item in items
-            if item["risk_score"] >= 50 and self._within_last_24_hours(item.get("last_seen"))
-        ]
+        digest_candidates = self._select_digest_candidates(items)
         sent_immediate = 0
         for item in immediate:
             if await self.send_immediate_alert(item):

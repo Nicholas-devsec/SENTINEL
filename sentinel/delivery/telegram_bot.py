@@ -34,7 +34,10 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Confirm Threat", callback_data=f"confirmed:{ioc_id}"),
                 InlineKeyboardButton("False Positive", callback_data=f"false_positive:{ioc_id}"),
                 InlineKeyboardButton("Needs Review", callback_data=f"needs_review:{ioc_id}"),
-            ]
+            ],
+            [
+                InlineKeyboardButton("Remove IOC", callback_data=f"remove_ioc:{ioc_id}"),
+            ],
         ]
     )
 

@@ -314,6 +314,7 @@ MAX_HEADING_CHARS = 80
 # Structural fallback: this many consecutive indicator-shaped lines counts as
 # an indicator table even without a labelled heading.
 MIN_DENSITY_RUN = 5
+MIN_DENSITY_STRONG_LINES = 2
 
 BARE_DOMAIN_RE = re.compile(
     r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"
@@ -375,11 +376,34 @@ def _cell_indicator_token(cell: str) -> str | None:
     return None
 
 
+def _is_strong_indicator_token(token: str) -> bool:
+    return (
+        MD5_RE.fullmatch(token) is not None
+        or SHA1_RE.fullmatch(token) is not None
+        or SHA256_RE.fullmatch(token) is not None
+        or URL_RE.fullmatch(token) is not None
+        or CVE_RE.fullmatch(token) is not None
+        or IPV4_RE.fullmatch(token) is not None
+    )
+
+
 def _looks_like_indicator_line(line: str) -> bool:
     cells = [cell for cell in line.split("|") if cell.strip()]
     if not cells or len(cells) > 4:
         return False
     return any(_cell_indicator_token(cell) is not None for cell in cells)
+
+
+def _strong_indicator_line_count(lines: list[str]) -> int:
+    strong = 0
+    for line in lines:
+        cells = [cell for cell in line.split("|") if cell.strip()]
+        if any(
+            token is not None and _is_strong_indicator_token(token)
+            for token in (_cell_indicator_token(cell) for cell in cells)
+        ):
+            strong += 1
+    return strong
 
 
 def find_ioc_section(
@@ -428,7 +452,7 @@ def find_ioc_section(
         if _looks_like_indicator_line(line):
             run.append(line)
             continue
-        if len(run) >= MIN_DENSITY_RUN:
+        if len(run) >= MIN_DENSITY_RUN and _strong_indicator_line_count(run) >= MIN_DENSITY_STRONG_LINES:
             return IOCSection(heading="", text="\n".join(run), signal="indicator_density")
         run = []
     return None

@@ -5,7 +5,7 @@ import pytest
 from sentinel.agents.scraper import ScrapeReport
 from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
-from sentinel.pipeline import PipelineResult, build_agents, run_pipeline_once
+from sentinel.pipeline import PipelineResult, build_agents, run_daily_digest, run_pipeline_once
 
 
 class FakeAgent:
@@ -65,7 +65,11 @@ def test_build_agents_requires_mitre_stix_path() -> None:
 @pytest.mark.asyncio
 async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
     scraped = [{"value": "1.1.1.1"}]
-    validated_row = type("Row", (), {"id": "ioc-1", "value": "1.1.1.1", "last_seen": "2026-04-08T12:00:00+00:00"})
+    validated_row = type(
+        "Row",
+        (),
+        {"id": "ioc-1", "value": "1.1.1.1", "type": "ipv4", "source": "feed-a", "last_seen": "2026-04-08T12:00:00+00:00"},
+    )
     enriched = [type("Enriched", (), {"value": "1.1.1.1"})]
     scored = [
         {
@@ -144,10 +148,103 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_pipeline_once_reprocesses_corroborated_iocs(monkeypatch) -> None:
+    corroborated_row = type(
+        "Row",
+        (),
+        {
+            "id": "ioc-2",
+            "value": "repeat.example",
+            "type": "domain",
+            "source": "feed-a",
+            "last_seen": "2026-04-08T12:00:00+00:00",
+        },
+    )
+    enriched = [type("Enriched", (), {"value": "repeat.example", "type": "domain", "source": "feed-a"})]
+    scored = [
+        {
+            "value": "repeat.example",
+            "type": "domain",
+            "source": "feed-a",
+            "risk_score": 72.0,
+            "severity": "high",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+        }
+    ]
+    generated = [type("Generated", (), {"value": "repeat.example", "crowdstrike_response": None, "sigma_rule": "rule"})]
+    delivery = type("DeliveryResult", (), {"immediate_alerts": 1, "digest_candidates": 1})()
+
+    class CorroboratedValidatorAgent(FakeAgent):
+        async def run_with_report(self, *args, **kwargs):
+            self.calls.append({"args": args, "kwargs": kwargs})
+            return ValidationReport(new_iocs=[], corroborated_iocs=[corroborated_row], sightings_recorded=1)
+
+    agents = {
+        "scraper": FakeScraperAgent([{"value": "repeat.example"}]),
+        "validator": CorroboratedValidatorAgent(None),
+        "enricher": FakeAgent(enriched),
+        "scorer": FakeAgent(scored),
+        "rule_generator": FakeAgent(generated),
+        "delivery": FakeAgent(delivery),
+    }
+
+    monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
+    monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=[corroborated_row]))
+    monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=[corroborated_row]))
+    monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
+
+    async def fake_corroboration(session, ioc_ids):
+        return {"ioc-2": 2}
+
+    monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    async def fake_scoring_context(session, ioc_ids):
+        return {"ioc-2": {"provenance": "feed", "corroboration_sources": 2}}
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
+
+    class NullSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: NullSession())
+
+    result = await run_pipeline_once(
+        SentinelSettings.model_validate(
+            {
+                "mitre": {"stix_path": "/tmp/enterprise-attack.json"},
+                "db": {"url": "postgresql+asyncpg://test:test@localhost/test", "redis_url": "redis://localhost:6379/0"},
+            }
+        )
+    )
+
+    assert result.validated == 0
+    assert result.corroborated == 1
+    assert agents["enricher"].calls[0]["args"][0] == [corroborated_row]
+    assert agents["delivery"].calls[0]["args"][0][0]["corroboration_sources"] == 2
+
+
+@pytest.mark.asyncio
 async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatch) -> None:
     validated_rows = [
-        type("Row", (), {"id": "ioc-ip", "value": "8.8.8.8", "last_seen": "2026-04-08T12:00:00+00:00"}),
-        type("Row", (), {"id": "ioc-hash", "value": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "last_seen": "2026-04-08T12:00:00+00:00"}),
+        type("Row", (), {"id": "ioc-ip", "value": "8.8.8.8", "type": "ipv4", "source": "feed-a", "last_seen": "2026-04-08T12:00:00+00:00"}),
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-hash",
+                "value": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                "type": "sha256",
+                "source": "feed-b",
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
     ]
     enriched = [
         type(
@@ -270,3 +367,339 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
     assert hash_payload["vt_detections"] == 15
     assert hash_payload["external_links"]["VirusTotal"].startswith("https://www.virustotal.com/gui/file/")
     assert agents["rule_generator"].calls[0]["args"][0][1]["type"] == "sha256"
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_once_aligns_delivery_payload_by_ioc_identity(monkeypatch) -> None:
+    validated_rows = [
+        type("Row", (), {"id": "ioc-ip", "value": "8.8.8.8", "type": "ipv4", "source": "feed-a", "last_seen": "2026-04-08T12:00:00+00:00"}),
+        type("Row", (), {"id": "ioc-domain", "value": "bad.example", "type": "domain", "source": "feed-b", "last_seen": "2026-04-08T13:00:00+00:00"}),
+    ]
+    scored = [
+        {
+            "value": "8.8.8.8",
+            "type": "ipv4",
+            "source": "feed-a",
+            "risk_score": 72.0,
+            "severity": "high",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+        },
+        {
+            "value": "bad.example",
+            "type": "domain",
+            "source": "feed-b",
+            "risk_score": 91.0,
+            "severity": "critical",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+        },
+    ]
+    persisted_rows_reordered = [validated_rows[1], validated_rows[0]]
+    delivery = type("DeliveryResult", (), {"immediate_alerts": 2, "digest_candidates": 2})()
+    agents = {
+        "scraper": FakeScraperAgent([{"value": "8.8.8.8"}, {"value": "bad.example"}]),
+        "validator": FakeValidatorAgent(validated_rows),
+        "enricher": FakeAgent([type("Enriched", (), {"value": row.value}) for row in validated_rows]),
+        "scorer": FakeAgent(scored),
+        "rule_generator": FakeAgent([]),
+        "delivery": FakeAgent(delivery),
+    }
+
+    monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
+    monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=validated_rows))
+    monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=persisted_rows_reordered))
+    monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
+
+    async def fake_corroboration(session, ioc_ids):
+        return {"ioc-ip": 2, "ioc-domain": 3}
+
+    monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+
+    async def fake_scoring_context(session, ioc_ids):
+        return {}
+
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_scoring_context)
+
+    class NullSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: NullSession())
+
+    await run_pipeline_once(
+        SentinelSettings.model_validate(
+            {
+                "mitre": {"stix_path": "/tmp/enterprise-attack.json"},
+                "db": {"url": "sqlite+aiosqlite:///./data/test.db", "redis_url": "disabled"},
+            }
+        )
+    )
+
+    delivery_payload = agents["delivery"].calls[0]["args"][0]
+    assert [item["id"] for item in delivery_payload] == ["ioc-ip", "ioc-domain"]
+    assert next(item for item in delivery_payload if item["value"] == "8.8.8.8")["corroboration_sources"] == 2
+    assert next(item for item in delivery_payload if item["value"] == "bad.example")["corroboration_sources"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_daily_digest_uses_same_digest_policy_as_delivery(monkeypatch) -> None:
+    rows = [
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-low",
+                "value": "low.example",
+                "type": "domain",
+                "source": "feed-a",
+                "risk_score": 12.0,
+                "severity": "informational",
+                "source_title": None,
+                "reference_url": None,
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-discovery",
+                "value": "publisher.example/mal",
+                "type": "url",
+                "source": "discovery:publisher.example",
+                "risk_score": 5.0,
+                "severity": "informational",
+                "source_title": "Publisher writeup",
+                "reference_url": "https://publisher.example/post",
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-high",
+                "value": "high.example",
+                "type": "domain",
+                "source": "feed-b",
+                "risk_score": 80.0,
+                "severity": "high",
+                "source_title": None,
+                "reference_url": None,
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+    ]
+
+    monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
+
+    class ScalarResult:
+        def all(self):
+            return rows
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def scalars(self, query):
+            return ScalarResult()
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: FakeSession())
+
+    captured: dict[str, list[dict]] = {}
+
+    class FakeDeliveryAgent:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def daily_digest(self, items):
+            captured["items"] = items
+            return {"count": len(items)}
+
+        async def aclose(self):
+            return None
+
+        def _select_digest_candidates(self, items):
+            from sentinel.agents.delivery import DeliveryAgent
+
+            agent = DeliveryAgent.__new__(DeliveryAgent)
+            agent.settings = settings
+            agent._within_last_24_hours = lambda value: True
+            agent._is_web_discovery_item = DeliveryAgent._is_web_discovery_item.__get__(agent, DeliveryAgent)
+            agent._alert_policy = DeliveryAgent._alert_policy.__get__(agent, DeliveryAgent)
+            return DeliveryAgent._select_digest_candidates(agent, items)
+
+    settings = SentinelSettings.model_validate(
+        {
+            "delivery": {"telegram_token": "token", "telegram_chat_id": "chat"},
+            "db": {"url": "sqlite+aiosqlite:///./data/test.db", "redis_url": "disabled"},
+        }
+    )
+    monkeypatch.setattr("sentinel.pipeline.DeliveryAgent", FakeDeliveryAgent)
+    monkeypatch.setattr("sentinel.pipeline._build_telegram_bot", lambda settings: None)
+
+    result = await run_daily_digest(settings)
+
+    assert result == {"count": 2}
+    assert {item["id"] for item in captured["items"]} == {"ioc-high", "ioc-discovery"}
+
+
+@pytest.mark.asyncio
+async def test_run_daily_digest_uses_candidate_pool_before_policy_filter(monkeypatch) -> None:
+    rows = [
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-high",
+                "value": "high.example",
+                "type": "domain",
+                "source": "feed-a",
+                "risk_score": 90.0,
+                "severity": "critical",
+                "source_title": None,
+                "reference_url": None,
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-medium",
+                "value": "medium.example",
+                "type": "domain",
+                "source": "feed-b",
+                "risk_score": 60.0,
+                "severity": "medium",
+                "source_title": None,
+                "reference_url": None,
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+        type(
+            "Row",
+            (),
+            {
+                "id": "ioc-discovery",
+                "value": "publisher.example/mal",
+                "type": "url",
+                "source": "discovery:publisher.example",
+                "risk_score": 5.0,
+                "severity": "informational",
+                "source_title": "Publisher writeup",
+                "reference_url": "https://publisher.example/post",
+                "related_cves": [],
+                "vt_detections": None,
+                "abuse_confidence": None,
+                "shodan_ports": [],
+                "mitre_techniques": [],
+                "mitre_tactics": [],
+                "last_seen": "2026-04-08T12:00:00+00:00",
+            },
+        ),
+    ]
+
+    monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
+
+    class ScalarResult:
+        def __init__(self, selected_rows):
+            self._rows = selected_rows
+
+        def all(self):
+            return self._rows
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def scalars(self, query):
+            limit_clause = getattr(query, "_limit_clause", None)
+            limit = int(limit_clause.value) if limit_clause is not None else len(rows)
+            return ScalarResult(rows[:limit])
+
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: FakeSession())
+
+    captured: dict[str, list[dict]] = {}
+
+    class FakeDeliveryAgent:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def daily_digest(self, items):
+            captured["items"] = items
+            return {"count": len(items)}
+
+        async def aclose(self):
+            return None
+
+        def _select_digest_candidates(self, items):
+            from sentinel.agents.delivery import DeliveryAgent
+
+            agent = DeliveryAgent.__new__(DeliveryAgent)
+            agent.settings = settings
+            agent._within_last_24_hours = lambda value: True
+            agent._is_web_discovery_item = DeliveryAgent._is_web_discovery_item.__get__(agent, DeliveryAgent)
+            agent._alert_policy = DeliveryAgent._alert_policy.__get__(agent, DeliveryAgent)
+            return DeliveryAgent._select_digest_candidates(agent, items)
+
+    settings = SentinelSettings.model_validate(
+        {
+            "delivery": {
+                "telegram_token": "token",
+                "telegram_chat_id": "chat",
+                "telegram_daily_digest_limit": 1,
+                "telegram_digest_candidate_pool_size": 3,
+            },
+            "db": {"url": "sqlite+aiosqlite:///./data/test.db", "redis_url": "disabled"},
+        }
+    )
+    monkeypatch.setattr("sentinel.pipeline.DeliveryAgent", FakeDeliveryAgent)
+    monkeypatch.setattr("sentinel.pipeline._build_telegram_bot", lambda settings: None)
+
+    result = await run_daily_digest(settings)
+
+    assert result == {"count": 3}
+    assert {item["id"] for item in captured["items"]} == {"ioc-high", "ioc-medium", "ioc-discovery"}

@@ -58,12 +58,20 @@ class WriteupSearchSettings(BaseModel):
     fetch_budget_seconds: int = 60
 
 
+class SourceMixSettings(BaseModel):
+    enabled: bool = True
+    max_items_per_source: int = 150
+
+
 class SourceSettings(BaseModel):
     otx_api_key: str = "${OTX_API_KEY}"
     threatfox_api_key: str = "${THREATFOX_API_KEY}"
+    malwarebazaar_api_key: str = "${MALWAREBAZAAR_API_KEY}"
+    phishtank_app_key: str = "${PHISHTANK_APP_KEY}"
     max_item_age_hours: int = 24
     writeup_max_item_age_hours: int = 72
     http_timeout_seconds: int = 60
+    mix: SourceMixSettings = Field(default_factory=SourceMixSettings)
     writeup_search: WriteupSearchSettings = Field(default_factory=WriteupSearchSettings)
     feeds: list[FeedConfig] = Field(default_factory=list)
 
@@ -132,6 +140,9 @@ class EnrichmentSettings(BaseModel):
     shodan_key: str = "${SHODAN_API_KEY}"
     abuseipdb_key: str = "${ABUSEIPDB_API_KEY}"
     enable_whois: bool = False
+    provider_timeout_seconds: int = 20
+    batch_size: int = 50
+    max_iocs_per_run: int = 250
     weights: WeightSettings = Field(default_factory=WeightSettings)
 
 
@@ -148,6 +159,7 @@ class DeliverySettings(BaseModel):
     enable_telegram_immediate_alerts: bool = True
     telegram_max_alerts_per_run: int = 3
     telegram_daily_digest_limit: int = 10
+    telegram_digest_candidate_pool_size: int = 250
     enable_email: bool = False
     sendgrid_key: str = "${SENDGRID_API_KEY}"
     email_from: str = "sentinel@yourdomain.com"
@@ -172,12 +184,25 @@ class MitreSettings(BaseModel):
 class DatabaseSettings(BaseModel):
     url: str = "${DATABASE_URL}"
     redis_url: str = "${REDIS_URL}"
+    pool_pre_ping: bool = True
+    pool_recycle_seconds: int = 1800
+    pool_size: int = 10
+    max_overflow: int = 20
 
 
 class GitSettings(BaseModel):
     skills_repo_path: str = "./skills"
     author_name: str = "SENTINEL Learner"
     author_email: str = "sentinel@bot"
+
+
+class KarpathySettings(BaseModel):
+    min_keep_delta: float = 0.01
+    max_false_positive_increase: int = 0
+    max_true_positive_drop: int = 0
+    lease_ttl_seconds: int = 1800
+    replay_window_hours: int = 14 * 24
+    status_history_limit: int = 5
 
 
 class SentinelSettings(BaseModel):
@@ -193,6 +218,7 @@ class SentinelSettings(BaseModel):
     mitre: MitreSettings = Field(default_factory=MitreSettings)
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     git: GitSettings = Field(default_factory=GitSettings)
+    karpathy: KarpathySettings = Field(default_factory=KarpathySettings)
 
 
 def _is_missing_secret(value: str | None) -> bool:
@@ -217,6 +243,12 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
     commands = {command}
     if command == "scheduler":
         commands.update({"run-once", "telegram-listen"})
+    if command == "cron-run":
+        commands.add("run-once")
+    if command == "karpathy-service":
+        commands.add("karpathy-run")
+    if command == "karpathy-status":
+        commands.add("karpathy-run")
 
     if commands & {"run-once", "daily-digest", "scheduler", "telegram-listen", "send-real-samples", "send-discovery-samples"}:
         _validate_required_value("DATABASE_URL", settings.db.url)

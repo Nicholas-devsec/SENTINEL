@@ -6,8 +6,9 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
+from sentinel.alert_policy import build_alert_policy
 from sentinel.db.models import FeedbackRecord, IOC
-from sentinel.loops.karpathy_loop import ExperimentProposal, ThreatIntelLoop
+from sentinel.loops.karpathy_loop import ExperimentProposal, KeepDecision, ThreatIntelLoop
 from sentinel.loops.replay_eval import ReplayEvaluator
 
 
@@ -59,16 +60,16 @@ class SourceQualityLoop(ThreatIntelLoop):
             else:
                 cutoff = self.now_fn() - __import__("datetime").timedelta(hours=48)
                 query = (
-                    select(FeedbackRecord, IOC.source)
+                    select(FeedbackRecord.verdict, FeedbackRecord.source, IOC.source)
                     .join(IOC, FeedbackRecord.ioc_id == IOC.id)
                     .where(FeedbackRecord.timestamp >= cutoff)
-                    .where(IOC.source == self.target_source)
                     .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
                 )
                 rows = [
-                    {"verdict": feedback.verdict, "source": source}
-                    for feedback, source in (await session.execute(query)).all()
+                    {"verdict": verdict, "source": (feedback_source or ioc_source)}
+                    for verdict, feedback_source, ioc_source in (await session.execute(query)).all()
                 ]
+                rows = [row for row in rows if row.get("source") == self.target_source]
         confirmed = sum(1 for row in rows if row["verdict"] == "confirmed")
         false_positive = sum(1 for row in rows if row["verdict"] == "false_positive")
         stats = SourceFeedbackStats(
@@ -93,8 +94,9 @@ class SourceQualityLoop(ThreatIntelLoop):
         return ReplayEvaluator(
             session_factory=self.session_factory,
             skill_path=self.skill_path,
-            alert_threshold=float(self.settings.thresholds.alert_score),
+            alert_policy=build_alert_policy(self.settings),
             trust_weight=float(self.settings.enrichment.weights.source_trust),
+            window_hours=int(self.settings.karpathy.replay_window_hours),
             now_fn=self.now_fn,
         )
 
@@ -177,3 +179,58 @@ class SourceQualityLoop(ThreatIntelLoop):
             raise ValueError(f"Trust score for source '{target}' not found in {self.skill_path}")
         self.skill_path.write_text(updated, encoding="utf-8")
         return original
+
+    def decide_keep(
+        self,
+        *,
+        proposal: ExperimentProposal,
+        metric_before: float,
+        metric_after: float,
+        eval_details_before: dict | None,
+        eval_details_after: dict | None,
+    ) -> KeepDecision:
+        base = super().decide_keep(
+            proposal=proposal,
+            metric_before=metric_before,
+            metric_after=metric_after,
+            eval_details_before=eval_details_before,
+            eval_details_after=eval_details_after,
+        )
+        if not base.kept:
+            return base
+
+        before_confusion = (eval_details_before or {}).get("confusion", {})
+        after_confusion = (eval_details_after or {}).get("confusion", {})
+        true_positive_drop = int(before_confusion.get("tp", 0)) - int(after_confusion.get("tp", 0))
+        false_positive_increase = int(after_confusion.get("fp", 0)) - int(before_confusion.get("fp", 0))
+        max_tp_drop = int(self.settings.karpathy.max_true_positive_drop)
+        max_fp_increase = int(self.settings.karpathy.max_false_positive_increase)
+        if true_positive_drop > max_tp_drop:
+            return KeepDecision(
+                kept=False,
+                reason=f"true_positive_drop_exceeded:{true_positive_drop}>{max_tp_drop}",
+                details={
+                    "true_positive_drop": true_positive_drop,
+                    "max_true_positive_drop": max_tp_drop,
+                },
+            )
+        if false_positive_increase > max_fp_increase:
+            return KeepDecision(
+                kept=False,
+                reason=f"false_positive_increase_exceeded:{false_positive_increase}>{max_fp_increase}",
+                details={
+                    "false_positive_increase": false_positive_increase,
+                    "max_false_positive_increase": max_fp_increase,
+                },
+            )
+        return KeepDecision(
+            kept=True,
+            reason="delta_and_replay_guardrails_passed",
+            details={
+                **(base.details or {}),
+                "true_positive_drop": true_positive_drop,
+                "max_true_positive_drop": max_tp_drop,
+                "false_positive_increase": false_positive_increase,
+                "max_false_positive_increase": max_fp_increase,
+            },
+        )

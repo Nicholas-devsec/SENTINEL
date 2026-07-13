@@ -11,12 +11,15 @@ from sentinel.delivery.telegram_bot import fetch_chat_candidates, format_chat_ca
 from sentinel.logging_utils import configure_logging
 from sentinel.pipeline import _build_telegram_bot, rescore_existing_iocs, run_daily_digest, run_pipeline_once
 from sentinel.runtime import (
+    format_karpathy_status,
     format_karpathy_readiness,
     format_karpathy_report,
+    inspect_karpathy_status,
     load_real_sample_iocs,
     run_live_karpathy_loop,
     run_shadow_karpathy_validation,
 )
+from sentinel.scheduler.cron import karpathy_main as karpathy_scheduler_main
 from sentinel.scheduler.cron import main as scheduler_main
 
 
@@ -24,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run SENTINEL MVP commands")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("run-once", help="Run the full live MVP pipeline once")
+    subcommands.add_parser("cron-run", help="Cron-friendly one-shot pipeline: scrape -> store -> enrich -> Telegram")
     subcommands.add_parser("scraper-diagnose", help="Fetch live sources and print per-feed scrape diagnostics")
     subcommands.add_parser("daily-digest", help="Send the daily digest for the last 24 hours")
     subcommands.add_parser(
@@ -31,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-level every stored IOC under current scoring weights + context (no API calls)",
     )
     subcommands.add_parser("scheduler", help="Run the APScheduler service loop")
+    subcommands.add_parser("karpathy-service", help="Run only the long-lived scheduled Karpathy loop service")
     subcommands.add_parser("telegram-listen", help="Start Telegram polling to capture analyst callback feedback")
     telegram_parser = subcommands.add_parser(
         "telegram-chat-id",
@@ -43,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     karpathy_parser.add_argument("--loop", choices=["source", "scoring", "detection"], default="source")
     karpathy_parser.add_argument("--max-experiments", type=int, default=None)
+    karpathy_status_parser = subcommands.add_parser(
+        "karpathy-status",
+        help="Inspect Karpathy readiness, active lease, and recent experiment history",
+    )
+    karpathy_status_parser.add_argument("--loop", choices=["source", "scoring", "detection"], default="source")
+    karpathy_status_parser.add_argument("--limit", type=int, default=None)
     validation_parser = subcommands.add_parser(
         "karpathy-validate",
         help="Run a shadow-mode Karpathy validation scenario without touching the live repo",
@@ -88,7 +99,7 @@ async def _dispatch(command: str, **kwargs) -> None:
     settings = get_settings()
     if command != "scraper-diagnose":
         validate_runtime_settings(settings, command=command)
-    if command == "run-once":
+    if command in {"run-once", "cron-run"}:
         result = await run_pipeline_once(settings=settings)
         print(result)
         return
@@ -98,12 +109,13 @@ async def _dispatch(command: str, **kwargs) -> None:
             report = await scraper.run_with_diagnostics()
         finally:
             await scraper.aclose()
-        print(f"Scrape diagnostics: kept_total={len(report.items)}")
+        balance_dropped_total = sum(diagnostic.balance_dropped for diagnostic in report.diagnostics)
+        print(f"Scrape diagnostics: kept_total={len(report.items)} balance_dropped_total={balance_dropped_total}")
         for diagnostic in report.diagnostics:
             error = diagnostic.error or "none"
             print(
                 f"- source={diagnostic.source} fetched={diagnostic.fetched} kept={diagnostic.kept} "
-                f"stale_dropped={diagnostic.stale_dropped} error={error}"
+                f"stale_dropped={diagnostic.stale_dropped} balance_dropped={diagnostic.balance_dropped} error={error}"
             )
         return
     if command == "daily-digest":
@@ -121,6 +133,9 @@ async def _dispatch(command: str, **kwargs) -> None:
         return
     if command == "scheduler":
         await scheduler_main()
+        return
+    if command == "karpathy-service":
+        await karpathy_scheduler_main()
         return
     if command == "telegram-listen":
         await run_telegram_listener(settings=settings)
@@ -142,6 +157,14 @@ async def _dispatch(command: str, **kwargs) -> None:
             return
         print()
         print(format_karpathy_report(report))
+        return
+    if command == "karpathy-status":
+        report = await inspect_karpathy_status(
+            loop_type=str(kwargs.get("loop", "source")),
+            settings=settings,
+            limit=kwargs.get("limit"),
+        )
+        print(format_karpathy_status(report))
         return
     if command == "karpathy-validate":
         report = await run_shadow_karpathy_validation(

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -26,6 +28,9 @@ WEIGHT_LINE = re.compile(r"^- ([a-zA-Z0-9_:-]+):\s*([0-9]*\.?[0-9]+)\s*$")
 CONTEXT_CURATED = 1.0
 CONTEXT_WRITEUP = 0.6
 CONTEXT_FEED = 0.0
+
+
+logger = logging.getLogger(__name__)
 
 
 def context_evidence_score(provenance: str | None, extraction_mode: str | None) -> float:
@@ -88,6 +93,7 @@ class EnrichmentAgent(BaseAgent):
         limits = semaphore_limits or {"virustotal": 4, "shodan": 4, "abuseipdb": 8, "whois": 8}
         self.semaphores = {name: asyncio.Semaphore(limit) for name, limit in limits.items()}
         self._owns_abuse_client = abuseipdb_client is None
+        self.provider_timeout_seconds = float(self.settings.enrichment.provider_timeout_seconds)
 
     def get_scoring_weights(self) -> dict[str, float]:
         section_match = WEIGHTS_SECTION.search(self.skill_prompt)
@@ -144,7 +150,7 @@ class EnrichmentAgent(BaseAgent):
 
     async def _bounded(self, semaphore_name: str, coro) -> Any:
         async with self.semaphores[semaphore_name]:
-            return await coro
+            return await asyncio.wait_for(coro, timeout=self.provider_timeout_seconds)
 
     async def _fetch_virustotal(self, ioc: dict[str, Any]) -> dict[str, Any]:
         return await self._bounded("virustotal", self.virustotal_client.lookup_ioc(ioc["type"], ioc["value"]))
@@ -260,6 +266,52 @@ class EnrichmentAgent(BaseAgent):
         sources = int(context.get("corroboration_sources") or 1)
         return context_score, sources
 
+    @staticmethod
+    def _chunked(items: list[IOC | dict[str, Any]], batch_size: int) -> Iterable[list[IOC | dict[str, Any]]]:
+        for start in range(0, len(items), batch_size):
+            yield items[start : start + batch_size]
+
+    async def _gather_provider_results(self, tasks: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+        task_map = {name: asyncio.create_task(task) for name, task in tasks.items()}
+        provider_results: dict[str, Any] = {}
+        provider_errors: dict[str, str] = {}
+        try:
+            results = await asyncio.gather(*task_map.values(), return_exceptions=True)
+        except asyncio.CancelledError:
+            for task in task_map.values():
+                task.cancel()
+            await asyncio.gather(*task_map.values(), return_exceptions=True)
+            raise
+        for name, result in zip(task_map.keys(), results, strict=True):
+            if isinstance(result, Exception):
+                provider_errors[name] = str(result)
+            else:
+                provider_results[name] = result
+        return provider_results, provider_errors
+
+    async def _run_batch(
+        self,
+        batch: list[IOC | dict[str, Any]],
+        *,
+        weights: dict[str, float],
+        context_by_value: dict[str, dict[str, Any]],
+    ) -> list[EnrichedIOC]:
+        def context_for(ioc: IOC | dict[str, Any]) -> dict[str, Any] | None:
+            value = ioc.value if isinstance(ioc, IOC) else ioc.get("value")
+            return context_by_value.get(value)
+
+        tasks = [
+            asyncio.create_task(self.enrich_one(ioc, weights=weights, context=context_for(ioc)))
+            for ioc in batch
+        ]
+        try:
+            return await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
     async def enrich_one(
         self,
         item: IOC | dict[str, Any],
@@ -277,14 +329,7 @@ class EnrichmentAgent(BaseAgent):
             "abuseipdb": self._fetch_abuseipdb(ioc),
             "whois": self._fetch_whois(ioc),
         }
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        provider_results: dict[str, Any] = {}
-        provider_errors: dict[str, str] = {}
-        for name, result in zip(tasks.keys(), results, strict=True):
-            if isinstance(result, Exception):
-                provider_errors[name] = str(result)
-            else:
-                provider_results[name] = result
+        provider_results, provider_errors = await self._gather_provider_results(tasks)
 
         vt_detections, vt_ratio = self._extract_vt_metrics(provider_results.get("virustotal"))
         abuse_confidence = self._extract_abuse_confidence(provider_results.get("abuseipdb"))
@@ -366,20 +411,49 @@ class EnrichmentAgent(BaseAgent):
         weights = self.get_scoring_weights()
         context_by_value = context_by_value or {}
         started = time.perf_counter()
-
-        def context_for(ioc: IOC | dict[str, Any]) -> dict[str, Any] | None:
-            value = ioc.value if isinstance(ioc, IOC) else ioc.get("value")
-            return context_by_value.get(value)
-
-        enriched = await asyncio.gather(
-            *(self.enrich_one(ioc, weights=weights, context=context_for(ioc)) for ioc in validated_iocs)
-        )
+        max_iocs = max(1, int(self.settings.enrichment.max_iocs_per_run))
+        batch_size = max(1, int(self.settings.enrichment.batch_size))
+        selected_iocs = list(validated_iocs[:max_iocs])
+        skipped = max(0, len(validated_iocs) - len(selected_iocs))
+        if skipped:
+            self.logger.warning(
+                "Enrichment budget capped this run at %s IOC(s); skipped=%s",
+                len(selected_iocs),
+                skipped,
+            )
+        enriched: list[EnrichedIOC] = []
+        try:
+            for batch_number, batch in enumerate(self._chunked(selected_iocs, batch_size), start=1):
+                batch_started = time.perf_counter()
+                enriched.extend(
+                    await self._run_batch(
+                        batch,
+                        weights=weights,
+                        context_by_value=context_by_value,
+                    )
+                )
+                self.logger.info(
+                    "Enrichment batch %s completed for %s IOC(s) in %.2fs",
+                    batch_number,
+                    len(batch),
+                    time.perf_counter() - batch_started,
+                )
+        except asyncio.CancelledError:
+            self.logger.warning(
+                "Enrichment cancelled after %.2fs; completed=%s IOC(s)",
+                time.perf_counter() - started,
+                len(enriched),
+            )
+            raise
         elapsed = time.perf_counter() - started
         self.logger.info(
-            "Enrichment completed for %s IOC(s) in %.2fs (whois=%s)",
+            "Enrichment completed for %s/%s IOC(s) in %.2fs (whois=%s skipped=%s batch_size=%s)",
+            len(enriched),
             len(validated_iocs),
             elapsed,
             "enabled" if self.whois_client is not None else "disabled",
+            skipped,
+            batch_size,
         )
         return enriched
 

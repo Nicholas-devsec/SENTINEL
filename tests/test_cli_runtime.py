@@ -138,6 +138,70 @@ async def test_cli_dispatch_starts_telegram_listener(monkeypatch, tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_cli_dispatch_runs_cron_run_pipeline_once(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = build_settings(tmp_path)
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli,
+        "run_pipeline_once",
+        lambda **kwargs: __import__("asyncio").sleep(0, result={"scraped": 10, "alerts": 2}),
+    )
+
+    await cli._dispatch("cron-run")
+
+    assert "{'scraped': 10, 'alerts': 2}" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_cli_dispatch_starts_karpathy_service(monkeypatch, tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    seen: list[str] = []
+
+    async def fake_karpathy_scheduler_main():
+        seen.append("started")
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "karpathy_scheduler_main", fake_karpathy_scheduler_main)
+
+    await cli._dispatch("karpathy-service")
+
+    assert seen == ["started"]
+
+
+@pytest.mark.asyncio
+async def test_cli_dispatch_prints_karpathy_status(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = build_settings(tmp_path)
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli,
+        "inspect_karpathy_status",
+        lambda **kwargs: __import__("asyncio").sleep(
+            0,
+            result=SimpleNamespace(
+                readiness=SimpleNamespace(
+                    loop_type="source",
+                    ready=True,
+                    skill_path="/tmp/skills/sources/SKILL.md",
+                    changelog_path="/tmp/skills/CHANGELOG.md",
+                    checks=[],
+                    counts={},
+                    current_branch="main",
+                    target_source="threatfox",
+                ),
+                active_lease={"lease_name": "karpathy:source", "holder_id": "host:lease", "expires_at": "2026-07-12T10:00:00+00:00"},
+                recent_runs=[],
+            ),
+        ),
+    )
+    monkeypatch.setattr(cli, "format_karpathy_status", lambda report: "Karpathy status rendered")
+
+    await cli._dispatch("karpathy-status", loop="source")
+
+    assert "Karpathy status rendered" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
 async def test_cli_dispatch_reports_when_no_real_samples_found(monkeypatch, tmp_path: Path, capsys) -> None:
     settings = build_settings(tmp_path)
 
@@ -161,7 +225,7 @@ async def test_cli_dispatch_prints_scraper_diagnostics(monkeypatch, tmp_path: Pa
             return ScrapeReport(
                 items=[{"value": "example.test"}],
                 diagnostics=[
-                    SourceScrapeDiagnostic(source="urlhaus", fetched=5, kept=2, stale_dropped=3, error=None),
+                    SourceScrapeDiagnostic(source="urlhaus", fetched=5, kept=2, stale_dropped=2, balance_dropped=1, error=None),
                     SourceScrapeDiagnostic(source="otx", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
                 ],
             )
@@ -175,9 +239,9 @@ async def test_cli_dispatch_prints_scraper_diagnostics(monkeypatch, tmp_path: Pa
     await cli._dispatch("scraper-diagnose")
 
     output = capsys.readouterr().out
-    assert "Scrape diagnostics: kept_total=1" in output
-    assert "source=urlhaus fetched=5 kept=2 stale_dropped=3 error=none" in output
-    assert "source=otx fetched=0 kept=0 stale_dropped=0 error=ReadTimeout: timed out" in output
+    assert "Scrape diagnostics: kept_total=1 balance_dropped_total=1" in output
+    assert "source=urlhaus fetched=5 kept=2 stale_dropped=2 balance_dropped=1 error=none" in output
+    assert "source=otx fetched=0 kept=0 stale_dropped=0 balance_dropped=0 error=ReadTimeout: timed out" in output
 
 
 @pytest.mark.asyncio

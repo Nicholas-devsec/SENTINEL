@@ -4,8 +4,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import json
+import socket
 import subprocess
 import tempfile
+import uuid
 from typing import Any, Sequence
 
 from git import GitCommandError, InvalidGitRepositoryError, Repo
@@ -13,7 +15,7 @@ from sqlalchemy import case, func, select
 
 from sentinel.agents.scorer import build_external_links_for_ioc
 from sentinel.config import SentinelSettings
-from sentinel.db.models import FeedbackRecord, IOC, IOCSighting, SourceMaterial
+from sentinel.db.models import ExperimentLog, FeedbackRecord, IOC, IOCSighting, ServiceLease, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory
 from sentinel.loops.detection_loop import DetectionEffectivenessLoop
 from sentinel.loops.karpathy_loop import ExperimentOutcome
@@ -79,6 +81,28 @@ class KarpathyRunReport:
     feedback_count: int | None = None
     trust_before: float | None = None
     trust_after: float | None = None
+    merged_commit_hashes: list[str] = field(default_factory=list)
+    cleanup_status: str | None = None
+    lock_status: str | None = None
+
+
+@dataclass(slots=True)
+class KarpathyStatusEntry:
+    loop_type: str
+    experiment_number: int
+    kept: bool
+    delta: float
+    timestamp: datetime
+    target: str | None
+    eval_mode: str | None
+    details: dict[str, Any]
+
+
+@dataclass(slots=True)
+class KarpathyStatusReport:
+    readiness: KarpathyReadinessReport
+    active_lease: dict[str, Any] | None
+    recent_runs: list[KarpathyStatusEntry]
 
 
 class _ScriptedProvider:
@@ -196,6 +220,7 @@ def format_karpathy_outcomes(outcomes: list[Any]) -> str:
         lines.append(
             f"- experiment={payload['experiment_number']} kept={str(payload['kept']).lower()} "
             f"delta={payload['delta']:.4f} hypothesis={payload['hypothesis']}"
+            + (f" keep_reason={payload.get('keep_reason')}" if payload.get("keep_reason") else "")
         )
     return "\n".join(lines)
 
@@ -227,6 +252,12 @@ def format_karpathy_report(report: KarpathyRunReport) -> str:
             f"- commit_hashes={', '.join(report.commit_hashes) if report.commit_hashes else 'none'}",
         ]
     )
+    if getattr(report, "merged_commit_hashes", None):
+        lines.append(f"- merged_commit_hashes={', '.join(report.merged_commit_hashes)}")
+    if getattr(report, "cleanup_status", None):
+        lines.append(f"- cleanup={report.cleanup_status}")
+    if getattr(report, "lock_status", None):
+        lines.append(f"- lock_status={report.lock_status}")
     if getattr(report, "error", None):
         lines.append(f"- error={report.error}")
     if getattr(report, "outcomes", None):
@@ -249,6 +280,30 @@ def format_karpathy_readiness(report: KarpathyReadinessReport) -> str:
         counts = ", ".join(f"{key}={value}" for key, value in sorted(report.counts.items()))
         lines.append(f"- counts: {counts}")
     lines.append(f"- ready={'yes' if report.ready else 'no'}")
+    return "\n".join(lines)
+
+
+def format_karpathy_status(report: KarpathyStatusReport) -> str:
+    lines = [format_karpathy_readiness(report.readiness)]
+    if report.active_lease is not None:
+        lines.append(
+            "Active lease: "
+            f"name={report.active_lease['lease_name']} holder={report.active_lease['holder_id']} "
+            f"expires_at={report.active_lease['expires_at']}"
+        )
+    else:
+        lines.append("Active lease: none")
+    if not report.recent_runs:
+        lines.append("Recent runs: none")
+        return "\n".join(lines)
+    lines.append("Recent runs:")
+    for entry in report.recent_runs:
+        keep_reason = str(entry.details.get("keep_decision", {}).get("reason") or "n/a")
+        lines.append(
+            f"- {entry.timestamp.isoformat()} loop={entry.loop_type} experiment={entry.experiment_number} "
+            f"kept={str(entry.kept).lower()} delta={entry.delta:.4f} target={entry.target or 'n/a'} "
+            f"mode={entry.eval_mode or 'n/a'} reason={keep_reason}"
+        )
     return "\n".join(lines)
 
 
@@ -529,15 +584,15 @@ async def inspect_live_karpathy_readiness(
                 feedback_rows = [row for row in session.feedback_rows if row["verdict"] in {"confirmed", "false_positive"}]
             else:
                 query = (
-                    select(FeedbackRecord.verdict, IOC.source)
+                    select(FeedbackRecord.verdict, FeedbackRecord.source, IOC.source)
                     .select_from(FeedbackRecord)
                     .join(IOC, IOC.id == FeedbackRecord.ioc_id)
                     .where(FeedbackRecord.timestamp >= cutoff)
                     .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
                 )
                 feedback_rows = [
-                    {"verdict": verdict, "source": source}
-                    for verdict, source in (await session.execute(query)).all()
+                    {"verdict": verdict, "source": (feedback_source or ioc_source)}
+                    for verdict, feedback_source, ioc_source in (await session.execute(query)).all()
                 ]
             counts["feedback_rows"] = len(feedback_rows)
             counts["distinct_sources"] = len({row.get("source", "unknown") for row in feedback_rows})
@@ -611,6 +666,146 @@ async def inspect_live_karpathy_readiness(
     )
 
 
+def _karpathy_lease_name(loop_type: str) -> str:
+    return f"karpathy:{loop_type}"
+
+
+async def _try_acquire_karpathy_lease(
+    *,
+    loop_type: str,
+    settings: SentinelSettings,
+    session_factory: Any | None = None,
+    now_fn: Any | None = None,
+) -> tuple[bool, str]:
+    active_session_factory = session_factory or AsyncSessionFactory
+    now_provider = now_fn or (lambda: datetime.now(UTC))
+    holder_id = f"{socket.gethostname()}:{uuid.uuid4()}"
+    lease_name = _karpathy_lease_name(loop_type)
+    expires_at = now_provider() + timedelta(seconds=int(settings.karpathy.lease_ttl_seconds))
+    async with active_session_factory() as session:
+        if hasattr(session, "leases"):
+            current = session.leases.get(lease_name)
+            if current is not None and current["expires_at"] > now_provider():
+                return False, str(current["holder_id"])
+            session.leases[lease_name] = {
+                "lease_name": lease_name,
+                "holder_id": holder_id,
+                "acquired_at": now_provider(),
+                "expires_at": expires_at,
+            }
+            return True, holder_id
+        row = await session.get(ServiceLease, lease_name)
+        if row is not None and row.expires_at > now_provider():
+            return False, row.holder_id
+        if row is None:
+            row = ServiceLease(
+                lease_name=lease_name,
+                holder_id=holder_id,
+                acquired_at=now_provider(),
+                expires_at=expires_at,
+                metadata_json={"loop_type": loop_type},
+            )
+            session.add(row)
+        else:
+            row.holder_id = holder_id
+            row.acquired_at = now_provider()
+            row.expires_at = expires_at
+            row.metadata_json = {"loop_type": loop_type}
+        await session.commit()
+        return True, holder_id
+
+
+async def _release_karpathy_lease(
+    *,
+    loop_type: str,
+    holder_id: str,
+    session_factory: Any | None = None,
+) -> None:
+    active_session_factory = session_factory or AsyncSessionFactory
+    lease_name = _karpathy_lease_name(loop_type)
+    async with active_session_factory() as session:
+        if hasattr(session, "leases"):
+            current = session.leases.get(lease_name)
+            if current is not None and current["holder_id"] == holder_id:
+                session.leases.pop(lease_name, None)
+            return
+        row = await session.get(ServiceLease, lease_name)
+        if row is None or row.holder_id != holder_id:
+            return
+        await session.delete(row)
+        await session.commit()
+
+
+async def inspect_karpathy_status(
+    *,
+    loop_type: str,
+    settings: SentinelSettings,
+    session_factory: Any | None = None,
+    limit: int | None = None,
+) -> KarpathyStatusReport:
+    readiness = await inspect_live_karpathy_readiness(
+        loop_type=loop_type,
+        settings=settings,
+        session_factory=session_factory,
+    )
+    active_session_factory = session_factory or AsyncSessionFactory
+    active_lease: dict[str, Any] | None = None
+    recent_runs: list[KarpathyStatusEntry] = []
+    history_limit = int(limit or settings.karpathy.status_history_limit)
+    async with active_session_factory() as session:
+        if hasattr(session, "leases"):
+            lease = session.leases.get(_karpathy_lease_name(loop_type))
+            if lease is not None:
+                active_lease = dict(lease)
+            rows = list(getattr(session, "experiment_logs", []))[-history_limit:]
+            rows.reverse()
+            for row in rows:
+                if row.get("loop_type") != loop_type:
+                    continue
+                recent_runs.append(
+                    KarpathyStatusEntry(
+                        loop_type=row["loop_type"],
+                        experiment_number=row["experiment_number"],
+                        kept=bool(row["kept"]),
+                        delta=float(row["delta"]),
+                        timestamp=row["timestamp"],
+                        target=row.get("target"),
+                        eval_mode=row.get("eval_mode"),
+                        details=dict(row.get("details", {})),
+                    )
+                )
+            return KarpathyStatusReport(readiness=readiness, active_lease=active_lease, recent_runs=recent_runs)
+
+        lease = await session.get(ServiceLease, _karpathy_lease_name(loop_type))
+        if lease is not None:
+            active_lease = {
+                "lease_name": lease.lease_name,
+                "holder_id": lease.holder_id,
+                "expires_at": lease.expires_at.isoformat(),
+            }
+        query = (
+            select(ExperimentLog)
+            .where(ExperimentLog.loop_type == loop_type)
+            .order_by(ExperimentLog.timestamp.desc())
+            .limit(history_limit)
+        )
+        rows = list((await session.scalars(query)).all())
+        for row in rows:
+            recent_runs.append(
+                KarpathyStatusEntry(
+                    loop_type=row.loop_type,
+                    experiment_number=row.experiment_number,
+                    kept=row.kept,
+                    delta=row.delta,
+                    timestamp=row.timestamp,
+                    target=row.target,
+                    eval_mode=row.eval_mode,
+                    details=dict(row.details or {}),
+                )
+            )
+    return KarpathyStatusReport(readiness=readiness, active_lease=active_lease, recent_runs=recent_runs)
+
+
 def prepare_ephemeral_loop_workspace(*, loop_type: str, target_source: str | None = None) -> tuple[str, Path]:
     repo = Repo(Path.cwd(), search_parent_directories=True)
     repo_root = Path(repo.working_tree_dir).resolve()
@@ -628,6 +823,83 @@ def prepare_ephemeral_loop_workspace(*, loop_type: str, target_source: str | Non
     return branch_name, worktree_path
 
 
+def _commit_range(repo: Repo, *, base_commit: str, branch_name: str) -> list[str]:
+    revs = list(repo.iter_commits(f"{base_commit}..{branch_name}"))
+    revs.reverse()
+    return [commit.hexsha for commit in revs]
+
+
+def _abort_cherry_pick_if_needed(repo: Repo) -> bool:
+    cherry_pick_head = Path(repo.git_dir) / "CHERRY_PICK_HEAD"
+    if not cherry_pick_head.exists():
+        return False
+    repo.git.cherry_pick("--abort")
+    return True
+
+
+def _cleanup_ephemeral_workspace(
+    *,
+    branch_name: str,
+    worktree_path: Path,
+    preserve_branch: bool,
+) -> str:
+    repo = Repo(Path.cwd(), search_parent_directories=True)
+    cleanup_notes: list[str] = []
+    if worktree_path.exists():
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo.working_tree_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cleanup_notes.append("worktree-removed")
+    else:
+        cleanup_notes.append("worktree-missing")
+    if preserve_branch:
+        cleanup_notes.append("branch-preserved")
+    else:
+        repo.git.branch("-D", branch_name)
+        cleanup_notes.append("branch-deleted")
+    return ",".join(cleanup_notes)
+
+
+def _finalize_live_worktree(
+    *,
+    loop_type: str,
+    branch_name: str,
+    worktree_path: Path,
+    base_commit: str,
+) -> tuple[list[str], str]:
+    repo = Repo(Path.cwd(), search_parent_directories=True)
+    merged_commit_hashes = _commit_range(repo, base_commit=base_commit, branch_name=branch_name)
+    merge_notes: list[str] = []
+    preserve_branch = False
+    merge_error: str | None = None
+    try:
+        if merged_commit_hashes:
+            for commit_hash in merged_commit_hashes:
+                repo.git.cherry_pick(commit_hash)
+            merge_notes.append("merged")
+        else:
+            merge_notes.append(f"no-kept-{loop_type}-commits")
+    except GitCommandError as exc:
+        aborted = _abort_cherry_pick_if_needed(repo)
+        merge_notes.append("merge-conflict-aborted" if aborted else "merge-failed")
+        preserve_branch = True
+        merge_error = str(exc)
+    finally:
+        cleanup_status = _cleanup_ephemeral_workspace(
+            branch_name=branch_name,
+            worktree_path=worktree_path,
+            preserve_branch=preserve_branch,
+        )
+        merge_notes.append(cleanup_status)
+    if merge_error:
+        merge_notes.append(f"error={merge_error}")
+    return merged_commit_hashes, ",".join(merge_notes)
+
+
 async def run_live_karpathy_loop(
     *,
     loop_type: str,
@@ -642,20 +914,78 @@ async def run_live_karpathy_loop(
     )
     if not readiness.ready:
         return readiness, None
-    branch_name, worktree_path = prepare_ephemeral_loop_workspace(loop_type=loop_type, target_source=readiness.target_source)
-    loop = build_karpathy_loop(
+    lease_acquired, lease_holder = await _try_acquire_karpathy_lease(
         loop_type=loop_type,
         settings=settings,
-        repo_path=worktree_path,
-        skill_path=worktree_path / LOOP_SKILL_PATHS[loop_type],
-        changelog_path=worktree_path / "skills/CHANGELOG.md",
         session_factory=session_factory,
-        target_source=readiness.target_source,
     )
-    outcomes = await loop.optimize(max_experiments=max_experiments or settings.thresholds.karpathy_experiments)
-    repo = Repo(worktree_path)
-    initial_commit = repo.head.commit.hexsha
-    commits = [initial_commit] if outcomes and any(outcome.kept for outcome in outcomes) else []
+    if not lease_acquired:
+        return readiness, KarpathyRunReport(
+            loop_type=loop_type,
+            mode="live",
+            experiments_attempted=0,
+            kept=0,
+            reverted=0,
+            metric_before=None,
+            metric_after=None,
+            affected_sections=[],
+            commit_hashes=[],
+            branch_name=None,
+            worktree_path=None,
+            outcomes=[],
+            target_source=readiness.target_source,
+            feedback_count=readiness.counts.get("target_source_feedback_rows"),
+            merged_commit_hashes=[],
+            cleanup_status=None,
+            error=f"lease-held-by:{lease_holder}",
+            lock_status=f"lease-held-by:{lease_holder}",
+        )
+    branch_name, worktree_path = prepare_ephemeral_loop_workspace(loop_type=loop_type, target_source=readiness.target_source)
+    parent_repo = Repo(Path.cwd(), search_parent_directories=True)
+    base_commit = parent_repo.head.commit.hexsha
+    outcomes: list[ExperimentOutcome] = []
+    commits: list[str] = []
+    merged_commit_hashes: list[str] = []
+    cleanup_status: str | None = None
+    error: str | None = None
+    try:
+        loop = build_karpathy_loop(
+            loop_type=loop_type,
+            settings=settings,
+            repo_path=worktree_path,
+            skill_path=worktree_path / LOOP_SKILL_PATHS[loop_type],
+            changelog_path=worktree_path / "skills/CHANGELOG.md",
+            session_factory=session_factory,
+            target_source=readiness.target_source,
+        )
+        outcomes = await loop.optimize(max_experiments=max_experiments or settings.thresholds.karpathy_experiments)
+        worktree_repo = Repo(worktree_path)
+        commits = _commit_range(worktree_repo, base_commit=base_commit, branch_name=branch_name)
+        merged_commit_hashes, cleanup_status = _finalize_live_worktree(
+            loop_type=loop_type,
+            branch_name=branch_name,
+            worktree_path=worktree_path,
+            base_commit=base_commit,
+        )
+        if "merge-conflict-aborted" in cleanup_status or "merge-failed" in cleanup_status:
+            error = cleanup_status
+    except Exception as exc:
+        error = str(exc)
+        if cleanup_status is None:
+            try:
+                cleanup_status = _cleanup_ephemeral_workspace(
+                    branch_name=branch_name,
+                    worktree_path=worktree_path,
+                    preserve_branch=bool(commits),
+                )
+            except Exception as cleanup_exc:
+                cleanup_status = f"cleanup-failed:{cleanup_exc}"
+    finally:
+        await _release_karpathy_lease(
+            loop_type=loop_type,
+            holder_id=lease_holder,
+            session_factory=session_factory,
+        )
     report = KarpathyRunReport(
         loop_type=loop_type,
         mode="live",
@@ -673,6 +1003,10 @@ async def run_live_karpathy_loop(
         feedback_count=readiness.counts.get("target_source_feedback_rows"),
         trust_before=outcomes[0].trust_before if outcomes else None,
         trust_after=outcomes[-1].trust_after if outcomes else None,
+        merged_commit_hashes=merged_commit_hashes,
+        cleanup_status=cleanup_status,
+        error=error,
+        lock_status=f"acquired:{lease_holder}",
     )
     return readiness, report
 

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from sentinel.alert_policy import build_alert_policy
+from sentinel.config import SentinelSettings
 from sentinel.db.models import IOC, FeedbackRecord
 from sentinel.loops.replay_eval import ReplayEvaluator, parse_trust_scores
 
@@ -68,10 +70,16 @@ async def seed_labeled_data(db_session_factory) -> None:
 
 
 def build_evaluator(db_session_factory, skill_path: Path) -> ReplayEvaluator:
+    settings = SentinelSettings.model_validate(
+        {
+            "thresholds": {"alert_score": 35},
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
     return ReplayEvaluator(
         session_factory=db_session_factory,
         skill_path=skill_path,
-        alert_threshold=70.0,
+        alert_policy=build_alert_policy(settings),
         trust_weight=0.20,
         now_fn=lambda: NOW,
     )
@@ -190,3 +198,40 @@ async def test_replay_uses_latest_verdict_per_ioc(db_session_factory, skill_path
     assert result.total_labeled == 1
     assert result.true_positive == 1
     assert result.false_positive == 0
+
+
+@pytest.mark.asyncio
+async def test_replay_prefers_feedback_source_snapshot_over_current_ioc_source(db_session_factory, skill_path: Path) -> None:
+    async with db_session_factory() as session:
+        ioc = IOC(
+            value="source-snapshot.test",
+            dedupe_hash="hash-source-snapshot",
+            type="domain",
+            source="threatfox",
+            source_trust=0.90,
+            first_seen=NOW,
+            last_seen=NOW,
+            risk_score=71.0,
+        )
+        session.add(ioc)
+        await session.flush()
+        session.add(
+            FeedbackRecord(
+                ioc_id=ioc.id,
+                analyst_id="analyst-1",
+                verdict="false_positive",
+                timestamp=NOW,
+                channel="telegram",
+                source="otx",
+            )
+        )
+        ioc.source = "threatfox"
+        await session.commit()
+    skill_path.write_text(SKILL_TEMPLATE.format(otx_trust="0.80"), encoding="utf-8")
+    evaluator = build_evaluator(db_session_factory, skill_path)
+
+    result = await evaluator.evaluate()
+
+    assert "otx" in result.per_source
+    assert "threatfox" not in result.per_source
+    assert result.true_negative == 1

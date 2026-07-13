@@ -8,7 +8,9 @@ import pytest
 
 from sentinel.agents.scraper import (
     FeodoTrackerAdapter,
+    MalwareBazaarAdapter,
     OTXPulseAdapter,
+    PhishTankAdapter,
     RSSAdapter,
     ScraperAgent,
     SourceScrapeDiagnostic,
@@ -93,6 +95,39 @@ async def test_threatfox_adapter_parses_recent_iocs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_threatfox_adapter_parses_utc_suffix_timestamps() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "query_status": "ok",
+                "data": [
+                    {
+                        "id": "42",
+                        "ioc": "203.0.113.20",
+                        "ioc_type": "ip",
+                        "first_seen": "2026-07-06 18:31:09 UTC",
+                        "last_seen": "2026-07-06 18:32:10 UTC",
+                    }
+                ],
+            },
+        )
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = ThreatFoxAdapter(
+            "https://feeds.local/threatfox",
+            trust_score=0.94,
+            api_key="threatfox-key",
+            client=client,
+        )
+        records = await adapter.fetch()
+
+    assert len(records) == 1
+    assert records[0].first_seen.isoformat() == "2026-07-06T18:31:09+00:00"
+    assert records[0].last_seen.isoformat() == "2026-07-06T18:32:10+00:00"
+
+
+@pytest.mark.asyncio
 async def test_urlhaus_adapter_parses_csv() -> None:
     transport = httpx.MockTransport(
         lambda request: httpx.Response(
@@ -109,6 +144,29 @@ async def test_urlhaus_adapter_parses_csv() -> None:
     assert records[0].value == "http://malicious.test"
     assert records[0].source == "urlhaus"
     assert records[0].source_trust == 0.91
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_adapter_skips_comment_banner_lines() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            text=(
+                "################################################################\n"
+                "# abuse.ch URLhaus Database Dump (CSV - recent URLs only)      #\n"
+                "# id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter\n"
+                "\"1\",\"2026-04-08 12:00:00\",\"http://malicious.test\",\"online\","
+                "\"2026-04-08 12:05:00\",\"malware_download\",\"phishing\","
+                "\"https://urlhaus.local/1\",\"tester\"\n"
+            ),
+        )
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = URLHausAdapter("https://feeds.local/urlhaus.csv", trust_score=0.91, client=client)
+        records = await adapter.fetch()
+
+    assert len(records) == 1
+    assert records[0].value == "http://malicious.test"
 
 
 @pytest.mark.asyncio
@@ -134,6 +192,98 @@ async def test_feodotracker_adapter_parses_json() -> None:
     assert len(records) == 1
     assert records[0].value == "203.0.113.10"
     assert records[0].type == "ipv4"
+
+
+@pytest.mark.asyncio
+async def test_malwarebazaar_adapter_parses_recent_hash_detections() -> None:
+    seen_headers: dict[str, str] = {}
+    seen_body = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_body
+        seen_headers.update(dict(request.headers))
+        seen_body = request.content.decode("utf-8")
+        return httpx.Response(
+            200,
+            json={
+                "query_status": "ok",
+                "data": [
+                    {
+                        "sha256_hash": "a" * 64,
+                        "sha1_hash": "b" * 40,
+                        "md5_hash": "c" * 32,
+                        "first_seen": "2026-07-06 18:31:09 UTC",
+                        "signature": "AgentTesla",
+                        "file_name": "invoice.jar",
+                        "file_type": "jar",
+                        "reporter": "abuse_ch",
+                    }
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = MalwareBazaarAdapter(
+            "https://feeds.local/malwarebazaar",
+            trust_score=0.92,
+            api_key="mb-key",
+            lookback_hours=24,
+            client=client,
+        )
+        records = await adapter.fetch()
+
+    assert {record.type for record in records} == {"md5", "sha1", "sha256"}
+    assert all(record.source == "malwarebazaar" for record in records)
+    assert all(record.reference_url == f"https://bazaar.abuse.ch/sample/{'a' * 64}/" for record in records)
+    assert seen_headers["auth-key"] == "mb-key"
+    assert "query=recent_detections" in seen_body
+
+
+@pytest.mark.asyncio
+async def test_phishtank_adapter_parses_verified_urls_and_app_key_path() -> None:
+    seen_url = ""
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_url
+        seen_url = str(request.url)
+        seen_headers.update(dict(request.headers))
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "phish_id": "123456",
+                    "url": "https://phish.example/login",
+                    "phish_detail_url": "https://www.phishtank.com/phish_detail.php?phish_id=123456",
+                    "submission_time": "2026-07-06T18:15:47+00:00",
+                    "verified": "yes",
+                    "verification_time": "2026-07-06T18:37:31+00:00",
+                    "online": "yes",
+                    "target": "Example Bank",
+                }
+            ],
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = PhishTankAdapter(
+            "https://data.phishtank.com/data/online-valid.json",
+            trust_score=0.88,
+            app_key="pt-key",
+            client=client,
+        )
+        records = await adapter.fetch()
+
+    assert len(records) == 1
+    assert records[0].value == "https://phish.example/login"
+    assert records[0].type == "url"
+    assert records[0].source == "phishtank"
+    assert records[0].reference_url == "https://www.phishtank.com/phish_detail.php?phish_id=123456"
+    assert "verified_phishing" in records[0].tags
+    assert seen_url == "https://data.phishtank.com/data/pt-key/online-valid.json"
+    assert seen_headers["user-agent"] == "phishtank/sentinel"
 
 
 @pytest.mark.asyncio
@@ -449,6 +599,52 @@ async def test_scraper_agent_filters_writeups_by_search_terms_and_caps_candidate
 
 
 @pytest.mark.asyncio
+async def test_scraper_agent_uses_browser_headers_for_article_fetches(settings: SentinelSettings) -> None:
+    settings.db.redis_url = "disabled"
+    settings.sources.feeds = [
+        FeedConfig(name="gbhackers_blog", url="https://feeds.local/rss.xml", trust=0.64),
+    ]
+    rss_xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Phishing campaign delivers stealer</title>
+          <link>https://articles.local/post-1</link>
+          <pubDate>Wed, 08 Apr 2026 12:00:00 GMT</pubDate>
+          <description>hxxps[:]//evil-one[.]test/dropper</description>
+        </item>
+      </channel>
+    </rss>"""
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "articles.local":
+            seen_headers.update(dict(request.headers))
+            return httpx.Response(200, text="<html><body>Payload at hxxps[:]//evil-one[.]test/dropper</body></html>")
+        if request.url.path.endswith("rss.xml"):
+            return httpx.Response(200, text=rss_xml)
+        raise AssertionError(f"Unexpected request {request.url}")
+
+    transport = httpx.MockTransport(handler)
+    import sentinel.agents.scraper as scraper_module
+
+    previous_now = scraper_module._now_utc
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 9, 7, 0, 0, tzinfo=scraper_module.UTC)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        agent = ScraperAgent(settings=settings, http_client=http_client)
+        try:
+            report = await agent.run_with_diagnostics()
+        finally:
+            await agent.aclose()
+            scraper_module._now_utc = previous_now
+
+    assert report.writeups
+    assert seen_headers["user-agent"].startswith("Mozilla/5.0")
+    assert seen_headers["accept-language"] == "en-US,en;q=0.9"
+    assert seen_headers["referer"] == "https://articles.local/post-1"
+
+
+@pytest.mark.asyncio
 async def test_scraper_agent_reports_timeout_diagnostic(settings: SentinelSettings) -> None:
     settings.sources.feeds = [
         {"name": "otx", "url": "https://feeds.local/otx", "trust": 0.1},
@@ -523,6 +719,23 @@ async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: 
                     ]
                 },
             )
+        if request.url.path.endswith("threatfox"):
+            return httpx.Response(
+                200,
+                json={
+                    "query_status": "ok",
+                    "data": [
+                        {
+                            "id": "41",
+                            "ioc": "94.103.84.81",
+                            "ioc_type": "ip",
+                            "first_seen": "2026-04-08T12:00:00Z",
+                            "last_seen": "2026-04-08T13:00:00Z",
+                            "reference": "https://threatfox.abuse.ch/ioc/41/",
+                        }
+                    ],
+                },
+            )
         if request.url.path.endswith("rss.xml"):
             return httpx.Response(200, text=rss_xml)
         raise AssertionError(f"Unexpected request {request.url}")
@@ -544,14 +757,14 @@ async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: 
         finally:
             scraper_module._now_utc = previous_now
 
-    # 3 direct feed IOCs + 3 extracted from the article body (defanged domain,
-    # refanged URL, C2 IP). The article link itself is never an IOC.
+    # 4 direct feed IOCs + 2 extracted from the article body (refanged URL and
+    # C2 IP). The bare domain inside that defanged URL is intentionally not
+    # emitted as a duplicate standalone IOC.
     assert len(records) == 6
     assert len(report.writeups) == 1
     assert report.writeups[0].url == "https://articles.local/news"
     extracted = [record for record in records if record.provenance == "writeup"]
     assert {record.value for record in extracted} == {
-        "evil-payload.top",
         "http://evil-payload.top/gate.php",
         "45.155.204.10",
     }
@@ -662,6 +875,73 @@ async def test_scraper_agent_reports_diagnostics_for_kept_stale_and_errors(setti
         SourceScrapeDiagnostic(source="working", fetched=2, kept=1, stale_dropped=1, error=None),
         SourceScrapeDiagnostic(source="broken", fetched=0, kept=0, stale_dropped=0, error="ReadTimeout: timed out"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_scraper_agent_caps_dominant_sources_and_records_balance_drop(settings: SentinelSettings) -> None:
+    import sentinel.agents.scraper as scraper_module
+    from sentinel.agents.scraper import RawIOC
+
+    settings.sources.mix.enabled = True
+    settings.sources.mix.max_items_per_source = 2
+    previous_now = scraper_module._now_utc
+    scraper_module._now_utc = lambda: scraper_module.datetime(2026, 4, 10, 11, 0, 0, tzinfo=scraper_module.UTC)
+
+    def make_item(value: str, source: str, hour: int) -> RawIOC:
+        seen = scraper_module.datetime(2026, 4, 10, hour, 0, 0, tzinfo=scraper_module.UTC)
+        return RawIOC(
+            value=value,
+            type="domain",
+            source=source,
+            source_trust=0.9,
+            first_seen=seen,
+            last_seen=seen,
+        )
+
+    class URLHausAdapterStub:
+        source_name = "urlhaus"
+
+        async def fetch(self):
+            return [
+                make_item("urlhaus-1.example", "urlhaus", 10),
+                make_item("urlhaus-2.example", "urlhaus", 9),
+                make_item("urlhaus-3.example", "urlhaus", 8),
+            ]
+
+    class ThreatFoxAdapterStub:
+        source_name = "threatfox"
+
+        async def fetch(self):
+            return [
+                make_item("threatfox-1.example", "threatfox", 10),
+                make_item("threatfox-2.example", "threatfox", 9),
+                make_item("threatfox-3.example", "threatfox", 8),
+            ]
+
+    class OTXAdapterStub:
+        source_name = "otx"
+
+        async def fetch(self):
+            return [make_item("otx-1.example", "otx", 7)]
+
+    agent = ScraperAgent(settings=settings)
+    previous_build = agent._build_adapters
+    agent._build_adapters = lambda: ([URLHausAdapterStub(), ThreatFoxAdapterStub(), OTXAdapterStub()], [])
+    try:
+        report = await agent.run_with_diagnostics()
+    finally:
+        scraper_module._now_utc = previous_now
+        agent._build_adapters = previous_build
+        await agent.aclose()
+
+    assert [item.source for item in report.items] == ["urlhaus", "threatfox", "otx", "urlhaus", "threatfox"]
+    by_source = {diagnostic.source: diagnostic for diagnostic in report.diagnostics}
+    assert by_source["urlhaus"].kept == 2
+    assert by_source["urlhaus"].balance_dropped == 1
+    assert by_source["threatfox"].kept == 2
+    assert by_source["threatfox"].balance_dropped == 1
+    assert by_source["otx"].kept == 1
+    assert by_source["otx"].balance_dropped == 0
 
 
 @pytest.mark.asyncio

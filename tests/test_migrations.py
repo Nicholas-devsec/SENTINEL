@@ -38,8 +38,16 @@ async def test_ensure_schema_adds_new_columns_to_legacy_tables(tmp_path) -> None
                 text("INSERT INTO feedback_records (id, ioc_id, analyst_id, verdict, timestamp, channel, source) "
                      "VALUES ('x', 'y', 'a', 'confirmed', CURRENT_TIMESTAMP, 'telegram', 'threatfox')")
             )
-            for table in ("iocs", "ioc_sightings", "source_materials", "experiment_logs"):
+            for table in ("iocs", "ioc_sightings", "source_materials", "experiment_logs", "schema_migrations"):
                 await connection.execute(text(f"SELECT * FROM {table} LIMIT 1"))
+            migration_rows = list(
+                (
+                    await connection.execute(
+                        text("SELECT migration_id FROM schema_migrations ORDER BY migration_id")
+                    )
+                ).scalars()
+            )
+            assert "feedback_records.source" in migration_rows
 
         # Idempotent: second run applies nothing.
         assert await ensure_schema(engine) == []

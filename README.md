@@ -7,8 +7,9 @@ replay-evaluated self-improvement loop over its skill files.
 
 ## What actually works today
 
-- **Live IOC pulls** from ThreatFox, URLhaus, FeodoTracker, and OTX with
-  freshness filtering (`sentinel/agents/scraper.py`).
+- **Live IOC pulls** from ThreatFox, URLhaus, FeodoTracker, OTX,
+  MalwareBazaar, and PhishTank with freshness filtering
+  (`sentinel/agents/scraper.py`).
 - **Writeup ingestion**: RSS/blog entries are treated as source material, not
   IOCs. Article bodies are fetched, HTML-stripped, and candidate indicators
   (defanged domains/URLs, IPs, hashes, CVEs) are extracted with provenance
@@ -31,7 +32,9 @@ replay-evaluated self-improvement loop over its skill files.
   `sentinel discovery-memory --sync`. Pipeline integration is opt-in via
   `discovery.enabled` in config.yaml.
 - **Enrichment** via VirusTotal, Shodan, AbuseIPDB, optional WHOIS, with a
-  weighted risk score.
+  weighted risk score. Enrichment is now bounded by configurable provider
+  timeouts, batch size, and a per-run IOC cap so a large feed pull cannot fan
+  out unbounded API work in one pass.
 - **MITRE ATT&CK matching** via TF-IDF over a local STIX bundle.
 - **Type-aware detection generation** for Sigma, KQL, SPL, YARA, and
   CrowdStrike: domains get dns_query rules, URLs get proxy rules, IPs get
@@ -48,6 +51,9 @@ replay-evaluated self-improvement loop over its skill files.
   patch. Runs are readiness-gated, worktree-isolated, and fully logged to
   `experiment_logs` with confusion-matrix detail. See
   [docs/karpathy_loop.md](docs/karpathy_loop.md).
+  Live optimization currently supports the `source` loop only; scoring and
+  detection remain non-live surfaces until their metrics are directly
+  production-meaningful.
 
 ## Quickstart
 
@@ -55,7 +61,7 @@ replay-evaluated self-improvement loop over its skill files.
 python3.12 -m venv .venv
 .venv/bin/pip install -e .          # or: pip install -r requirements.txt
 cp .env.example .env                # fill in keys (see below)
-.venv/bin/pytest                    # 99 tests, no network or database needed
+.venv/bin/pytest                    # temp sqlite, no live network required
 ```
 
 Runtime dependencies: PostgreSQL and Redis, plus a local MITRE ATT&CK
@@ -63,25 +69,75 @@ enterprise STIX bundle pointed at by `MITRE_STIX_PATH`. SQLite works for local
 experiments
 (`DATABASE_URL=sqlite+aiosqlite:///./data/sentinel.db`).
 
+For production Postgres deployments, tune the async engine through `db.*` in
+`config.yaml` (`pool_pre_ping`, `pool_recycle_seconds`, `pool_size`,
+`max_overflow`).
+
 Required env keys per command are validated at startup; the minimum for the
 pipeline is `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and
-`MITRE_STIX_PATH`. Enrichment keys (`VT_API_KEY`, `SHODAN_API_KEY`,
-`ABUSEIPDB_API_KEY`) and feed keys (`OTX_API_KEY`, `THREATFOX_API_KEY`)
-degrade gracefully when absent.
+`MITRE_STIX_PATH`.
+
+Feed-ingestion keys pull new threat data into SENTINEL:
+`OTX_API_KEY`, `THREATFOX_API_KEY`, `MALWAREBAZAAR_API_KEY`, and optionally
+`PHISHTANK_APP_KEY`.
+
+Enrichment keys do not ingest new indicators; they validate, enrich, and score
+IOCs after ingestion:
+`VT_API_KEY`, `SHODAN_API_KEY`, and `ABUSEIPDB_API_KEY`.
+
+Key production runtime knobs:
+- `sources.mix.max_items_per_source`
+- `enrichment.provider_timeout_seconds`
+- `enrichment.batch_size`
+- `enrichment.max_iocs_per_run`
+- `delivery.telegram_digest_candidate_pool_size`
+- `karpathy.min_keep_delta`
+- `karpathy.max_false_positive_increase`
+- `karpathy.max_true_positive_drop`
+- `karpathy.lease_ttl_seconds`
+
+All of those optional keys degrade gracefully when absent. `PHISHTANK_APP_KEY`
+is optional; without it the implemented PhishTank source stays disabled rather
+than hammering the flaky public endpoint.
 
 ## Commands
 
 ```bash
 sentinel run-once            # full pipeline: scrape -> validate -> enrich -> score -> rules -> deliver
-sentinel scraper-diagnose    # per-feed fetch/kept/stale diagnostics, no delivery
+sentinel cron-run            # cron-friendly one-shot scrape/store/enrich/Telegram run
+sentinel scraper-diagnose    # per-feed fetch/kept/stale/balance diagnostics, no delivery
 sentinel daily-digest        # last-24h digest to Telegram
-sentinel scheduler           # APScheduler service (interval scrape + daily digest)
+sentinel scheduler           # long-lived pipeline scheduler (scrape cadence + daily digest)
+sentinel karpathy-service    # long-lived scheduled Karpathy loop service
+sentinel karpathy-status     # readiness, active lease, and recent Karpathy run history
 sentinel telegram-listen     # capture analyst feedback buttons
 sentinel karpathy-validate --loop source --scenario improve   # shadow-mode loop mechanics
 sentinel karpathy-run --loop source --max-experiments 1       # readiness-gated live loop
 ```
 
 (Equivalent: `.venv/bin/python -m sentinel.cli <command>`.)
+
+## Ops model
+
+- External cron: run `sentinel cron-run` at your chosen time, e.g. `0 7 * * *`.
+- Long-lived feedback process: run `sentinel telegram-listen` so analyst button clicks are captured.
+- Long-lived Karpathy process: run `sentinel karpathy-service` separately from ingestion/delivery.
+- Operator inspection: run `sentinel karpathy-status --loop source` to see preflight state, active lease ownership, and recent experiment outcomes.
+
+Telegram alert cards now include a dedicated `Remove IOC` button. That action
+purges the IOC plus its linked sightings and feedback rows from the database;
+use `False Positive` when you want analyst learning without deleting the row.
+
+## Karpathy Notes
+
+- Live Karpathy currently supports the `source` loop only.
+- Promotion now requires more than a positive metric blip: the loop enforces a
+  minimum delta plus replay guardrails on true-positive loss and false-positive
+  increase.
+- Live runs acquire a DB-backed lease via `service_leases`, so duplicate
+  `karpathy-service` instances do not optimize concurrently.
+- Experiment logs now carry skill hashes and keep/revert decision details so
+  every promoted change can be traced back to the exact evaluated skill state.
 
 ## Data model (v2)
 
@@ -96,10 +152,14 @@ sentinel karpathy-run --loop source --max-experiments 1       # readiness-gated 
   feedback time.
 - `experiment_logs` — Karpathy experiments with eval mode (`replay`/`live`),
   target, metric before/after, and full eval detail JSON.
+- `schema_migrations` — lightweight migration ledger for additive schema
+  upgrades applied by the runtime bootstrap.
 
-Schema upgrades are additive: `sentinel.db.migrations.ensure_schema` creates
-new tables and issues `ALTER TABLE ADD COLUMN` for columns added since the
-database was created (Alembic migration files are the eventual replacement).
+Schema upgrades are currently additive and version-recorded:
+`sentinel.db.migrations.ensure_schema` creates missing tables, applies known
+`ALTER TABLE ADD COLUMN` upgrades, and records each applied step in
+`schema_migrations`. Alembic should be used for staged production schema
+changes that go beyond additive column rollout.
 
 ## Repo layout
 
@@ -111,4 +171,4 @@ database was created (Alembic migration files are the eventual replacement).
 - `skills/` — versioned prompt/config files the loops are allowed to edit;
   `skills/CHANGELOG.md` records every kept change.
 - `generated/detections/` — committed detection artifacts by platform.
-- `tests/` — 99 tests; async sqlite in-memory, no live network.
+- `tests/` — async sqlite temp databases, no live network.

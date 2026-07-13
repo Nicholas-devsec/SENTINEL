@@ -36,8 +36,9 @@ class FakeSendGridClient:
 
 
 class FakeSession:
-    def __init__(self, storage: list[FeedbackRecord]) -> None:
+    def __init__(self, storage: list[FeedbackRecord], removed_iocs: set[str] | None = None) -> None:
         self.storage = storage
+        self.removed_iocs = removed_iocs if removed_iocs is not None else set()
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -51,13 +52,21 @@ class FakeSession:
     async def commit(self) -> None:
         return None
 
+    async def remove_ioc(self, ioc_id) -> bool:
+        normalized = str(ioc_id)
+        if normalized in self.removed_iocs:
+            return False
+        self.removed_iocs.add(normalized)
+        return True
+
 
 class FakeSessionFactory:
     def __init__(self) -> None:
         self.storage: list[FeedbackRecord] = []
+        self.removed_iocs: set[str] = set()
 
     def __call__(self) -> FakeSession:
-        return FakeSession(self.storage)
+        return FakeSession(self.storage, self.removed_iocs)
 
 
 class FakeQuery:
@@ -159,7 +168,6 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
 async def test_delivery_agent_limits_telegram_alert_burst() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
-    settings.thresholds.alert_score = 35
     settings.delivery.telegram_max_alerts_per_run = 2
     agent = DeliveryAgent(
         settings=settings,
@@ -168,9 +176,9 @@ async def test_delivery_agent_limits_telegram_alert_burst() -> None:
         session_factory=FakeSessionFactory(),
     )
     items = [
-        {"id": str(uuid4()), "value": "a.example", "type": "domain", "source": "feed-a", "risk_score": 40, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
-        {"id": str(uuid4()), "value": "b.example", "type": "domain", "source": "feed-a", "risk_score": 39, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
-        {"id": str(uuid4()), "value": "c.example", "type": "domain", "source": "feed-a", "risk_score": 38, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "a.example", "type": "domain", "source": "feed-a", "risk_score": 80, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "b.example", "type": "domain", "source": "feed-a", "risk_score": 79, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
+        {"id": str(uuid4()), "value": "c.example", "type": "domain", "source": "feed-a", "risk_score": 78, "severity": "high", "mitre_techniques": [], "mitre_tactics": [], "last_seen": datetime.now(UTC)},
     ]
 
     result = await agent.run(items)
@@ -230,6 +238,90 @@ async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> 
     assert "[md5] b3352b42432dedc4a519f011dc8b5d5a" in telegram_bot.messages[0]["text"]
     assert "malware artifact hash" in telegram_bot.messages[0]["text"]
     assert telegram_bot.messages[0]["reply_markup"] is not None
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_article() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 35
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "c559cc68986933200fd5d9e4388e2f58",
+            "type": "md5",
+            "source": "discovery:cyberpress.org",
+            "risk_score": 74.0,
+            "severity": "high",
+            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
+            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution - cyberpress.org",
+            "mitre_techniques": ["T1593.002"],
+            "mitre_tactics": ["reconnaissance"],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "b3352b42432dedc4a519f011dc8b5d5a",
+            "type": "md5",
+            "source": "discovery:cyberpress.org",
+            "risk_score": 31.0,
+            "severity": "informational",
+            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
+            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution - cyberpress.org",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert len(telegram_bot.messages) == 1
+    assert "HIGH | Score 74.00 | 2 IOC(s)" in telegram_bot.messages[0]["text"]
+    assert "[md5] c559cc68986933200fd5d9e4388e2f58" in telegram_bot.messages[0]["text"]
+    assert "[md5] b3352b42432dedc4a519f011dc8b5d5a" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_discovery() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 70
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "publisher.example/bad",
+            "type": "url",
+            "source": "discovery:publisher.example",
+            "risk_score": 12.0,
+            "severity": "informational",
+            "reference_url": "https://publisher.example/post",
+            "source_title": "Publisher writeup",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": datetime.now(UTC),
+        }
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 0
+    assert result.digest_candidates == 0
+    assert len(telegram_bot.messages) == 0
 
 
 @pytest.mark.asyncio
@@ -300,6 +392,70 @@ async def test_delivery_agent_acknowledges_duplicate_feedback_without_duplicatin
     assert second.show_alert is True
     assert len(session_factory.storage) == 1
     assert record.verdict == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_removes_ioc_from_database_via_callback() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
+
+    removed = await agent.handle_callback_query(query)
+
+    assert removed is True
+    assert query.answered is True
+    assert query.answer_text == "Removed IOC from database"
+    assert query.show_alert is True
+    assert ioc_id in session_factory.removed_iocs
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_acknowledges_repeated_ioc_removal() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+
+    first = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
+    second = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
+
+    assert await agent.handle_callback_query(first) is True
+    assert await agent.handle_callback_query(second) is False
+    assert first.answer_text == "Removed IOC from database"
+    assert second.answer_text == "IOC was already absent"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_appends_retriage_feedback_event() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+
+    first = FakeQuery(data=f"confirmed:{ioc_id}", user_id="42")
+    second = FakeQuery(data=f"false_positive:{ioc_id}", user_id="42")
+
+    await agent.handle_callback_query(first)
+    record = await agent.handle_callback_query(second)
+
+    assert len(session_factory.storage) == 2
+    assert [item.verdict for item in session_factory.storage] == ["confirmed", "false_positive"]
+    assert second.answer_text == "Recorded: false positive"
+    assert record.verdict == "false_positive"
 
 
 @pytest.mark.asyncio
@@ -422,13 +578,52 @@ async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
     assert len(telegram_bot.messages) == 6
     assert "Delivering 5 analyst-ready IOC card(s)" in telegram_bot.messages[0]["text"]
     assert "SENTINEL Daily Digest 1/5" in telegram_bot.messages[1]["text"]
-    assert "IOC: ioc-11" in telegram_bot.messages[1]["text"]
+    assert "- [domain] ioc-11" in telegram_bot.messages[1]["text"]
     assert "SENTINEL Daily Digest 5/5" in telegram_bot.messages[5]["text"]
-    assert "IOC: ioc-7" in telegram_bot.messages[5]["text"]
+    assert "- [domain] ioc-7" in telegram_bot.messages[5]["text"]
     joined = "\n".join(message["text"] for message in telegram_bot.messages)
-    assert "IOC: ioc-0\n" not in joined
-    assert "IOC: ioc-1\n" not in joined
-    assert "IOC: ioc-6\n" not in joined
+    assert "- [domain] ioc-0" not in joined
+    assert "- [domain] ioc-2" not in joined
+    assert "- [domain] ioc-6" not in joined
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_requires_digest_threshold_for_web_discovery() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "value": "low-score-discovery.example",
+            "type": "domain",
+            "source": "discovery:publisher.example",
+            "risk_score": 5.0,
+            "severity": "informational",
+            "related_cves": [],
+            "external_links": {},
+            "last_seen": now,
+        },
+        {
+            "value": "stale-discovery.example",
+            "type": "domain",
+            "source": "discovery:publisher.example",
+            "risk_score": 5.0,
+            "severity": "informational",
+            "related_cves": [],
+            "external_links": {},
+            "last_seen": now - timedelta(days=2),
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.digest_candidates == 0
 
 
 def test_format_daily_digest_intro_for_non_empty_and_empty_digest() -> None:

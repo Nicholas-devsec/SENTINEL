@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -44,6 +46,14 @@ class ExperimentOutcome:
     trust_before: float | None = None
     trust_after: float | None = None
     feedback_count: int | None = None
+    keep_reason: str | None = None
+
+
+@dataclass(slots=True)
+class KeepDecision:
+    kept: bool
+    reason: str
+    details: dict[str, Any] | None = None
 
 
 class ThreatIntelLoop:
@@ -79,6 +89,7 @@ class ThreatIntelLoop:
         self.changelog_path = Path(changelog_path)
         self.now_fn = now_fn or (lambda: datetime.now(UTC))
         self.metric_override = metric_override
+        self._last_keep_decision: KeepDecision | None = None
 
     async def run_experiment(self, prompt: str) -> dict[str, Any]:
         response = await asyncio.wait_for(
@@ -155,6 +166,12 @@ class ThreatIntelLoop:
         kept: bool,
     ) -> None:
         details = dict(getattr(self, "_last_eval_details", None) or {})
+        if getattr(self, "_last_keep_decision", None) is not None:
+            details["keep_decision"] = {
+                "kept": self._last_keep_decision.kept,
+                "reason": self._last_keep_decision.reason,
+                **(self._last_keep_decision.details or {}),
+            }
         if proposal.reasoning:
             details["reasoning"] = proposal.reasoning
         if proposal.expected_effect:
@@ -194,6 +211,32 @@ class ThreatIntelLoop:
         session.add(row)
         await session.commit()
 
+    def _skill_hash(self) -> str:
+        return hashlib.sha256(self.skill_path.read_bytes()).hexdigest()
+
+    def decide_keep(
+        self,
+        *,
+        proposal: ExperimentProposal,
+        metric_before: float,
+        metric_after: float,
+        eval_details_before: dict[str, Any] | None,
+        eval_details_after: dict[str, Any] | None,
+    ) -> KeepDecision:
+        delta = metric_after - metric_before
+        minimum = float(self.settings.karpathy.min_keep_delta)
+        if delta < minimum:
+            return KeepDecision(
+                kept=False,
+                reason=f"delta_below_threshold:{delta:.4f}<{minimum:.4f}",
+                details={"delta": round(delta, 6), "min_keep_delta": minimum},
+            )
+        return KeepDecision(
+            kept=True,
+            reason="delta_above_threshold",
+            details={"delta": round(delta, 6), "min_keep_delta": minimum},
+        )
+
     def _append_changelog(self, proposal: ExperimentProposal, delta: float, kept: bool) -> None:
         path = self.changelog_path
         if not path.exists():
@@ -226,7 +269,9 @@ class ThreatIntelLoop:
 
         for experiment_number in range(1, max_experiments + 1):
             current_skill = self.skill_path.read_text(encoding="utf-8")
+            skill_hash_before = self._skill_hash()
             metric_before = await self.measure_metric()
+            eval_details_before = deepcopy(getattr(self, "_last_eval_details", None))
             prompt = self._build_prompt(experiment_number, current_skill, history)
             raw = await self.run_experiment(prompt)
             proposal = self._parse_proposal(raw["raw_response"])
@@ -239,9 +284,25 @@ class ThreatIntelLoop:
             except Exception:
                 self.revert_patch(original)
                 raise
+            eval_details_after = deepcopy(getattr(self, "_last_eval_details", None))
+            skill_hash_after = self._skill_hash()
 
             delta = metric_after - metric_before
-            kept = delta > 0
+            decision = self.decide_keep(
+                proposal=proposal,
+                metric_before=metric_before,
+                metric_after=metric_after,
+                eval_details_before=eval_details_before,
+                eval_details_after=eval_details_after,
+            )
+            self._last_keep_decision = decision
+            kept = decision.kept
+            self._last_eval_details = {
+                **(eval_details_after or {}),
+                "skill_hash_before": skill_hash_before,
+                "skill_hash_after": skill_hash_after,
+                "eval_details_before": eval_details_before,
+            }
             if not kept:
                 self.revert_patch(original)
                 metric_after = metric_before
@@ -274,6 +335,7 @@ class ThreatIntelLoop:
                 trust_before=getattr(self, "_last_trust_before", None),
                 trust_after=getattr(self, "_last_trust_after", None),
                 feedback_count=getattr(self, "_last_feedback_count", None),
+                keep_reason=decision.reason,
             )
             outcomes.append(outcome)
             history.append(

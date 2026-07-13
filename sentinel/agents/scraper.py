@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import re
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,19 @@ from sentinel.config import SentinelSettings, _is_disabled_value, _is_missing_se
 TRUST_SCORES_SECTION = re.compile(r"## Trust Scores\s+(.*?)(?:\n## |\Z)", re.DOTALL)
 TRUST_SCORE_LINE = re.compile(r"^- ([a-zA-Z0-9_:-]+):\s*([0-9]*\.?[0-9]+)\s*$")
 CVE_TEXT_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
+DEFAULT_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
 
 
 @dataclass(slots=True)
@@ -66,6 +80,7 @@ class SourceScrapeDiagnostic:
     fetched: int = 0
     kept: int = 0
     stale_dropped: int = 0
+    balance_dropped: int = 0
     error: str | None = None
     writeups_fetched: int = 0
     iocs_extracted: int = 0
@@ -99,14 +114,19 @@ def _now_utc() -> datetime:
 def _normalize_timestamp(value: str | None) -> datetime:
     if not value:
         return _now_utc()
+    normalized = value.strip()
     try:
-        if value.endswith("Z"):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        parsed = datetime.fromisoformat(value)
+        if normalized.endswith("Z"):
+            return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        if normalized.endswith(" UTC"):
+            return datetime.fromisoformat(normalized.removesuffix(" UTC").replace(" ", "T") + "+00:00")
+        if normalized.endswith(" GMT"):
+            return datetime.fromisoformat(normalized.removesuffix(" GMT").replace(" ", "T") + "+00:00")
+        parsed = datetime.fromisoformat(normalized)
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except ValueError:
         try:
-            parsed = parsedate_to_datetime(value)
+            parsed = parsedate_to_datetime(normalized)
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except (TypeError, ValueError):
             return _now_utc()
@@ -396,6 +416,92 @@ class ThreatFoxAdapter:
         return records
 
 
+class MalwareBazaarAdapter:
+    source_name = "malwarebazaar"
+
+    def __init__(
+        self,
+        api_url: str,
+        *,
+        trust_score: float,
+        api_key: str | None = None,
+        lookback_hours: int = 24,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.api_url = api_url
+        self.trust_score = trust_score
+        self.api_key = api_key
+        self.lookback_hours = lookback_hours
+        self.client = client or httpx.AsyncClient(timeout=30.0)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.api_key:
+            headers["Auth-Key"] = self.api_key
+        return headers
+
+    def _build_records(self, sample: dict[str, Any]) -> list[RawIOC]:
+        first_seen = _normalize_timestamp(sample.get("first_seen"))
+        last_seen = _normalize_timestamp(sample.get("last_seen")) if sample.get("last_seen") else first_seen
+        sha256_hash = str(sample.get("sha256_hash") or "").strip()
+        reference_url = f"https://bazaar.abuse.ch/sample/{sha256_hash}/" if sha256_hash else None
+        tags = []
+        for field in ("signature", "file_type", "file_name"):
+            value = sample.get(field)
+            if isinstance(value, str) and value.strip():
+                tags.append(value.strip())
+        if isinstance(sample.get("tags"), list):
+            tags.extend(str(tag).strip() for tag in sample["tags"] if str(tag).strip())
+
+        records: list[RawIOC] = []
+        for raw_key, ioc_type in (("md5_hash", "md5"), ("sha1_hash", "sha1"), ("sha256_hash", "sha256")):
+            value = str(sample.get(raw_key) or "").strip()
+            if not value:
+                continue
+            records.append(
+                RawIOC(
+                    value=value,
+                    type=ioc_type,
+                    source=self.source_name,
+                    source_trust=self.trust_score,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    tags=sorted(set(tags)),
+                    description=sample.get("signature") or sample.get("file_name") or "MalwareBazaar recent detection",
+                    reference_url=reference_url,
+                    attributes={
+                        "sample_sha256": sha256_hash or None,
+                        "file_name": sample.get("file_name"),
+                        "signature": sample.get("signature"),
+                        "reporter": sample.get("reporter"),
+                        "file_type": sample.get("file_type"),
+                    },
+                )
+            )
+        return records
+
+    async def fetch(self) -> list[RawIOC]:
+        if not self.api_key or _is_missing_secret(self.api_key):
+            return []
+        hours = max(1, min(168, int(self.lookback_hours)))
+        response = await self.client.post(
+            self.api_url,
+            headers=self._headers(),
+            data={"query": "recent_detections", "hours": str(hours)},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            return []
+        records: list[RawIOC] = []
+        for sample in data:
+            if not isinstance(sample, dict):
+                continue
+            records.extend(self._build_records(sample))
+        return records
+
+
 class URLHausAdapter:
     source_name = "urlhaus"
 
@@ -407,7 +513,20 @@ class URLHausAdapter:
     async def fetch(self) -> list[RawIOC]:
         response = await self.client.get(self.feed_url)
         response.raise_for_status()
-        reader = csv.DictReader(io.StringIO(response.text))
+        filtered_lines: list[str] = []
+        for raw_line in response.text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                candidate = line.lstrip("#").strip()
+                if candidate.startswith("id,dateadded,"):
+                    filtered_lines.append(candidate)
+                continue
+            filtered_lines.append(raw_line)
+        if not filtered_lines:
+            return []
+        reader = csv.DictReader(io.StringIO("\n".join(filtered_lines)))
         records: list[RawIOC] = []
         for row in reader:
             value = (row.get("url") or row.get("ioc") or "").strip()
@@ -429,6 +548,72 @@ class URLHausAdapter:
                     attributes={
                         "url_status": row.get("url_status"),
                         "reporter": row.get("reporter"),
+                    },
+                )
+            )
+        return records
+
+
+class PhishTankAdapter:
+    source_name = "phishtank"
+
+    def __init__(
+        self,
+        feed_url: str,
+        *,
+        trust_score: float,
+        app_key: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.feed_url = feed_url
+        self.trust_score = trust_score
+        self.app_key = app_key
+        self.client = client or httpx.AsyncClient(timeout=30.0)
+
+    def _headers(self) -> dict[str, str]:
+        return {"User-Agent": "phishtank/sentinel"}
+
+    def _feed_url(self) -> str:
+        if not self.app_key or _is_missing_secret(self.app_key):
+            return self.feed_url
+        marker = "/data/"
+        if marker not in self.feed_url:
+            return self.feed_url
+        prefix, suffix = self.feed_url.split(marker, 1)
+        return f"{prefix}{marker}{self.app_key.strip()}/{suffix}"
+
+    async def fetch(self) -> list[RawIOC]:
+        if not self.app_key or _is_missing_secret(self.app_key):
+            return []
+        response = await self.client.get(self._feed_url(), headers=self._headers())
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            return []
+        records: list[RawIOC] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("url") or "").strip()
+            if not value:
+                continue
+            seen = _normalize_timestamp(item.get("verification_time") or item.get("submission_time"))
+            records.append(
+                RawIOC(
+                    value=value,
+                    type="url",
+                    source=self.source_name,
+                    source_trust=self.trust_score,
+                    first_seen=seen,
+                    last_seen=seen,
+                    tags=[tag for tag in [item.get("target"), "verified_phishing"] if isinstance(tag, str) and tag.strip()],
+                    description=item.get("target") or "PhishTank verified phishing URL",
+                    reference_url=item.get("phish_detail_url"),
+                    attributes={
+                        "phish_id": item.get("phish_id"),
+                        "verified": item.get("verified"),
+                        "online": item.get("online"),
+                        "target": item.get("target"),
                     },
                 )
             )
@@ -549,6 +734,11 @@ class ScraperAgent(BaseAgent):
         self._owns_redis = redis_client is None
         self._owns_http_client = http_client is None
 
+    def _request_headers(self, url: str) -> dict[str, str]:
+        headers = dict(DEFAULT_BROWSER_HEADERS)
+        headers["Referer"] = url
+        return headers
+
     def _extract_related_cves(self, item: RawIOC) -> list[str]:
         text_parts: list[str] = [item.value, item.description or "", " ".join(item.tags)]
         for value in item.attributes.values():
@@ -647,6 +837,25 @@ class ScraperAgent(BaseAgent):
                         client=self.http_client,
                     )
                 )
+            elif source_name == "malwarebazaar":
+                ioc_adapters.append(
+                    MalwareBazaarAdapter(
+                        feed.url,
+                        trust_score=trust_score,
+                        api_key=self.settings.sources.malwarebazaar_api_key,
+                        lookback_hours=self.settings.sources.max_item_age_hours,
+                        client=self.http_client,
+                    )
+                )
+            elif source_name == "phishtank":
+                ioc_adapters.append(
+                    PhishTankAdapter(
+                        feed.url,
+                        trust_score=trust_score,
+                        app_key=self.settings.sources.phishtank_app_key,
+                        client=self.http_client,
+                    )
+                )
             else:
                 writeup_adapters.append(
                     RSSAdapter(
@@ -663,7 +872,7 @@ class ScraperAgent(BaseAgent):
 
         try:
             response = await asyncio.wait_for(
-                self.http_client.get(writeup.url),
+                self.http_client.get(writeup.url, headers=self._request_headers(writeup.url)),
                 timeout=float(self.settings.sources.http_timeout_seconds),
             )
             response.raise_for_status()
@@ -783,6 +992,60 @@ class ScraperAgent(BaseAgent):
         timeout_seconds = float(self.settings.sources.http_timeout_seconds)
         return await asyncio.wait_for(adapter.fetch(), timeout=timeout_seconds)
 
+    def _rebalance_source_mix(
+        self,
+        items: list[RawIOC],
+        diagnostics: list[SourceScrapeDiagnostic],
+    ) -> list[RawIOC]:
+        mix_settings = self.settings.sources.mix
+        cap = int(mix_settings.max_items_per_source)
+        if not mix_settings.enabled or cap <= 0 or not items:
+            return items
+
+        by_source: dict[str, list[RawIOC]] = {}
+        for item in items:
+            by_source.setdefault(item.source, []).append(item)
+
+        for source_items in by_source.values():
+            source_items.sort(
+                key=lambda item: (
+                    item.last_seen,
+                    item.first_seen,
+                    item.value,
+                ),
+                reverse=True,
+            )
+
+        diagnostic_by_source = {diagnostic.source: diagnostic for diagnostic in diagnostics}
+        trimmed: dict[str, deque[RawIOC]] = {}
+        source_order = sorted(
+            by_source,
+            key=lambda source: by_source[source][0].last_seen,
+            reverse=True,
+        )
+        for source in source_order:
+            source_items = by_source[source]
+            kept_items = source_items[:cap]
+            dropped = max(0, len(source_items) - len(kept_items))
+            diagnostic = diagnostic_by_source.get(source)
+            if diagnostic is not None:
+                diagnostic.balance_dropped += dropped
+                diagnostic.kept = len(kept_items)
+            trimmed[source] = deque(kept_items)
+
+        balanced: list[RawIOC] = []
+        while True:
+            advanced = False
+            for source in source_order:
+                queue = trimmed[source]
+                if not queue:
+                    continue
+                balanced.append(queue.popleft())
+                advanced = True
+            if not advanced:
+                break
+        return balanced
+
     async def run_with_diagnostics(self, *args: Any, **kwargs: Any) -> ScrapeReport:
         self.reload_skill()
         ioc_adapters, writeup_adapters = self._build_adapters()
@@ -850,6 +1113,7 @@ class ScraperAgent(BaseAgent):
             )
             diagnostics.append(diagnostic)
 
+        collected = self._rebalance_source_mix(collected, diagnostics)
         await self.publish_to_queue(collected)
         return ScrapeReport(items=collected, diagnostics=diagnostics, writeups=all_writeups)
 

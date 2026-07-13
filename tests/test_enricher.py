@@ -90,7 +90,13 @@ updated_by: test
     return skill_path
 
 
-def build_settings(*, enable_whois: bool = False) -> SentinelSettings:
+def build_settings(
+    *,
+    enable_whois: bool = False,
+    provider_timeout_seconds: int = 20,
+    batch_size: int = 50,
+    max_iocs_per_run: int = 250,
+) -> SentinelSettings:
     return SentinelSettings.model_validate(
         {
             "enrichment": {
@@ -98,6 +104,9 @@ def build_settings(*, enable_whois: bool = False) -> SentinelSettings:
                 "shodan_key": "shodan",
                 "abuseipdb_key": "abuse",
                 "enable_whois": enable_whois,
+                "provider_timeout_seconds": provider_timeout_seconds,
+                "batch_size": batch_size,
+                "max_iocs_per_run": max_iocs_per_run,
             },
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
         }
@@ -370,3 +379,67 @@ async def test_enrichment_agent_disables_whois_by_default(enrichment_skill: Path
 
     assert enriched[0].whois == {}
     assert whois_client.max_active == 0
+
+
+@pytest.mark.asyncio
+async def test_enrichment_agent_limits_total_iocs_per_run(enrichment_skill: Path) -> None:
+    now = datetime.now(UTC)
+    agent = EnrichmentAgent(
+        skill_path=str(enrichment_skill),
+        settings=build_settings(max_iocs_per_run=1, batch_size=1),
+        virustotal_client=FakeVirusTotalClient({"last_analysis_stats": {}}),
+        shodan_client=FakeShodanClient(None),
+        abuseipdb_client=FakeAbuseIPDBClient(None),
+    )
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "alpha.test",
+                "type": "domain",
+                "source": "feed-a",
+                "source_trust": 0.9,
+                "first_seen": now,
+                "last_seen": now,
+            },
+            {
+                "value": "beta.test",
+                "type": "domain",
+                "source": "feed-b",
+                "source_trust": 0.8,
+                "first_seen": now,
+                "last_seen": now,
+            },
+        ]
+    )
+
+    assert [item.value for item in enriched] == ["alpha.test"]
+
+
+@pytest.mark.asyncio
+async def test_enrichment_agent_records_provider_timeout_as_partial_failure(enrichment_skill: Path) -> None:
+    now = datetime.now(UTC)
+    whois_client = FakeWhoisClient({"registrar": "Slow Registrar"}, delay=0.05)
+    agent = EnrichmentAgent(
+        skill_path=str(enrichment_skill),
+        settings=build_settings(enable_whois=True, provider_timeout_seconds=0),
+        virustotal_client=FakeVirusTotalClient({"last_analysis_stats": {}}),
+        shodan_client=FakeShodanClient(None),
+        abuseipdb_client=FakeAbuseIPDBClient(None),
+        whois_client=whois_client,
+    )
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "slow.test",
+                "type": "domain",
+                "source": "feed-a",
+                "source_trust": 0.7,
+                "first_seen": now,
+                "last_seen": now,
+            }
+        ]
+    )
+
+    assert "whois" in enriched[0].provider_errors

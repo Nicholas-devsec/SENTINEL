@@ -866,6 +866,36 @@ async def test_weak_section_page_counts_as_weak(db_session_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_indicator_density_domain_cluster_does_not_count_as_ioc_section(db_session_factory) -> None:
+    domain_cluster_article = """
+    <html><body>
+    <h1>What an orchid grower has learned from a phishing attack</h1>
+    <p>The publisher network referenced a number of sister sites while discussing the incident.</p>
+    <p>agf.nl</p>
+    <p>freshplaza.es</p>
+    <p>freshplaza.it</p>
+    <p>freshplaza.de</p>
+    <p>freshplaza.com</p>
+    <p>freshplaza.fr</p>
+    <p>freshplaza.cn</p>
+    <p>hortidaily.com</p>
+    <p>hortidaily.es</p>
+    <p>verticalfarmdaily.com</p>
+    </body></html>
+    """
+    feed = [{"title": "Publisher recap of phishing incident", "link": "https://blog.vendor.test/orchid"}]
+    transport = httpx.MockTransport(routes(feed, {"/orchid": domain_cluster_article}))
+    agent = build_agent(build_settings(), transport, db_session_factory)
+
+    report = await agent.run_with_report()
+
+    diagnostic = report.diagnostics[0]
+    assert report.items == []
+    assert diagnostic.skipped_no_section == 1
+    assert diagnostic.skipped_weak == 0
+
+
+@pytest.mark.asyncio
 async def test_gbhackers_style_ioc_table_page_extracts(db_session_factory) -> None:
     table_article = """
     <html><body>

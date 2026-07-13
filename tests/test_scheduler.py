@@ -47,6 +47,22 @@ def test_build_scheduler_uses_configured_timezone_and_7am_digest(monkeypatch) ->
             pass
 
 
+def test_build_karpathy_scheduler_registers_only_karpathy_job(monkeypatch) -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.schedule.enable_karpathy_job = True
+    monkeypatch.setattr(cron, "get_settings", lambda: settings)
+    scheduler = cron.build_karpathy_scheduler()
+    try:
+        assert scheduler.get_job("karpathy-loop") is not None
+        assert scheduler.get_job("daily-digest") is None
+        assert scheduler.get_job("scrape-pipeline") is None
+    finally:
+        try:
+            scheduler.shutdown(wait=False)
+        except SchedulerNotRunningError:
+            pass
+
+
 import pytest
 
 

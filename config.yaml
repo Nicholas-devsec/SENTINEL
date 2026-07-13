@@ -7,7 +7,7 @@ schedule:
   karpathy_loop_type: "source"
 
 thresholds:
-  alert_score: 35
+  alert_score: 70
   rule_score: 30
   karpathy_experiments: 25
   karpathy_budget_mins: 30
@@ -15,9 +15,14 @@ thresholds:
 sources:
   otx_api_key: ${OTX_API_KEY}
   threatfox_api_key: ${THREATFOX_API_KEY}
+  malwarebazaar_api_key: ${MALWAREBAZAAR_API_KEY}
+  phishtank_app_key: ${PHISHTANK_APP_KEY}
   max_item_age_hours: 24
   writeup_max_item_age_hours: 72
   http_timeout_seconds: 60
+  mix:
+    enabled: true
+    max_items_per_source: 150
   writeup_search:
     enabled: true
     terms:
@@ -53,6 +58,14 @@ sources:
     - name: otx
       url: https://otx.alienvault.com/api/v1/pulses/subscribed
       trust: 0.90
+      enabled: true
+    - name: malwarebazaar
+      url: https://mb-api.abuse.ch/api/v1/
+      trust: 0.92
+      enabled: true
+    - name: phishtank
+      url: https://data.phishtank.com/data/online-valid.json
+      trust: 0.88
       enabled: true
     - name: talos_blog
       url: https://blog.talosintelligence.com/feed/
@@ -147,6 +160,9 @@ enrichment:
   shodan_key: ${SHODAN_API_KEY}
   abuseipdb_key: ${ABUSEIPDB_API_KEY}
   enable_whois: false
+  provider_timeout_seconds: 20
+  batch_size: 50
+  max_iocs_per_run: 250
   weights:
     vt_ratio: 0.30
     abuse_confidence: 0.25
@@ -167,6 +183,7 @@ delivery:
   enable_telegram_immediate_alerts: true
   telegram_max_alerts_per_run: 3
   telegram_daily_digest_limit: 5
+  telegram_digest_candidate_pool_size: 250
   enable_email: false
   sendgrid_key: ${SENDGRID_API_KEY}
   email_from: sentinel@yourdomain.com
@@ -188,8 +205,20 @@ mitre:
 db:
   url: ${DATABASE_URL}
   redis_url: ${REDIS_URL}
+  pool_pre_ping: true
+  pool_recycle_seconds: 1800
+  pool_size: 10
+  max_overflow: 20
 
 git:
   skills_repo_path: ./skills
   author_name: SENTINEL Learner
   author_email: sentinel@bot
+
+karpathy:
+  min_keep_delta: 0.01
+  max_false_positive_increase: 0
+  max_true_positive_drop: 0
+  lease_ttl_seconds: 1800
+  replay_window_hours: 336
+  status_history_limit: 5

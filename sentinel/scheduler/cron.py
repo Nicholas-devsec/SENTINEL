@@ -13,6 +13,21 @@ from sentinel.runtime import format_karpathy_readiness, format_karpathy_report, 
 
 logger = logging.getLogger(__name__)
 
+WEEKDAY_ALIASES = {
+    "monday": "mon",
+    "tuesday": "tue",
+    "wednesday": "wed",
+    "thursday": "thu",
+    "friday": "fri",
+    "saturday": "sat",
+    "sunday": "sun",
+}
+
+
+def _normalize_day_of_week(value: str) -> str:
+    lowered = value.strip().lower()
+    return WEEKDAY_ALIASES.get(lowered, lowered)
+
 
 async def scrape_pipeline() -> None:
     settings = get_settings()
@@ -64,11 +79,19 @@ def build_scheduler() -> AsyncIOScheduler:
         id="daily-digest",
         replace_existing=True,
     )
+    for job in scheduler.get_jobs():
+        logger.info("Registered scheduler job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
+    return scheduler
+
+
+def build_karpathy_scheduler() -> AsyncIOScheduler:
+    settings = get_settings()
+    scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
     if settings.schedule.enable_karpathy_job:
         scheduler.add_job(
             karpathy_loop_job,
             CronTrigger(
-                day_of_week=settings.schedule.karpathy_loop_day,
+                day_of_week=_normalize_day_of_week(settings.schedule.karpathy_loop_day),
                 hour=3,
                 minute=0,
                 timezone=settings.schedule.timezone,
@@ -77,7 +100,7 @@ def build_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
     for job in scheduler.get_jobs():
-        logger.info("Registered scheduler job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
+        logger.info("Registered karpathy scheduler job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
     return scheduler
 
 
@@ -87,6 +110,19 @@ async def main() -> None:
     scheduler.start()
     for job in scheduler.get_jobs():
         logger.info("Scheduler started job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
+    try:
+        while True:
+            await __import__("asyncio").sleep(3600)
+    finally:
+        scheduler.shutdown()
+
+
+async def karpathy_main() -> None:
+    configure_logging()
+    scheduler = build_karpathy_scheduler()
+    scheduler.start()
+    for job in scheduler.get_jobs():
+        logger.info("Karpathy scheduler started job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
     try:
         while True:
             await __import__("asyncio").sleep(3600)

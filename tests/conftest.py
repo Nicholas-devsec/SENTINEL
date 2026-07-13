@@ -13,9 +13,9 @@ def smoke_fixture() -> str:
 
 
 @pytest_asyncio.fixture
-async def db_session_factory():
-    """Real async sqlite in-memory database with the full SENTINEL schema."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def db_session_factory(tmp_path):
+    """Real async sqlite database with the full SENTINEL schema."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'sentinel-test.db'}")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)

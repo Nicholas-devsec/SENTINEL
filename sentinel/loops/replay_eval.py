@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from sqlalchemy import select
 
+from sentinel.alert_policy import AlertPolicy
 from sentinel.db.models import IOC, FeedbackRecord
 
 
@@ -42,6 +43,8 @@ TRUST_SCORE_LINE_RE = re.compile(
 @dataclass(slots=True)
 class ReplayEvalResult:
     metric: float
+    precision: float
+    recall: float
     true_positive: int
     false_positive: int
     false_negative: int
@@ -56,6 +59,8 @@ class ReplayEvalResult:
     def to_details(self) -> dict[str, Any]:
         return {
             "metric": self.metric,
+            "precision": self.precision,
+            "recall": self.recall,
             "confusion": {
                 "tp": self.true_positive,
                 "fp": self.false_positive,
@@ -101,7 +106,7 @@ class ReplayEvaluator:
         *,
         session_factory: Any,
         skill_path: str | Path,
-        alert_threshold: float,
+        alert_policy: AlertPolicy,
         trust_weight: float,
         window_hours: int = 14 * 24,
         beta: float = 0.5,
@@ -109,7 +114,8 @@ class ReplayEvaluator:
     ) -> None:
         self.session_factory = session_factory
         self.skill_path = Path(skill_path)
-        self.alert_threshold = float(alert_threshold)
+        self.alert_policy = alert_policy
+        self.alert_threshold = float(alert_policy.immediate_min_score)
         self.trust_weight = float(trust_weight)
         self.window_hours = window_hours
         self.beta = beta
@@ -132,7 +138,7 @@ class ReplayEvaluator:
         latest: dict[Any, LabeledIOC] = {}
         for ioc, feedback in rows:
             latest[ioc.id] = LabeledIOC(
-                source=ioc.source,
+                source=(feedback.source or ioc.source),
                 source_trust_stored=float(ioc.source_trust or 0.0),
                 risk_score_stored=float(ioc.risk_score or 0.0),
                 verdict=feedback.verdict,
@@ -172,6 +178,8 @@ class ReplayEvaluator:
         metric = _f_beta(precision, recall, self.beta)
         return ReplayEvalResult(
             metric=metric,
+            precision=precision,
+            recall=recall,
             true_positive=tp,
             false_positive=fp,
             false_negative=fn,

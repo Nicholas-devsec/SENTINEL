@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sentinel.db.models import Base
 
 logger = logging.getLogger(__name__)
+SCHEMA_MIGRATIONS_TABLE = "schema_migrations"
 
 # table -> {column_name: SQL type usable in ADD COLUMN on sqlite and postgres}
 ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
@@ -35,6 +36,20 @@ ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "details": "JSON",
     },
 }
+
+
+def _ensure_migration_table(sync_connection) -> None:
+    sync_connection.execute(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {SCHEMA_MIGRATIONS_TABLE} (
+                migration_id VARCHAR(255) PRIMARY KEY,
+                description VARCHAR(1024) NOT NULL,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
 
 
 def _missing_columns(sync_connection) -> list[tuple[str, str, str]]:
@@ -56,10 +71,29 @@ async def ensure_schema(engine: AsyncEngine) -> list[str]:
     applied: list[str] = []
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(_ensure_migration_table)
         missing = await connection.run_sync(_missing_columns)
+        if missing and engine.dialect.name != "sqlite":
+            logger.warning(
+                "Applying runtime additive schema updates on %s. Use Alembic for staged production migrations.",
+                engine.dialect.name,
+            )
         for table, column, sql_type in missing:
             statement = f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"
             await connection.execute(text(statement))
+            await connection.execute(
+                text(
+                    f"""
+                    INSERT INTO {SCHEMA_MIGRATIONS_TABLE} (migration_id, description)
+                    VALUES (:migration_id, :description)
+                    ON CONFLICT(migration_id) DO NOTHING
+                    """
+                ),
+                {
+                    "migration_id": f"{table}.{column}",
+                    "description": statement,
+                },
+            )
             applied.append(statement)
             logger.info("Applied additive migration: %s", statement)
     return applied

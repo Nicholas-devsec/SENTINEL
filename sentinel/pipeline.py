@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict, dataclass
+import logging
+import time
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,9 @@ from sentinel.integrations.mitre_attack import MitreAttackRepository
 from telegram import Bot
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class PipelineResult:
     scraped: int
@@ -35,6 +40,21 @@ class PipelineResult:
     sightings: int = 0
     corroborated: int = 0
     discovered: int = 0
+    stage_durations: dict[str, float] | None = field(default=None, compare=False)
+
+
+def _ordered_processing_rows(
+    rows: list[IOC],
+    *,
+    context_by_value: dict[str, dict[str, Any]],
+) -> list[IOC]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            0 if (context_by_value.get(row.value, {}).get("provenance") in {"writeup", "discovery"}) else 1,
+            -(row.last_seen.timestamp() if hasattr(row.last_seen, "timestamp") else 0.0),
+        ),
+    )
 
 
 async def init_db() -> None:
@@ -105,6 +125,10 @@ async def _persist_scoring(scored_items: list[ScoredIOC]) -> list[IOC]:
         return persisted
 
 
+def _ioc_identity(value: str, ioc_type: str, source: str) -> tuple[str, str, str]:
+    return (str(value), str(ioc_type).lower(), str(source).lower())
+
+
 async def _persist_generated(generated: list[GeneratedArtifacts]) -> None:
     async with AsyncSessionFactory() as session:
         for artifact in generated:
@@ -144,8 +168,12 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
     settings = settings or get_settings()
     await init_db()
     agents = build_agents(settings)
+    stage_durations: dict[str, float] = {}
+    run_started = time.perf_counter()
     try:
+        stage_started = time.perf_counter()
         scrape_report: ScrapeReport = await agents["scraper"].run_with_diagnostics()
+        stage_durations["scrape"] = round(time.perf_counter() - stage_started, 2)
         raw_items = scrape_report.items
         all_writeups = list(scrape_report.writeups)
         discovered_count = 0
@@ -154,51 +182,83 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
 
             discovery = DiscoveryAgent(settings=settings)
             try:
+                stage_started = time.perf_counter()
                 discovery_report = await discovery.run_with_report()
+                stage_durations["discovery"] = round(time.perf_counter() - stage_started, 2)
             finally:
                 await discovery.aclose()
             raw_items = [*raw_items, *discovery_report.items]
             all_writeups.extend(discovery_report.writeups)
             discovered_count = len(discovery_report.items)
+        stage_started = time.perf_counter()
         source_material_ids = await _persist_writeups(all_writeups)
         validation_report = await agents["validator"].run_with_report(
             raw_items, source_material_ids=source_material_ids
         )
-        validated_rows: list[IOC] = validation_report.new_iocs
+        stage_durations["validate"] = round(time.perf_counter() - stage_started, 2)
+        processing_rows: list[IOC] = validation_report.all_iocs
         # Build per-IOC scoring context (provenance, curation, corroboration) so
         # the score reflects evidence and analyst curation, not feed identity.
+        stage_started = time.perf_counter()
         async with AsyncSessionFactory() as session:
-            context_by_id = await get_scoring_context(session, [row.id for row in validated_rows])
+            context_by_id = await get_scoring_context(session, [row.id for row in processing_rows])
         context_by_value = {
-            row.value: context_by_id[row.id] for row in validated_rows if row.id in context_by_id
+            row.value: context_by_id[row.id] for row in processing_rows if row.id in context_by_id
         }
         # Enrich non-feed (writeup/discovery) indicators first so a flood of feed
         # IOCs cannot exhaust the VirusTotal/AbuseIPDB budget before them.
-        ordered_rows = sorted(
-            validated_rows,
-            key=lambda row: 0 if (context_by_value.get(row.value, {}).get("provenance") in {"writeup", "discovery"}) else 1,
-        )
+        ordered_rows = _ordered_processing_rows(processing_rows, context_by_value=context_by_value)
+        stage_durations["context"] = round(time.perf_counter() - stage_started, 2)
+        stage_started = time.perf_counter()
         enriched_items: list[EnrichedIOC] = await agents["enricher"].run(
             ordered_rows, context_by_value=context_by_value
         )
+        stage_durations["enrich"] = round(time.perf_counter() - stage_started, 2)
+        stage_started = time.perf_counter()
         await _persist_enrichment(enriched_items)
         scored_items: list[ScoredIOC] = await agents["scorer"].run(enriched_items)
         persisted_scored = await _persist_scoring(scored_items)
+        stage_durations["score"] = round(time.perf_counter() - stage_started, 2)
+        stage_started = time.perf_counter()
         async with AsyncSessionFactory() as session:
             corroboration = await get_corroboration(session, [row.id for row in persisted_scored])
+        persisted_by_identity = {
+            _ioc_identity(row.value, row.type, row.source): row for row in persisted_scored
+        }
         delivery_payload = []
-        for row, scored in zip(persisted_scored, scored_items, strict=False):
+        for scored in scored_items:
             payload = asdict(scored) if hasattr(scored, "__dataclass_fields__") else dict(scored)
+            row = persisted_by_identity.get(
+                _ioc_identity(payload["value"], payload["type"], payload["source"])
+            )
+            if row is None:
+                continue
             payload["id"] = str(row.id)
             payload["last_seen"] = row.last_seen
             payload["corroboration_sources"] = corroboration.get(row.id, 1)
             delivery_payload.append(payload)
         generated = await agents["rule_generator"].run(delivery_payload)
         await _persist_generated(generated)
+        stage_durations["generate"] = round(time.perf_counter() - stage_started, 2)
+        stage_started = time.perf_counter()
         delivery_result = await agents["delivery"].run(delivery_payload)
+        stage_durations["deliver"] = round(time.perf_counter() - stage_started, 2)
+        stage_durations["total"] = round(time.perf_counter() - run_started, 2)
+        logger.info(
+            "Pipeline completed scraped=%s validated_new=%s corroborated=%s processed=%s enriched=%s scored=%s generated=%s immediate_alerts=%s durations=%s",
+            len(raw_items),
+            len(validation_report.new_iocs),
+            len(validation_report.corroborated_iocs),
+            len(processing_rows),
+            len(enriched_items),
+            len(scored_items),
+            len(generated),
+            delivery_result.immediate_alerts,
+            stage_durations,
+        )
         return PipelineResult(
             scraped=len(raw_items),
-            validated=len(validated_rows),
+            validated=len(validation_report.new_iocs),
             enriched=len(enriched_items),
             scored=len(scored_items),
             generated=len(generated),
@@ -208,6 +268,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             sightings=validation_report.sightings_recorded,
             corroborated=len(validation_report.corroborated_iocs),
             discovered=discovered_count,
+            stage_durations=stage_durations,
         )
     finally:
         for key in ("scraper", "enricher", "rule_generator", "delivery"):
@@ -281,6 +342,10 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
     delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
     try:
         cutoff = datetime.now(UTC) - timedelta(hours=24)
+        candidate_pool_size = max(
+            int(settings.delivery.telegram_daily_digest_limit),
+            int(settings.delivery.telegram_digest_candidate_pool_size),
+        )
         async with AsyncSessionFactory() as session:
             rows = list(
                 (
@@ -289,7 +354,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                         .where(IOC.last_seen >= cutoff)
                         .where(IOC.risk_score.is_not(None))
                         .order_by(IOC.risk_score.desc(), IOC.last_seen.desc())
-                        .limit(settings.delivery.telegram_daily_digest_limit)
+                        .limit(candidate_pool_size)
                     )
                 ).all()
             )
@@ -316,7 +381,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
         ]
         for item in items:
             item["external_links"] = build_external_links_for_ioc(item)
-        return await delivery.daily_digest(items)
+        return await delivery.daily_digest(delivery._select_digest_candidates(items))
     finally:
         closer = getattr(delivery, "aclose", None)
         if closer is not None:
