@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator walter.filloco.icu
+id: walter-filloco-icu
+status: experimental
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "walter.filloco.icu"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

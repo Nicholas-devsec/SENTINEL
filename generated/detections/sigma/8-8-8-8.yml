@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 8.8.8.8
+id: 8-8-8-8
+status: experimental
+description: Outbound connection to known-bad IP (source: securelist_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "8.8.8.8"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1568.001
+  - attack.t1583.002
+  - attack.t1590.002

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "mirrors.ustc.edu.cn" or tostring(AdditionalFields) has "mirrors.ustc.edu.cn"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

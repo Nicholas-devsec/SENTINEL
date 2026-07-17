@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "audit.checkmarx.cx" or tostring(AdditionalFields) has "audit.checkmarx.cx"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

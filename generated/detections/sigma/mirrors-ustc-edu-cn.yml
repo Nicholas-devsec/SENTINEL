@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator mirrors.ustc.edu.cn
+id: mirrors-ustc-edu-cn
+status: experimental
+description: DNS resolution of known-bad domain (source: securelist_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "mirrors.ustc.edu.cn"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

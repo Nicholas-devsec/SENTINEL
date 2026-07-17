@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator looksta.icu
+id: looksta-icu
+status: experimental
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "looksta.icu"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

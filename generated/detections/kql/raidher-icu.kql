@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "raidher.icu" or tostring(AdditionalFields) has "raidher.icu"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

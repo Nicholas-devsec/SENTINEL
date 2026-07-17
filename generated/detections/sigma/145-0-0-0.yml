@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 145.0.0.0
+id: 145-0-0-0
+status: experimental
+description: Outbound connection to known-bad IP (source: securelist_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "145.0.0.0"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

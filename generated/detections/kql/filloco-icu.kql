@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "filloco.icu" or tostring(AdditionalFields) has "filloco.icu"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

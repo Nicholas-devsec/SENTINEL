@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator panalobet.ph
+id: panalobet-ph
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.group-ib.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "panalobet.ph"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001
