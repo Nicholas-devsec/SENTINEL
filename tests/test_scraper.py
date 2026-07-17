@@ -992,3 +992,30 @@ async def test_writeup_extraction_marks_ioc_section_for_curation_credit(settings
     assert {"malicious-c2.badcorp.top", "45.155.204.99"} <= {item.value for item in curated_items}
     # No section -> fallback labeling (may still find defanged/urls, but not curated).
     assert all(item.attributes["extraction_mode"] == "fallback" for item in prose_items)
+
+
+def test_writeup_extraction_caps_ioc_section_article_yield(settings: SentinelSettings) -> None:
+    from sentinel.agents.scraper import RawWriteup
+
+    settings.sources.writeup_search.max_iocs_per_article_ioc_section = 3
+    agent = ScraperAgent(settings=settings)
+    writeup = RawWriteup(
+        source="rapid7_blog",
+        source_trust=0.8,
+        url="https://www.rapid7.com/blog/post/example/",
+        title="Rapid7 large IOC appendix",
+        published_at=__import__("sentinel.agents.scraper", fromlist=["_now_utc"])._now_utc(),
+        content_text=(
+            "Indicators of Compromise\n"
+            "alpha.bad.example\n"
+            "beta.bad.example\n"
+            "gamma.bad.example\n"
+            "delta.bad.example\n"
+            "epsilon.bad.example\n"
+        ),
+    )
+
+    items = agent._extract_iocs_from_writeup(writeup)
+
+    assert len(items) == 3
+    assert all(item.attributes["extraction_mode"] == "ioc_section" for item in items)

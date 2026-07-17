@@ -6,11 +6,10 @@ from typing import Any
 from sentinel.config import SentinelSettings
 
 
-HIGH_SEVERITY_MIN_SCORE = 70.0
-MEDIUM_SEVERITY_MIN_SCORE = 50.0
-CURATED_IMMEDIATE_MIN_SCORE = 60.0
-CORROBORATED_CONTEXT_MIN_SCORE = 65.0
-CURATED_DIGEST_MIN_SCORE = 45.0
+MEDIUM_SEVERITY_MIN_SCORE = 40.0
+CURATED_IMMEDIATE_MIN_SCORE = 50.0
+CORROBORATED_CONTEXT_MIN_SCORE = 55.0
+CURATED_DIGEST_MIN_SCORE = 35.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,9 +63,8 @@ class AlertPolicy:
 
 
 def build_alert_policy(settings: SentinelSettings) -> AlertPolicy:
-    immediate_min_score = max(float(settings.thresholds.alert_score), HIGH_SEVERITY_MIN_SCORE)
     return AlertPolicy(
-        immediate_min_score=immediate_min_score,
+        immediate_min_score=float(settings.thresholds.alert_score),
         curated_immediate_min_score=CURATED_IMMEDIATE_MIN_SCORE,
         corroborated_context_min_score=CORROBORATED_CONTEXT_MIN_SCORE,
         digest_min_score=MEDIUM_SEVERITY_MIN_SCORE,

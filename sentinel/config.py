@@ -21,7 +21,7 @@ class ScheduleSettings(BaseModel):
 
 
 class ThresholdSettings(BaseModel):
-    alert_score: int = 70
+    alert_score: int = 60
     rule_score: int = 50
     karpathy_experiments: int = 25
     karpathy_budget_mins: int = 30
@@ -56,6 +56,8 @@ class WriteupSearchSettings(BaseModel):
     )
     max_candidates_per_source: int = 5
     fetch_budget_seconds: int = 60
+    max_iocs_per_article_ioc_section: int = 50
+    max_iocs_per_article_fallback: int = 15
 
 
 class SourceMixSettings(BaseModel):

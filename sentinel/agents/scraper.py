@@ -902,9 +902,13 @@ class ScraperAgent(BaseAgent):
         if section is not None:
             extracted = extract_iocs_from_section(section.text, exclude_hostnames=exclude)
             extraction_mode = "ioc_section"
+            max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_ioc_section)
         else:
             extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
             extraction_mode = "fallback"
+            max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
+        if max_items > 0:
+            extracted = extracted[:max_items]
         records: list[RawIOC] = []
         for candidate in extracted:
             records.append(
@@ -923,6 +927,7 @@ class ScraperAgent(BaseAgent):
                         "article_url": writeup.url,
                         "extraction": "regex-v1",
                         "extraction_mode": extraction_mode,
+                        "ioc_section_label": candidate.section_label,
                     },
                     provenance="writeup",
                 )

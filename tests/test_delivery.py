@@ -406,6 +406,51 @@ async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_disco
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_uses_recent_medium_score_fallback_for_digest_when_policy_qualifies_none() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 60
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "weak.example",
+            "type": "domain",
+            "source": "discovery:publisher.example",
+            "risk_score": 12.0,
+            "severity": "informational",
+            "last_seen": now,
+            "provenance": "discovery",
+            "extraction_mode": "fallback",
+            "attributes": {"provenance": "discovery", "extraction_mode": "fallback"},
+        },
+        {
+            "id": str(uuid4()),
+            "value": "medium.example",
+            "type": "domain",
+            "source": "feed-a",
+            "risk_score": 31.0,
+            "severity": "informational",
+            "last_seen": now,
+            "provenance": "feed",
+            "extraction_mode": "feed",
+            "attributes": {"provenance": "feed", "extraction_mode": "feed"},
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 0
+    assert result.digest_candidates == 1
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_can_disable_immediate_telegram_alerts() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
@@ -669,6 +714,112 @@ async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_daily_digest_groups_all_iocs_from_same_article() -> None:
+    telegram_bot = FakeTelegramBot()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "alpha.bad.example",
+            "type": "domain",
+            "source": "securelist_blog",
+            "risk_score": 44.0,
+            "severity": "informational",
+            "source_title": "Same article with multiple IOCs",
+            "reference_url": "https://securelist.example/report",
+            "related_cves": [],
+            "external_links": {},
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "beta.bad.example",
+            "type": "domain",
+            "source": "securelist_blog",
+            "risk_score": 43.0,
+            "severity": "informational",
+            "source_title": "Same article with multiple IOCs",
+            "reference_url": "https://securelist.example/report",
+            "related_cves": [],
+            "external_links": {},
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+    ]
+
+    response = await agent.daily_digest(items)
+
+    assert response["count"] == 1
+    assert len(telegram_bot.messages) == 2
+    assert "SENTINEL Daily Digest 1/1" in telegram_bot.messages[1]["text"]
+    assert "2 IOC(s)" in telegram_bot.messages[1]["text"]
+    assert "alpha.bad.example" in telegram_bot.messages[1]["text"]
+    assert "beta.bad.example" in telegram_bot.messages[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_daily_digest_merges_same_campaign_across_duplicate_writeups() -> None:
+    telegram_bot = FakeTelegramBot()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "goserpent-a.bad.example",
+            "type": "domain",
+            "source": "securelist_blog",
+            "risk_score": 36.48,
+            "severity": "informational",
+            "source_title": "GoSerpent: a persistent threat evolves with sophisticated data collection and exfiltration",
+            "reference_url": "https://securelist.example/goserpent",
+            "related_cves": [],
+            "external_links": {},
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "goserpent-b.bad.example",
+            "type": "domain",
+            "source": "gbhackers_blog",
+            "risk_score": 36.39,
+            "severity": "informational",
+            "source_title": "GoSerpent Silently Steals Government Files for Weeks Before Sending Them to Hackers",
+            "reference_url": "https://gbhackers.com/goserpent-steals-government-files/",
+            "related_cves": [],
+            "external_links": {},
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+    ]
+
+    response = await agent.daily_digest(items)
+
+    assert response["count"] == 1
+    assert len(telegram_bot.messages) == 2
+    assert "1/1" in telegram_bot.messages[1]["text"]
+    assert "2 IOC(s)" in telegram_bot.messages[1]["text"]
+    assert "goserpent-a.bad.example" in telegram_bot.messages[1]["text"]
+    assert "goserpent-b.bad.example" in telegram_bot.messages[1]["text"]
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_requires_digest_threshold_for_web_discovery() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
@@ -832,6 +983,31 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
     assert "\nIOC\n" in rendered
     assert "- [ipv4] 162.243.103.246" in rendered
     assert "IPv4 infrastructure indicator" in rendered
+
+
+def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
+    from sentinel.delivery.telegram_bot import format_grouped_alert_message
+
+    rendered = format_grouped_alert_message(
+        source="securelist_blog",
+        risk_score=37.14,
+        severity="informational",
+        source_title="HelloNet campaign",
+        reference_url="https://securelist.example/hellonet",
+        iocs=[
+            {"type": "md5", "value": "16c211c96735f2fae9361b89bd7a31bf", "section_label": "HelloBackdoor"},
+            {"type": "md5", "value": "6001829a128fe264b4403138700c11a8", "section_label": "HelloBackdoor Droppers"},
+            {"type": "ipv4", "value": "5.39.253.206", "section_label": "wtsapi32.dll"},
+        ],
+        mitre_techniques=[],
+        mitre_tactics=[],
+    )
+
+    assert "HelloBackdoor" in rendered
+    assert "HelloBackdoor Droppers" in rendered
+    assert "wtsapi32.dll" in rendered
+    assert "[md5] 16c211c96735f2fae9361b89bd7a31bf" in rendered
+    assert "[ipv4] 5.39.253.206" in rendered
 
 
 def test_format_alert_message_shows_hash_intel_links() -> None:

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from sendgrid import SendGridAPIClient
@@ -28,6 +30,65 @@ from sentinel.delivery.telegram_bot import (
 
 
 logger = logging.getLogger(__name__)
+FALLBACK_DIGEST_MIN_SCORE = 25.0
+CAMPAIGN_STOPWORDS = {
+    "about",
+    "access",
+    "account",
+    "accounts",
+    "against",
+    "analyst",
+    "attack",
+    "attacks",
+    "breach",
+    "campaign",
+    "credential",
+    "credentials",
+    "cyber",
+    "data",
+    "delivers",
+    "delivery",
+    "evolves",
+    "files",
+    "for",
+    "from",
+    "government",
+    "group",
+    "hackers",
+    "harvest",
+    "impacting",
+    "indicator",
+    "indicators",
+    "information",
+    "intel",
+    "kit",
+    "kits",
+    "loader",
+    "malware",
+    "phishing",
+    "persistent",
+    "payload",
+    "payloads",
+    "ransomware",
+    "real",
+    "report",
+    "research",
+    "security",
+    "silently",
+    "sophisticated",
+    "stealer",
+    "steals",
+    "sending",
+    "targets",
+    "threat",
+    "toolkit",
+    "toolkits",
+    "update",
+    "uses",
+    "using",
+    "weeks",
+    "with",
+}
 
 
 @dataclass(slots=True)
@@ -137,7 +198,11 @@ class DeliveryAgent(BaseAgent):
                 {
                     **primary,
                     "grouped_iocs": [
-                        {"type": member["type"], "value": member["value"]}
+                        {
+                            "type": member["type"],
+                            "value": member["value"],
+                            "section_label": member.get("attributes", {}).get("ioc_section_label"),
+                        }
                         for member in ordered
                     ],
                     "related_cves": sorted(
@@ -177,6 +242,137 @@ class DeliveryAgent(BaseAgent):
         cards.extend(singles)
         cards.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
         return cards
+
+    def _title_tokens(self, item: dict[str, Any]) -> set[str]:
+        title = str(item.get("source_title") or "").lower()
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", title)
+            if len(token) >= 5 and token not in CAMPAIGN_STOPWORDS
+        }
+
+    def _campaign_signature(self, item: dict[str, Any]) -> frozenset[str]:
+        tokens = self._title_tokens(item)
+        if tokens:
+            return frozenset(sorted(tokens))
+        reference_url = str(item.get("reference_url") or "").strip()
+        host = urlparse(reference_url).hostname or ""
+        host_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", host.lower())
+            if len(token) >= 5 and token not in {"www", "blog", "news", "com", "org", "net"}
+        }
+        return frozenset(sorted(host_tokens))
+
+    def _ioc_entries_for_card(self, item: dict[str, Any]) -> list[dict[str, Any]]:
+        grouped = item.get("grouped_iocs") or []
+        if grouped:
+            return [
+                {
+                    "type": str(member.get("type", "unknown")),
+                    "value": str(member.get("value", "")),
+                    "section_label": member.get("section_label"),
+                }
+                for member in grouped
+            ]
+        return [
+            {
+                "type": str(item.get("type", "unknown")),
+                "value": str(item.get("value", "")),
+                "section_label": item.get("attributes", {}).get("ioc_section_label"),
+            }
+        ]
+
+    def _merge_digest_card(self, base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        merged_iocs: dict[tuple[str, str], dict[str, str]] = {}
+        for member in self._ioc_entries_for_card(base) + self._ioc_entries_for_card(incoming):
+            key = (member["type"], member["value"])
+            merged_iocs[key] = member
+        related_titles = sorted(
+            {
+                title
+                for title in [
+                    base.get("source_title"),
+                    incoming.get("source_title"),
+                    *(base.get("attributes", {}).get("related_titles") or []),
+                    *(incoming.get("attributes", {}).get("related_titles") or []),
+                ]
+                if title
+            }
+        )
+        related_urls = sorted(
+            {
+                url
+                for url in [
+                    base.get("reference_url"),
+                    incoming.get("reference_url"),
+                    *(base.get("attributes", {}).get("related_urls") or []),
+                    *(incoming.get("attributes", {}).get("related_urls") or []),
+                ]
+                if url
+            }
+        )
+        primary = base
+        secondary = incoming
+        if float(incoming.get("risk_score", 0.0)) > float(base.get("risk_score", 0.0)):
+            primary, secondary = incoming, base
+        attributes = dict(primary.get("attributes", {}))
+        attributes["related_titles"] = related_titles
+        attributes["related_urls"] = related_urls
+        attributes["similar_article_count"] = len(related_urls) or len(related_titles) or 1
+        return {
+            **primary,
+            "grouped_iocs": sorted(
+                merged_iocs.values(),
+                key=lambda entry: (
+                    str(entry.get("section_label") or ""),
+                    entry["type"],
+                    entry["value"],
+                ),
+            ),
+            "related_cves": sorted({*primary.get("related_cves", []), *secondary.get("related_cves", [])}),
+            "mitre_techniques": sorted({*primary.get("mitre_techniques", []), *secondary.get("mitre_techniques", [])}),
+            "mitre_tactics": sorted({*primary.get("mitre_tactics", []), *secondary.get("mitre_tactics", [])}),
+            "corroboration_sources": max(
+                int(primary.get("corroboration_sources", 1) or 1),
+                int(secondary.get("corroboration_sources", 1) or 1),
+            ),
+            "last_seen": max(
+                self._sort_last_seen_value(primary.get("last_seen")),
+                self._sort_last_seen_value(secondary.get("last_seen")),
+            ),
+            "attributes": attributes,
+        }
+
+    def _dedupe_digest_cards(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cards = self._group_immediate_alerts(items)
+        cards.sort(
+            key=lambda item: (
+                float(item.get("risk_score", 0.0)),
+                self._sort_last_seen_value(item.get("last_seen")),
+            ),
+            reverse=True,
+        )
+        deduped: list[dict[str, Any]] = []
+        for card in cards:
+            signature = self._campaign_signature(card)
+            merged = False
+            if signature:
+                for index, existing in enumerate(deduped):
+                    if signature & self._campaign_signature(existing):
+                        deduped[index] = self._merge_digest_card(existing, card)
+                        merged = True
+                        break
+            if not merged:
+                deduped.append(card)
+        deduped.sort(
+            key=lambda item: (
+                float(item.get("risk_score", 0.0)),
+                self._sort_last_seen_value(item.get("last_seen")),
+            ),
+            reverse=True,
+        )
+        return deduped
 
     def _is_web_discovery_item(self, item: dict[str, Any]) -> bool:
         return str(item.get("source") or "").strip().lower().startswith("discovery:")
@@ -218,11 +414,19 @@ class DeliveryAgent(BaseAgent):
 
     def _select_digest_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         policy = self._alert_policy()
-        return [
+        qualified = [
             item
             for item in items
             if self._within_last_24_hours(item.get("last_seen"))
             and policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
+        ]
+        if qualified:
+            return qualified
+        return [
+            item
+            for item in items
+            if self._within_last_24_hours(item.get("last_seen"))
+            and float(item.get("risk_score", 0.0)) >= FALLBACK_DIGEST_MIN_SCORE
         ]
 
     async def send_immediate_alert(self, item: dict[str, Any]) -> bool:
@@ -459,8 +663,8 @@ class DeliveryAgent(BaseAgent):
         return f"{prefix}: {label}"
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
-        sorted_items = sorted(items, key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
-        top_items = sorted_items[: self.settings.delivery.telegram_daily_digest_limit]
+        digest_cards = self._dedupe_digest_cards(items)
+        top_items = digest_cards[: self.settings.delivery.telegram_daily_digest_limit]
         result: dict[str, Any] = {
             "telegram": {"status": "disabled", "sent": False},
             "email": {"status": "disabled"},
@@ -478,24 +682,43 @@ class DeliveryAgent(BaseAgent):
                     ),
                 )
                 for index, item in enumerate(top_items, start=1):
-                    message = format_alert_message(
-                        heading=f"SENTINEL Daily Digest {index}/{len(top_items)}",
-                        value=item["value"],
-                        ioc_type=item["type"],
-                        source=item["source"],
-                        risk_score=float(item["risk_score"]),
-                        severity=item["severity"],
-                        last_seen=item.get("last_seen"),
-                        source_title=item.get("source_title"),
-                        reference_url=item.get("reference_url"),
-                        related_cves=item.get("related_cves", []),
-                        vt_detections=item.get("vt_detections"),
-                        abuse_confidence=item.get("abuse_confidence"),
-                        shodan_ports=item.get("shodan_ports", []),
-                        external_links=item.get("external_links", {}),
-                        mitre_techniques=item.get("mitre_techniques", []),
-                        mitre_tactics=item.get("mitre_tactics", []),
-                    )
+                    grouped_iocs = item.get("grouped_iocs") or []
+                    if grouped_iocs:
+                        message = format_grouped_alert_message(
+                            heading=f"SENTINEL Daily Digest {index}/{len(top_items)}",
+                            source=item["source"],
+                            risk_score=float(item["risk_score"]),
+                            severity=item["severity"],
+                            iocs=grouped_iocs,
+                            last_seen=item.get("last_seen"),
+                            source_title=item.get("source_title"),
+                            reference_url=item.get("reference_url"),
+                            related_cves=item.get("related_cves", []),
+                            corroboration_sources=item.get("corroboration_sources"),
+                            mitre_techniques=item.get("mitre_techniques", []),
+                            mitre_tactics=item.get("mitre_tactics", []),
+                            attributes=item.get("attributes", {}),
+                        )
+                    else:
+                        message = format_alert_message(
+                            heading=f"SENTINEL Daily Digest {index}/{len(top_items)}",
+                            value=item["value"],
+                            ioc_type=item["type"],
+                            source=item["source"],
+                            risk_score=float(item["risk_score"]),
+                            severity=item["severity"],
+                            last_seen=item.get("last_seen"),
+                            source_title=item.get("source_title"),
+                            reference_url=item.get("reference_url"),
+                            related_cves=item.get("related_cves", []),
+                            vt_detections=item.get("vt_detections"),
+                            abuse_confidence=item.get("abuse_confidence"),
+                            shodan_ports=item.get("shodan_ports", []),
+                            external_links=item.get("external_links", {}),
+                            mitre_techniques=item.get("mitre_techniques", []),
+                            mitre_tactics=item.get("mitre_tactics", []),
+                            attributes=item.get("attributes", {}),
+                        )
                     await self.telegram_bot.send_message(
                         chat_id=self.settings.delivery.telegram_chat_id,
                         text=message,

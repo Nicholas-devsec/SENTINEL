@@ -268,3 +268,43 @@ def test_section_extraction_respects_exclusions() -> None:
     extracted = {item.value for item in extract_iocs_from_section(section.text, exclude_hostnames={"blog.vendor.com"})}
     assert "real-c2.badcorp.io" in extracted
     assert "blog.vendor.com" not in extracted
+
+
+def test_securelist_style_ioc_subheadings_are_kept_and_labeled() -> None:
+    text = """Indicators of Compromise
+HelloBackdoor
+16C211C96735F2FAE9361B89BD7A31BF
+1BFE2B9493128574907A8279256A8BCC
+f9eed2f0158dc98e7012fb809152209c
+
+HelloBackdoor Droppers:
+6001829A128FE264B4403138700C11A8 - infotecs\\vipnet client\\puh.exe
+EE4FF46DDD8489E81447962F927BC3F6 - infotecs\\vipnet client\\store.exe
+
+Utility for adding exclusions to Windows Defender:
+41c938b3cd7e55d4077e34976929b140
+
+wtsapi32.dll
+B103CD21280B4061F88B2BCC51394894
+9F5606A0755BC633B9BD7DB6D179C09E
+0CFDFFC56F0FA325D0C4D24780B46597
+
+5.39.253.206
+176.32.34.135
+
+Detected TTPs:
+T1036.004
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = extract_iocs_from_section(section.text)
+    keyed = {(item.type, item.value): item.section_label for item in extracted}
+    assert ("md5", "16c211c96735f2fae9361b89bd7a31bf") in keyed
+    assert ("md5", "1bfe2b9493128574907a8279256a8bcc") in keyed
+    assert ("md5", "f9eed2f0158dc98e7012fb809152209c") in keyed
+    assert keyed[("md5", "16c211c96735f2fae9361b89bd7a31bf")] == "HelloBackdoor"
+    assert keyed[("md5", "6001829a128fe264b4403138700c11a8")] == "HelloBackdoor Droppers"
+    assert keyed[("md5", "41c938b3cd7e55d4077e34976929b140")] == "Utility for adding exclusions to Windows Defender"
+    assert keyed[("md5", "b103cd21280b4061f88b2bcc51394894")] == "wtsapi32.dll"
+    assert keyed[("ipv4", "5.39.253.206")] == "wtsapi32.dll"
+    assert keyed[("ipv4", "176.32.34.135")] == "wtsapi32.dll"

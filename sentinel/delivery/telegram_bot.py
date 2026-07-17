@@ -268,9 +268,14 @@ def format_grouped_alert_message(
         "",
         "IOCs",
     ]
+    active_label: str | None = None
     for item in iocs[:MAX_GROUPED_IOCS]:
         ioc_type = str(item.get("type", "unknown"))
         value = _normalize_ioc_display(str(item.get("value", "")), ioc_type)
+        section_label = str(item.get("section_label") or "").strip() or None
+        if section_label and section_label != active_label:
+            lines.append(section_label)
+            active_label = section_label
         summary = summarize_ioc(
             value=str(item.get("value", "")),
             ioc_type=ioc_type,

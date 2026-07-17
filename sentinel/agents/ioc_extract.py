@@ -53,6 +53,7 @@ DEFANGED_URL_SCHEME_PREFIX_RE = re.compile(r"(?:^|[^a-zA-Z0-9])h..ps?(?:\[:\]|:)
 class ExtractedIOC:
     type: str
     value: str
+    section_label: str | None = None
 
 
 def refang(text: str) -> str:
@@ -343,6 +344,14 @@ def _is_heading_line(line: str, signals: tuple[str, ...] | list[str]) -> bool:
     return any(signal in lowered for signal in signals)
 
 
+def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
+    for candidate in lines[start_index:]:
+        stripped = candidate.strip()
+        if stripped:
+            return stripped
+    return None
+
+
 # Labels that commonly appear beside indicator values in IOC tables and lists.
 # A line/cell that is only one of these must never terminate an IOC section.
 INDICATOR_TYPE_LABELS = {
@@ -394,6 +403,17 @@ def _looks_like_indicator_line(line: str) -> bool:
     return any(_cell_indicator_token(cell) is not None for cell in cells)
 
 
+def _looks_like_section_subheading(line: str, next_nonempty: str | None) -> bool:
+    stripped = line.strip()
+    if not stripped or _looks_like_indicator_line(line) or _is_indicator_type_label(stripped):
+        return False
+    if len(stripped) > MAX_HEADING_CHARS:
+        return False
+    if next_nonempty is None or not _looks_like_indicator_line(next_nonempty):
+        return False
+    return len(stripped.split()) <= 8
+
+
 def _strong_indicator_line_count(lines: list[str]) -> int:
     strong = 0
     for line in lines:
@@ -412,7 +432,7 @@ def find_ioc_section(
     """Locate an explicit IOC/indicators section, or an unlabelled indicator table."""
     lines = text.splitlines()
 
-    def is_next_topic_heading(line: str, collected_indicators: int) -> bool:
+    def is_next_topic_heading(line: str, collected_indicators: int, next_nonempty: str | None) -> bool:
         """A short capitalized non-indicator line after indicators = new section."""
         stripped = line.strip()
         if not stripped or collected_indicators == 0:
@@ -420,6 +440,8 @@ def find_ioc_section(
         # Table/list layouts interleave label cells ("Domain", "SHA256",
         # "Type | Value") with indicator values; labels continue the section.
         if all(_is_indicator_type_label(cell) for cell in stripped.split("|") if cell.strip()):
+            return False
+        if _looks_like_section_subheading(line, next_nonempty):
             return False
         return (
             len(stripped) <= 60
@@ -434,8 +456,9 @@ def find_ioc_section(
             continue
         body: list[str] = []
         indicator_count = 0
-        for candidate in lines[index + 1 :]:
-            if is_next_topic_heading(candidate, indicator_count):
+        for offset, candidate in enumerate(lines[index + 1 :], start=index + 2):
+            next_nonempty = _next_nonempty_line(lines, offset)
+            if is_next_topic_heading(candidate, indicator_count, next_nonempty):
                 break
             body.append(candidate)
             if _looks_like_indicator_line(candidate):
@@ -470,11 +493,25 @@ def extract_iocs_from_section(
     excluded = {host.lower() for host in (exclude_hostnames or set())}
     found = extract_iocs_from_text(section_text, exclude_hostnames=excluded)
     found = _augment_root_urls_with_path_cells(section_text, found)
-    already = {(item.type, item.value.lower()) for item in found}
+
+    label_by_key: dict[tuple[str, str], str | None] = {}
+    found_keys = {(item.type, item.value.lower()) for item in found}
     url_hosts = {
         (urlparse(item.value).hostname or "").lower() for item in found if item.type == "url"
     }
-    for line in section_text.splitlines():
+    lines = section_text.splitlines()
+    current_label: str | None = None
+    for index, line in enumerate(lines):
+        next_nonempty = _next_nonempty_line(lines, index + 1)
+        if _looks_like_section_subheading(line, next_nonempty):
+            current_label = line.strip().rstrip(":").strip()
+            continue
+        for item in extract_iocs_from_text(line, exclude_hostnames=excluded):
+            key = (item.type, item.value.lower())
+            if key not in found_keys:
+                found.append(item)
+                found_keys.add(key)
+            label_by_key.setdefault(key, current_label)
         # Table rows arrive as `label | value` lines; treat each cell as a
         # potential bare-domain list entry.
         for cell in line.split("|"):
@@ -486,8 +523,26 @@ def extract_iocs_from_section(
                 continue
             if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
                 continue
-            if token in excluded or token in url_hosts or ("domain", token) in already:
+            if token in excluded or token in url_hosts:
                 continue
-            already.add(("domain", token))
-            found.append(ExtractedIOC(type="domain", value=token))
-    return found
+            key = ("domain", token)
+            if key not in found_keys:
+                found.append(ExtractedIOC(type="domain", value=token))
+                found_keys.add(key)
+            label_by_key.setdefault(("domain", token), current_label)
+
+    enriched: list[ExtractedIOC] = []
+    seen: set[tuple[str, str]] = set()
+    for item in found:
+        key = (item.type, item.value.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        enriched.append(
+            ExtractedIOC(
+                type=item.type,
+                value=item.value,
+                section_label=label_by_key.get(key),
+            )
+        )
+    return enriched
