@@ -308,3 +308,29 @@ T1036.004
     assert keyed[("md5", "b103cd21280b4061f88b2bcc51394894")] == "wtsapi32.dll"
     assert keyed[("ipv4", "5.39.253.206")] == "wtsapi32.dll"
     assert keyed[("ipv4", "176.32.34.135")] == "wtsapi32.dll"
+
+
+def test_find_ioc_section_prefers_real_section_over_table_of_contents_entry() -> None:
+    text = """Table of Contents
+Persistence via the update system
+Indicators of Compromise
+Recommendations
+
+Body text begins here.
+Lots of prose.
+Recommendations
+Do the thing.
+Indicators of Compromise
+HelloBackdoor
+16C211C96735F2FAE9361B89BD7A31BF
+1BFE2B9493128574907A8279256A8BCC
+5.39.253[.]206
+176.32.34[.]135
+Detected TTPs
+T1036.004
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    assert "HelloBackdoor" in section.text
+    assert "16C211C96735F2FAE9361B89BD7A31BF" in section.text
+    assert "5.39.253[.]206" in section.text

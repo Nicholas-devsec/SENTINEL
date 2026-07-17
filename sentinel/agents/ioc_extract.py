@@ -371,16 +371,17 @@ def _is_indicator_type_label(text: str) -> bool:
 def _cell_indicator_token(cell: str) -> str | None:
     """First token of a short list/table cell, if it is indicator-shaped."""
     stripped = refang(cell.strip().lstrip("-*•").strip())
-    if not stripped or len(stripped.split()) > 3:
+    if not stripped:
         return None
-    token = stripped.split()[0].rstrip(",;")
+    parts = stripped.split()
+    token = parts[0].rstrip(",;")
     if MD5_RE.fullmatch(token) or SHA1_RE.fullmatch(token) or SHA256_RE.fullmatch(token):
         return token
     if URL_RE.fullmatch(token) or CVE_RE.fullmatch(token):
         return token
     if IPV4_RE.fullmatch(token):
         return token
-    if BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
+    if len(parts) <= 3 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
         return token
     return None
 
@@ -451,6 +452,8 @@ def find_ioc_section(
             and not any(signal in stripped.lower() for signal in signals)
         )
 
+    best_heading_section: IOCSection | None = None
+    best_heading_score: tuple[int, int, int] | None = None
     for index, line in enumerate(lines):
         if not _is_heading_line(line, signals):
             continue
@@ -467,7 +470,14 @@ def find_ioc_section(
                 break
         section_text = "\n".join(body).strip()
         if section_text:
-            return IOCSection(heading=line.strip(), text=section_text, signal="heading")
+            strong_count = _strong_indicator_line_count(body)
+            score = (indicator_count, strong_count, index)
+            if best_heading_score is None or score > best_heading_score:
+                best_heading_score = score
+                best_heading_section = IOCSection(heading=line.strip(), text=section_text, signal="heading")
+
+    if best_heading_section is not None:
+        return best_heading_section
 
     # Structural fallback: a dense run of indicator-shaped lines.
     run: list[str] = []
@@ -530,6 +540,8 @@ def extract_iocs_from_section(
                 found.append(ExtractedIOC(type="domain", value=token))
                 found_keys.add(key)
             label_by_key.setdefault(("domain", token), current_label)
+
+    found = _augment_root_urls_with_path_cells(section_text, found)
 
     enriched: list[ExtractedIOC] = []
     seen: set[tuple[str, str]] = set()
