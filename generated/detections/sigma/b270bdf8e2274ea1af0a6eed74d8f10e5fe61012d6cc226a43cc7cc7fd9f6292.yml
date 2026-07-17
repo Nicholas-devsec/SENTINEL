@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator b270bdf8e2274ea1af0a6eed74d8f10e5fe61012d6cc226a43cc7cc7fd9f6292
+id: b270bdf8e2274ea1af0a6eed74d8f10e5fe61012d6cc226a43cc7cc7fd9f6292
+status: experimental
+description: Execution of file with known-bad SHA256 (source: discovery:www.microsoft.com)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=b270bdf8e2274ea1af0a6eed74d8f10e5fe61012d6cc226a43cc7cc7fd9f6292"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672
