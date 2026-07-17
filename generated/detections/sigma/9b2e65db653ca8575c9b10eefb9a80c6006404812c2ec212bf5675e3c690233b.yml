@@ -1,7 +1,7 @@
 title: SENTINEL file hash indicator 9b2e65db653ca8575c9b10eefb9a80c6006404812c2ec212bf5675e3c690233b
 id: 9b2e65db653ca8575c9b10eefb9a80c6006404812c2ec212bf5675e3c690233b
 status: experimental
-description: Execution of file with known-bad SHA256 (source: discovery:www.microsoft.com)
+description: Execution of file with known-bad SHA256 (source: unit42_blog)
 logsource:
   category: process_creation
 detection:

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "bittorrent.com" or tostring(AdditionalFields) has "bittorrent.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

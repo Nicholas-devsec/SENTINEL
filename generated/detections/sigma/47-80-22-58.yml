@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 47.80.22.58
+id: 47-80-22-58
+status: experimental
+description: Outbound connection to known-bad IP (source: securelist_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "47.80.22.58"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1578.004

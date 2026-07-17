@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator e0c3bc27a65750e740c4f1719e531c7d
+id: e0c3bc27a65750e740c4f1719e531c7d
+status: experimental
+description: Execution of file with known-bad MD5 (source: securelist_blog)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "MD5=e0c3bc27a65750e740c4f1719e531c7d"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

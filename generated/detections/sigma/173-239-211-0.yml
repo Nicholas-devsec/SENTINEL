@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 173.239.211.0
+id: 173-239-211-0
+status: experimental
+description: Outbound connection to known-bad IP (source: rapid7_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "173.239.211.0"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1078.002

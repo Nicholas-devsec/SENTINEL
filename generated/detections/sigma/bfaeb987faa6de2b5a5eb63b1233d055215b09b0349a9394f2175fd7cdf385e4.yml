@@ -1,7 +1,7 @@
 title: SENTINEL file hash indicator bfaeb987faa6de2b5a5eb63b1233d055215b09b0349a9394f2175fd7cdf385e4
 id: bfaeb987faa6de2b5a5eb63b1233d055215b09b0349a9394f2175fd7cdf385e4
 status: experimental
-description: Execution of file with known-bad SHA256 (source: discovery:www.microsoft.com)
+description: Execution of file with known-bad SHA256 (source: unit42_blog)
 logsource:
   category: process_creation
 detection:
@@ -14,6 +14,6 @@ fields:
   - Hashes
 level: informational
 tags:
-  - attack.t1593.002
-  - attack.t1195.002
-  - attack.t1036.004
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

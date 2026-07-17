@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 8.220.214.132
+id: 8-220-214-132
+status: experimental
+description: Outbound connection to known-bad IP (source: securelist_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "8.220.214.132"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

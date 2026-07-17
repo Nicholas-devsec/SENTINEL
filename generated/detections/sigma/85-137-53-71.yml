@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 85.137.53.71
+id: 85-137-53-71
+status: experimental
+description: Outbound connection to known-bad IP (source: unit42_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "85.137.53.71"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1559.001
+  - attack.t1136.002

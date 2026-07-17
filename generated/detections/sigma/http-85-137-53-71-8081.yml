@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator http://85.137.53.71:8081/
+id: http-85-137-53-71-8081
+status: experimental
+description: Web request to known-bad URL (source: unit42_blog)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "http://85.137.53.71:8081/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672
