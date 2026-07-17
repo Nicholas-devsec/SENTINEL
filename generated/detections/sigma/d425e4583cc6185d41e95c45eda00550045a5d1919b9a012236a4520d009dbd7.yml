@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator d425e4583cc6185d41e95c45eda00550045a5d1919b9a012236a4520d009dbd7
+id: d425e4583cc6185d41e95c45eda00550045a5d1919b9a012236a4520d009dbd7
+status: experimental
+description: Execution of file with known-bad SHA256 (source: discovery:www.microsoft.com)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=d425e4583cc6185d41e95c45eda00550045a5d1919b9a012236a4520d009dbd7"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

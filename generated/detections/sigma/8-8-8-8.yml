@@ -14,6 +14,6 @@ fields:
   - DestinationPort
 level: informational
 tags:
+  - attack.t1568.001
   - attack.t1583.002
-  - attack.t1071.004
   - attack.t1590.002
