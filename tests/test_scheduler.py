@@ -47,6 +47,30 @@ def test_build_scheduler_uses_configured_timezone_and_7am_digest(monkeypatch) ->
             pass
 
 
+def test_build_scheduler_uses_configured_cron_expressions(monkeypatch) -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.schedule.pipeline_cron = "15 6 * * *"
+    settings.schedule.daily_digest_cron = "20 6 * * *"
+    monkeypatch.setattr(cron, "get_settings", lambda: settings)
+    scheduler = cron.build_scheduler()
+    try:
+        pipeline_job = scheduler.get_job("scrape-pipeline")
+        digest_job = scheduler.get_job("daily-digest")
+        assert pipeline_job is not None
+        assert digest_job is not None
+        pipeline_fields = {field.name: str(field) for field in pipeline_job.trigger.fields}
+        digest_fields = {field.name: str(field) for field in digest_job.trigger.fields}
+        assert pipeline_fields["hour"] == "6"
+        assert pipeline_fields["minute"] == "15"
+        assert digest_fields["hour"] == "6"
+        assert digest_fields["minute"] == "20"
+    finally:
+        try:
+            scheduler.shutdown(wait=False)
+        except SchedulerNotRunningError:
+            pass
+
+
 def test_build_karpathy_scheduler_registers_only_karpathy_job(monkeypatch) -> None:
     settings = build_settings().model_copy(deep=True)
     settings.schedule.enable_karpathy_job = True

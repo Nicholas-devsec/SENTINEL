@@ -1,10 +1,19 @@
 schedule:
   scrape_interval_hours: 4
+  pipeline_cron: "0 7 * * *"
   daily_digest_time: "07:00"
+  daily_digest_cron: "5 7 * * *"
   timezone: "America/Vancouver"
   karpathy_loop_day: "sunday"
+  karpathy_loop_cron: "0 3 * * 0"
   enable_karpathy_job: false
   karpathy_loop_type: "source"
+
+workflow:
+  feed_ioc_store_limit_per_run: 250
+  article_store_limit_per_run: 5
+  telegram_feed_alert_limit_per_run: 5
+  telegram_article_alert_limit_per_run: 2
 
 thresholds:
   alert_score: 70
@@ -100,6 +109,9 @@ discovery:
   # Additive analyst-style discovery pass. Runs inside the pipeline only when
   # enabled; `sentinel discover` runs it standalone for tuning either way.
   enabled: true
+  blocked_article_false_positive_threshold: 1
+  blocked_host_false_positive_threshold: 2
+  blocked_host_max_score: 0.35
   profiles:
     - name: crimeware-fresh
       enabled: true

@@ -558,17 +558,22 @@ class DiscoveryMemoryStore:
 
     async def _load_labeled_sightings(self, session: Any) -> list[dict[str, Any]]:
         query = (
-            select(FeedbackRecord.verdict, IOCSighting.source, IOCSighting.attributes)
+            select(FeedbackRecord.verdict, IOCSighting.source, IOCSighting.attributes, IOCSighting.reference_url)
             .select_from(FeedbackRecord)
             .join(IOC, IOC.id == FeedbackRecord.ioc_id)
             .join(IOCSighting, IOCSighting.ioc_id == IOC.id)
-            .where(IOCSighting.provenance == "discovery")
+            .where(IOCSighting.provenance.in_(["discovery", "writeup"]))
             .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive", "needs_review"]))
         )
         rows = (await session.execute(query)).all()
         return [
-            {"verdict": verdict, "source": source, "attributes": attributes or {}}
-            for verdict, source, attributes in rows
+            {
+                "verdict": verdict,
+                "source": source,
+                "attributes": attributes or {},
+                "reference_url": reference_url,
+            }
+            for verdict, source, attributes, reference_url in rows
         ]
 
     def _fold(self, rows: list[dict[str, Any]]) -> dict[tuple[str, str, str | None], dict[str, int]]:
@@ -586,6 +591,12 @@ class DiscoveryMemoryStore:
             attributes = row["attributes"]
             profile = attributes.get("search_profile")
             bump("source", row["source"], profile, verdict)
+            article_url = str(attributes.get("article_url") or row.get("reference_url") or "").strip()
+            if article_url:
+                bump("article_url", article_url, profile, verdict)
+                publisher_host = (urlparse(article_url).hostname or "").lower()
+                if publisher_host:
+                    bump("publisher_host", publisher_host, profile, verdict)
             mode = attributes.get("extraction_mode")
             if mode:
                 bump("extraction_mode", str(mode), profile, verdict)
@@ -622,6 +633,44 @@ class DiscoveryMemoryStore:
                 await session.scalars(select(DiscoveryMemory).where(DiscoveryMemory.kind == "source"))
             ).all()
         return {row.key: row.score for row in rows}
+
+    async def publisher_host_scores(self) -> dict[str, float]:
+        async with self.session_factory() as session:
+            rows = (
+                await session.scalars(select(DiscoveryMemory).where(DiscoveryMemory.kind == "publisher_host"))
+            ).all()
+        return {row.key: row.score for row in rows}
+
+    async def blocked_article_urls(
+        self,
+        *,
+        min_false_positives: int,
+    ) -> set[str]:
+        async with self.session_factory() as session:
+            rows = (
+                await session.scalars(select(DiscoveryMemory).where(DiscoveryMemory.kind == "article_url"))
+            ).all()
+        return {
+            row.key
+            for row in rows
+            if row.false_positive >= max(1, min_false_positives) and row.false_positive > row.confirmed
+        }
+
+    async def blocked_publisher_hosts(
+        self,
+        *,
+        min_false_positives: int,
+        max_score: float,
+    ) -> set[str]:
+        async with self.session_factory() as session:
+            rows = (
+                await session.scalars(select(DiscoveryMemory).where(DiscoveryMemory.kind == "publisher_host"))
+            ).all()
+        return {
+            row.key
+            for row in rows
+            if row.false_positive >= max(1, min_false_positives) and row.false_positive > row.confirmed and row.score <= max_score
+        }
 
     async def all_rows(self) -> list[DiscoveryMemory]:
         async with self.session_factory() as session:
@@ -710,6 +759,7 @@ class DiscoveryAgent(BaseAgent):
         *,
         weights: dict[str, float],
         memory_scores: dict[str, float],
+        host_scores: dict[str, float],
     ) -> Candidate:
         keywords = [keyword.strip().lower() for keyword in profile.keywords if keyword.strip()]
         title = (writeup.title or "").lower()
@@ -719,7 +769,10 @@ class DiscoveryAgent(BaseAgent):
         title_component = 1.0 if any(keyword in title for keyword in keywords) else 0.0
         age_hours = max((self.now_fn() - writeup.published_at).total_seconds() / 3600.0, 0.0)
         freshness_component = max(0.0, 1.0 - age_hours / max(profile.freshness_hours, 1))
-        memory_component = memory_scores.get(writeup.source, 0.5)
+        publisher_host = (urlparse(writeup.url).hostname or "").lower()
+        source_memory = memory_scores.get(writeup.source, 0.5)
+        host_memory = host_scores.get(publisher_host, 0.5)
+        memory_component = (source_memory + host_memory) / 2.0
         score = (
             weights.get("keyword_hits", 0.0) * keyword_component
             + weights.get("title_keyword_bonus", 0.0) * title_component
@@ -1082,9 +1135,20 @@ class DiscoveryAgent(BaseAgent):
         signals = self.section_signals()
         try:
             memory_scores = await self.memory.source_scores()
+            host_scores = await self.memory.publisher_host_scores()
+            blocked_urls = await self.memory.blocked_article_urls(
+                min_false_positives=self.settings.discovery.blocked_article_false_positive_threshold
+            )
+            blocked_hosts = await self.memory.blocked_publisher_hosts(
+                min_false_positives=self.settings.discovery.blocked_host_false_positive_threshold,
+                max_score=float(self.settings.discovery.blocked_host_max_score),
+            )
         except Exception as exc:
             self.logger.info("Discovery memory unavailable (%s); using neutral triage memory.", type(exc).__name__)
             memory_scores = {}
+            host_scores = {}
+            blocked_urls = set()
+            blocked_hosts = set()
 
         candidates_raw = await self._gather_candidates(profile)
         diagnostic.candidates_seen = len(candidates_raw)
@@ -1097,7 +1161,18 @@ class DiscoveryAgent(BaseAgent):
             if not self._host_allowed(profile, writeup.url):
                 diagnostic.skipped_denied_host += 1
                 continue
-            candidate = self._score_candidate(profile, writeup, weights=weights, memory_scores=memory_scores)
+            article_url = str(writeup.url or "").strip().lower()
+            publisher_host = (urlparse(writeup.url).hostname or "").lower()
+            if article_url in blocked_urls or (publisher_host and publisher_host in blocked_hosts):
+                diagnostic.skipped_denied_host += 1
+                continue
+            candidate = self._score_candidate(
+                profile,
+                writeup,
+                weights=weights,
+                memory_scores=memory_scores,
+                host_scores=host_scores,
+            )
             if candidate.score < gating["min_triage_score"]:
                 diagnostic.skipped_low_score += 1
                 continue

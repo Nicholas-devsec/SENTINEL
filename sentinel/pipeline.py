@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy import or_
 
 from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.enricher import EnrichedIOC, EnrichmentAgent
@@ -41,6 +42,50 @@ class PipelineResult:
     corroborated: int = 0
     discovered: int = 0
     stage_durations: dict[str, float] | None = field(default=None, compare=False)
+
+
+def _is_article_item(item: Any) -> bool:
+    provenance = str(getattr(item, "provenance", None) or "").strip().lower()
+    return provenance in {"writeup", "discovery"} and bool(str(getattr(item, "reference_url", None) or "").strip())
+
+
+def _apply_workflow_limits(
+    settings: SentinelSettings,
+    *,
+    raw_items: list[Any],
+    writeups: list[RawWriteup],
+) -> tuple[list[Any], list[RawWriteup]]:
+    feed_limit = max(0, int(settings.workflow.feed_ioc_store_limit_per_run))
+    article_limit = max(0, int(settings.workflow.article_store_limit_per_run))
+
+    feed_items = [item for item in raw_items if not _is_article_item(item)]
+    article_items = [item for item in raw_items if _is_article_item(item)]
+
+    if feed_limit > 0:
+        feed_items = feed_items[:feed_limit]
+    else:
+        feed_items = []
+
+    article_url_order: list[str] = []
+    seen_urls: set[str] = set()
+    for writeup in writeups:
+        url = str(writeup.url or "").strip()
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            article_url_order.append(url)
+    if not article_url_order:
+        for item in article_items:
+            url = str(getattr(item, "reference_url", None) or "").strip()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                article_url_order.append(url)
+
+    kept_article_urls = set(article_url_order[:article_limit]) if article_limit > 0 else set()
+    article_items = [
+        item for item in article_items if str(getattr(item, "reference_url", None) or "").strip() in kept_article_urls
+    ]
+    writeups = [writeup for writeup in writeups if str(writeup.url or "").strip() in kept_article_urls]
+    return [*feed_items, *article_items], writeups
 
 
 def _ordered_processing_rows(
@@ -215,6 +260,11 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             raw_items = [*raw_items, *discovery_report.items]
             all_writeups.extend(discovery_report.writeups)
             discovered_count = len(discovery_report.items)
+        raw_items, all_writeups = _apply_workflow_limits(
+            settings,
+            raw_items=raw_items,
+            writeups=all_writeups,
+        )
         stage_started = time.perf_counter()
         source_material_ids = await _persist_writeups(all_writeups, raw_items)
         validation_report = await agents["validator"].run_with_report(
@@ -388,6 +438,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                         select(IOC)
                         .where(IOC.last_seen >= cutoff)
                         .where(IOC.risk_score.is_not(None))
+                        .where(or_(IOC.analyst_verdict.is_(None), IOC.analyst_verdict != "false_positive"))
                         .order_by(IOC.risk_score.desc(), IOC.last_seen.desc())
                         .limit(candidate_pool_size)
                     )

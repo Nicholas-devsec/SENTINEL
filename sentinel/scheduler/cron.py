@@ -66,16 +66,21 @@ async def karpathy_loop_job() -> None:
 def build_scheduler() -> AsyncIOScheduler:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
-    scheduler.add_job(
-        scrape_pipeline,
-        IntervalTrigger(hours=settings.schedule.scrape_interval_hours),
-        id="scrape-pipeline",
-        replace_existing=True,
-    )
-    hour, minute = settings.schedule.daily_digest_time.split(":")
+    pipeline_cron = str(settings.schedule.pipeline_cron or "").strip()
+    if pipeline_cron:
+        pipeline_trigger = CronTrigger.from_crontab(pipeline_cron, timezone=settings.schedule.timezone)
+    else:
+        pipeline_trigger = IntervalTrigger(hours=settings.schedule.scrape_interval_hours)
+    scheduler.add_job(scrape_pipeline, pipeline_trigger, id="scrape-pipeline", replace_existing=True)
+    digest_cron = str(settings.schedule.daily_digest_cron or "").strip()
+    if digest_cron:
+        digest_trigger = CronTrigger.from_crontab(digest_cron, timezone=settings.schedule.timezone)
+    else:
+        hour, minute = settings.schedule.daily_digest_time.split(":")
+        digest_trigger = CronTrigger(hour=int(hour), minute=int(minute), timezone=settings.schedule.timezone)
     scheduler.add_job(
         daily_digest_job,
-        CronTrigger(hour=int(hour), minute=int(minute), timezone=settings.schedule.timezone),
+        digest_trigger,
         id="daily-digest",
         replace_existing=True,
     )
@@ -88,14 +93,19 @@ def build_karpathy_scheduler() -> AsyncIOScheduler:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
     if settings.schedule.enable_karpathy_job:
-        scheduler.add_job(
-            karpathy_loop_job,
-            CronTrigger(
+        karpathy_cron = str(settings.schedule.karpathy_loop_cron or "").strip()
+        if karpathy_cron:
+            trigger = CronTrigger.from_crontab(karpathy_cron, timezone=settings.schedule.timezone)
+        else:
+            trigger = CronTrigger(
                 day_of_week=_normalize_day_of_week(settings.schedule.karpathy_loop_day),
                 hour=3,
                 minute=0,
                 timezone=settings.schedule.timezone,
-            ),
+            )
+        scheduler.add_job(
+            karpathy_loop_job,
+            trigger,
             id="karpathy-loop",
             replace_existing=True,
         )

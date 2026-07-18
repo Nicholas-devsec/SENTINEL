@@ -170,6 +170,12 @@ class DeliveryAgent(BaseAgent):
             return value
         return datetime.min.replace(tzinfo=UTC)
 
+    def _is_article_card(self, item: dict[str, Any]) -> bool:
+        provenance = str(item.get("provenance") or item.get("attributes", {}).get("provenance") or "").strip().lower()
+        reference_url = str(item.get("reference_url") or "").strip()
+        grouped = item.get("grouped_iocs") or []
+        return bool(reference_url) and (provenance in {"writeup", "discovery"} or bool(grouped))
+
     def _group_immediate_alerts(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         singles: list[dict[str, Any]] = []
@@ -425,6 +431,23 @@ class DeliveryAgent(BaseAgent):
             selected.append(item)
         return selected
 
+    def _apply_delivery_limits(self, cards: list[dict[str, Any]], *, apply_burst_cap: bool = True) -> list[dict[str, Any]]:
+        feed_limit = max(0, int(self.settings.workflow.telegram_feed_alert_limit_per_run))
+        article_limit = max(0, int(self.settings.workflow.telegram_article_alert_limit_per_run))
+        feed_cards: list[dict[str, Any]] = []
+        article_cards: list[dict[str, Any]] = []
+        for card in cards:
+            if self._is_article_card(card):
+                article_cards.append(card)
+            else:
+                feed_cards.append(card)
+        limited = [*feed_cards[:feed_limit], *article_cards[:article_limit]]
+        limited.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
+        burst_cap = max(0, int(self.settings.delivery.telegram_max_alerts_per_run))
+        if apply_burst_cap and burst_cap > 0:
+            return limited[:burst_cap]
+        return limited
+
     def _select_digest_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         policy = self._alert_policy()
         qualified = [
@@ -441,6 +464,108 @@ class DeliveryAgent(BaseAgent):
             if self._within_last_24_hours(item.get("last_seen"))
             and float(item.get("risk_score", 0.0)) >= FALLBACK_DIGEST_MIN_SCORE
         ]
+
+    async def _load_ioc_row(self, session: Any, parsed_ioc_id: UUID | str) -> IOC | None:
+        if not hasattr(session, "execute") and not hasattr(session, "get"):
+            return None
+        getter = getattr(session, "get", None)
+        if getter is not None and isinstance(parsed_ioc_id, UUID):
+            row = await getter(IOC, parsed_ioc_id)
+            if row is not None:
+                return row
+        result = await session.execute(select(IOC).where(IOC.id == parsed_ioc_id).limit(1))
+        return result.scalar_one_or_none()
+
+    async def _record_feedback_with_session(
+        self,
+        *,
+        session: Any,
+        ioc_id: UUID | str,
+        analyst_id: str,
+        verdict: str,
+        channel: str,
+    ) -> FeedbackRecord:
+        existing = await self._find_existing_feedback(
+            session=session,
+            ioc_id=ioc_id,
+            analyst_id=analyst_id,
+            channel=channel,
+        )
+        row = await self._load_ioc_row(session, ioc_id)
+        if existing is not None and existing.verdict == verdict:
+            if row is not None:
+                row.analyst_verdict = verdict
+            return existing
+        record = FeedbackRecord(
+            ioc_id=ioc_id,
+            analyst_id=analyst_id,
+            verdict=verdict,
+            timestamp=datetime.now(UTC),
+            channel=channel,
+            source=row.source if row is not None else None,
+        )
+        if row is not None:
+            row.analyst_verdict = verdict
+        session.add(record)
+        return record
+
+    async def _feedback_target_ids(self, session: Any, *, parsed_ioc_id: UUID | str) -> list[UUID | str]:
+        if hasattr(session, "feedback_target_ids"):
+            return list(await session.feedback_target_ids(parsed_ioc_id))
+        if not hasattr(session, "execute") and not hasattr(session, "get"):
+            return [parsed_ioc_id]
+        row = await self._load_ioc_row(session, parsed_ioc_id)
+        if row is None:
+            return []
+        result = await session.execute(
+            select(IOCSighting.provenance, IOCSighting.reference_url).where(IOCSighting.ioc_id == parsed_ioc_id)
+        )
+        sightings = result.all()
+        article_urls = {
+            str(reference_url).strip()
+            for provenance, reference_url in sightings
+            if str(provenance or "").strip().lower() in {"writeup", "discovery"} and str(reference_url or "").strip()
+        }
+        if not article_urls:
+            return [parsed_ioc_id]
+        target_ids: set[UUID | str] = {parsed_ioc_id}
+        for article_url in article_urls:
+            sibling_rows = await session.execute(
+                select(IOCSighting.ioc_id).where(IOCSighting.reference_url == article_url)
+            )
+            target_ids.update(ioc_id for (ioc_id,) in sibling_rows.all())
+        return list(target_ids)
+
+    async def _suppress_false_positive_scope(
+        self,
+        *,
+        parsed_ioc_id: UUID | str,
+        analyst_id: str,
+        channel: str = "telegram",
+    ) -> tuple[int, bool]:
+        async with self.session_factory() as session:
+            target_ids = await self._feedback_target_ids(session, parsed_ioc_id=parsed_ioc_id)
+            if not target_ids:
+                return 0, False
+            changed = False
+            for target_id in target_ids:
+                existing = await self._find_existing_feedback(
+                    session=session,
+                    ioc_id=target_id,
+                    analyst_id=analyst_id,
+                    channel=channel,
+                )
+                if existing is None or existing.verdict != "false_positive":
+                    changed = True
+                await self._record_feedback_with_session(
+                    session=session,
+                    ioc_id=target_id,
+                    analyst_id=analyst_id,
+                    verdict="false_positive",
+                    channel=channel,
+                )
+            await session.commit()
+            return len(target_ids), changed
 
     async def send_immediate_alert(self, item: dict[str, Any]) -> bool:
         if self.telegram_bot is None:
@@ -513,33 +638,13 @@ class DeliveryAgent(BaseAgent):
         except ValueError:
             parsed_ioc_id = ioc_id
         async with self.session_factory() as session:
-            existing = await self._find_existing_feedback(
+            record = await self._record_feedback_with_session(
                 session=session,
                 ioc_id=parsed_ioc_id,
                 analyst_id=analyst_id,
-                channel=channel,
-            )
-            getter = getattr(session, "get", None)
-            row = None
-            if getter is not None and isinstance(parsed_ioc_id, UUID):
-                row = await getter(IOC, parsed_ioc_id)
-            if existing is not None:
-                if existing.verdict == normalized:
-                    if row is not None:
-                        row.analyst_verdict = normalized
-                    await session.commit()
-                    return existing
-            record = FeedbackRecord(
-                ioc_id=parsed_ioc_id,
-                analyst_id=analyst_id,
                 verdict=normalized,
-                timestamp=datetime.now(UTC),
                 channel=channel,
-                source=row.source if row is not None else None,
             )
-            if row is not None:
-                row.analyst_verdict = normalized
-            session.add(record)
             await session.commit()
             return record
 
@@ -548,19 +653,21 @@ class DeliveryAgent(BaseAgent):
         analyst_id = str(query.from_user.id)
         logger.info("Received Telegram feedback callback verdict=%s ioc_id=%s analyst_id=%s", verdict, ioc_id, analyst_id)
         try:
-            if verdict == "remove_ioc":
-                removed = await self.remove_ioc_from_db(ioc_id=ioc_id)
+            try:
+                parsed_ioc_id: UUID | str = UUID(str(ioc_id))
+            except ValueError:
+                parsed_ioc_id = ioc_id
+            if verdict == "false_positive":
+                affected, changed = await self._suppress_false_positive_scope(
+                    parsed_ioc_id=parsed_ioc_id,
+                    analyst_id=analyst_id,
+                    channel="telegram",
+                )
                 await query.answer(
-                    "Removed IOC from database" if removed else "IOC was already absent",
+                    "Already suppressed" if not changed else f"Recorded FP and suppressed {affected} IOC(s)",
                     show_alert=True,
                 )
-                logger.info(
-                    "Processed Telegram IOC removal ioc_id=%s analyst_id=%s removed=%s",
-                    ioc_id,
-                    analyst_id,
-                    removed,
-                )
-                return removed
+                return affected
             existing = await self._feedback_exists(
                 ioc_id=ioc_id,
                 analyst_id=analyst_id,
@@ -670,14 +777,15 @@ class DeliveryAgent(BaseAgent):
         label = {
             "confirmed": "confirmed",
             "false_positive": "false positive",
-            "needs_review": "needs review",
         }.get(verdict, verdict.replace("_", " "))
         prefix = "Already recorded" if repeated else "Recorded"
         return f"{prefix}: {label}"
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
         digest_cards = self._dedupe_digest_cards(items)
-        top_items = digest_cards[: self.settings.delivery.telegram_daily_digest_limit]
+        top_items = self._apply_delivery_limits(digest_cards, apply_burst_cap=False)[
+            : self.settings.delivery.telegram_daily_digest_limit
+        ]
         result: dict[str, Any] = {
             "telegram": {"status": "disabled", "sent": False},
             "email": {"status": "disabled"},
@@ -765,7 +873,7 @@ class DeliveryAgent(BaseAgent):
         if self.settings.delivery.enable_telegram_immediate_alerts:
             immediate_candidates = self._select_immediate_candidates(items)
             immediate = self._group_immediate_alerts(immediate_candidates)
-            immediate = immediate[: self.settings.delivery.telegram_max_alerts_per_run]
+            immediate = self._apply_delivery_limits(immediate)
         digest_candidates = self._select_digest_candidates(items)
         sent_immediate = 0
         for item in immediate:

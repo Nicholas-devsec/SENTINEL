@@ -333,6 +333,8 @@ class ValidationAgent(BaseAgent):
             row = batch_rows.get(item.dedupe_hash)
             if row is None:
                 row = await session.scalar(select(IOC).where(IOC.dedupe_hash == item.dedupe_hash))
+            if row is not None and str(row.analyst_verdict or "").strip().lower() == "false_positive":
+                continue
             if row is None:
                 row = IOC(
                     value=item.normalized_value,

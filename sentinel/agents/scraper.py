@@ -15,9 +15,11 @@ from typing import Any, Protocol
 import feedparser
 import httpx
 from redis.asyncio import Redis
+from sqlalchemy import select
 
 from sentinel.agents.base import BaseAgent
 from sentinel.config import SentinelSettings, _is_disabled_value, _is_missing_secret, get_settings
+from sentinel.db.models import DiscoveryMemory
 
 
 TRUST_SCORES_SECTION = re.compile(r"## Trust Scores\s+(.*?)(?:\n## |\Z)", re.DOTALL)
@@ -939,11 +941,19 @@ class ScraperAgent(BaseAgent):
     ) -> tuple[list[RawWriteup], list[RawIOC], SourceScrapeDiagnostic]:
         timeout_seconds = float(self.settings.sources.http_timeout_seconds)
         writeups = await asyncio.wait_for(adapter.fetch_writeups(), timeout=timeout_seconds)
+        blocked_urls, blocked_hosts = await self._load_feedback_suppressions()
         cutoff = self._writeup_cutoff()
         fresh = [writeup for writeup in writeups if writeup.published_at >= cutoff]
         stale = len(writeups) - len(fresh)
         matching = [writeup for writeup in fresh if self._matches_writeup_search(writeup)]
-        limited = sorted(matching, key=lambda writeup: writeup.published_at, reverse=True)[
+        filtered: list[RawWriteup] = []
+        for writeup in matching:
+            url = str(writeup.url or "").strip().lower()
+            host = (httpx.URL(writeup.url).host or "").lower() if str(writeup.url or "").strip() else ""
+            if url in blocked_urls or (host and host in blocked_hosts):
+                continue
+            filtered.append(writeup)
+        limited = sorted(filtered, key=lambda writeup: writeup.published_at, reverse=True)[
             : self.settings.sources.writeup_search.max_candidates_per_source
         ]
         deadline = asyncio.get_running_loop().time() + max(
@@ -973,6 +983,32 @@ class ScraperAgent(BaseAgent):
             iocs_extracted=len(extracted),
         )
         return processed, extracted, diagnostic
+
+    async def _load_feedback_suppressions(self) -> tuple[set[str], set[str]]:
+        try:
+            from sentinel.db.session import AsyncSessionFactory
+        except Exception:
+            return set(), set()
+        async with AsyncSessionFactory() as session:
+            rows = (
+                await session.scalars(
+                    select(DiscoveryMemory).where(DiscoveryMemory.kind.in_(["article_url", "publisher_host"]))
+                )
+            ).all()
+        blocked_urls: set[str] = set()
+        blocked_hosts: set[str] = set()
+        for row in rows:
+            if row.kind == "article_url":
+                if row.false_positive >= max(1, int(self.settings.discovery.blocked_article_false_positive_threshold)) and row.false_positive > row.confirmed:
+                    blocked_urls.add(row.key.lower())
+            elif row.kind == "publisher_host":
+                if (
+                    row.false_positive >= max(1, int(self.settings.discovery.blocked_host_false_positive_threshold))
+                    and row.false_positive > row.confirmed
+                    and float(row.score) <= float(self.settings.discovery.blocked_host_max_score)
+                ):
+                    blocked_hosts.add(row.key.lower())
+        return blocked_urls, blocked_hosts
 
     async def publish_to_queue(self, iocs: Iterable[RawIOC]) -> int:
         redis_url = self.settings.db.redis_url

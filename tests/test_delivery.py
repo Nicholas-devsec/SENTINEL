@@ -168,6 +168,7 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
 async def test_delivery_agent_limits_telegram_alert_burst() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
+    settings.workflow.telegram_feed_alert_limit_per_run = 2
     settings.delivery.telegram_max_alerts_per_run = 2
     agent = DeliveryAgent(
         settings=settings,
@@ -488,10 +489,9 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     record = await agent.handle_callback_query(query)
 
     assert query.answered is True
-    assert query.answer_text == "Recorded: false positive"
+    assert query.answer_text == "Recorded FP and suppressed 1 IOC(s)"
     assert query.show_alert is True
-    assert str(record.ioc_id) == ioc_id
-    assert record.verdict == "false_positive"
+    assert record == 1
     assert session_factory.storage[0].analyst_id == "42"
 
 
@@ -521,47 +521,6 @@ async def test_delivery_agent_acknowledges_duplicate_feedback_without_duplicatin
 
 
 @pytest.mark.asyncio
-async def test_delivery_agent_removes_ioc_from_database_via_callback() -> None:
-    session_factory = FakeSessionFactory()
-    agent = DeliveryAgent(
-        settings=build_settings(),
-        telegram_bot=FakeTelegramBot(),
-        sendgrid_client=FakeSendGridClient(),
-        session_factory=session_factory,
-    )
-    ioc_id = str(uuid4())
-    query = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
-
-    removed = await agent.handle_callback_query(query)
-
-    assert removed is True
-    assert query.answered is True
-    assert query.answer_text == "Removed IOC from database"
-    assert query.show_alert is True
-    assert ioc_id in session_factory.removed_iocs
-
-
-@pytest.mark.asyncio
-async def test_delivery_agent_acknowledges_repeated_ioc_removal() -> None:
-    session_factory = FakeSessionFactory()
-    agent = DeliveryAgent(
-        settings=build_settings(),
-        telegram_bot=FakeTelegramBot(),
-        sendgrid_client=FakeSendGridClient(),
-        session_factory=session_factory,
-    )
-    ioc_id = str(uuid4())
-
-    first = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
-    second = FakeQuery(data=f"remove_ioc:{ioc_id}", user_id="42")
-
-    assert await agent.handle_callback_query(first) is True
-    assert await agent.handle_callback_query(second) is False
-    assert first.answer_text == "Removed IOC from database"
-    assert second.answer_text == "IOC was already absent"
-
-
-@pytest.mark.asyncio
 async def test_delivery_agent_appends_retriage_feedback_event() -> None:
     session_factory = FakeSessionFactory()
     agent = DeliveryAgent(
@@ -580,8 +539,8 @@ async def test_delivery_agent_appends_retriage_feedback_event() -> None:
 
     assert len(session_factory.storage) == 2
     assert [item.verdict for item in session_factory.storage] == ["confirmed", "false_positive"]
-    assert second.answer_text == "Recorded: false positive"
-    assert record.verdict == "false_positive"
+    assert second.answer_text == "Recorded FP and suppressed 1 IOC(s)"
+    assert record == 1
 
 
 @pytest.mark.asyncio
@@ -679,6 +638,8 @@ async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
     settings.delivery.telegram_daily_digest_limit = 5
+    settings.workflow.telegram_feed_alert_limit_per_run = 5
+    settings.workflow.telegram_article_alert_limit_per_run = 0
     agent = DeliveryAgent(
         settings=settings,
         telegram_bot=telegram_bot,
@@ -711,6 +672,40 @@ async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
     assert "- [domain] ioc-0" not in joined
     assert "- [domain] ioc-2" not in joined
     assert "- [domain] ioc-6" not in joined
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_applies_separate_article_and_feed_limits() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.delivery.telegram_daily_digest_limit = 10
+    settings.workflow.telegram_feed_alert_limit_per_run = 2
+    settings.workflow.telegram_article_alert_limit_per_run = 1
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {"id": str(uuid4()), "value": "feed-1", "type": "domain", "source": "threatfox", "risk_score": 90.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "feed-2", "type": "domain", "source": "threatfox", "risk_score": 89.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "feed-3", "type": "domain", "source": "threatfox", "risk_score": 88.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "art-1-a", "type": "domain", "source": "securelist_blog", "risk_score": 87.0, "severity": "high", "last_seen": now, "reference_url": "https://a.example/report", "source_title": "Article A", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "art-1-b", "type": "ipv4", "source": "securelist_blog", "risk_score": 86.0, "severity": "high", "last_seen": now, "reference_url": "https://a.example/report", "source_title": "Article A", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "art-2-a", "type": "domain", "source": "gbhackers_blog", "risk_score": 85.0, "severity": "high", "last_seen": now, "reference_url": "https://b.example/report", "source_title": "Article B", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+    ]
+
+    response = await agent.daily_digest(items)
+
+    assert response["count"] == 3
+    rendered = "\n".join(message["text"] for message in telegram_bot.messages)
+    assert "feed-1" in rendered
+    assert "feed-2" in rendered
+    assert "feed-3" not in rendered
+    assert "Article A" in rendered
+    assert "Article B" not in rendered
 
 
 @pytest.mark.asyncio

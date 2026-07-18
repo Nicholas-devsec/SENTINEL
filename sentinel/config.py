@@ -13,11 +13,21 @@ from pydantic import BaseModel, Field
 
 class ScheduleSettings(BaseModel):
     scrape_interval_hours: int = 4
+    pipeline_cron: str | None = None
     daily_digest_time: str = "07:00"
+    daily_digest_cron: str | None = None
     timezone: str = "America/Vancouver"
     karpathy_loop_day: str = "sunday"
+    karpathy_loop_cron: str | None = None
     enable_karpathy_job: bool = False
     karpathy_loop_type: str = "source"
+
+
+class WorkflowSettings(BaseModel):
+    feed_ioc_store_limit_per_run: int = 250
+    article_store_limit_per_run: int = 5
+    telegram_feed_alert_limit_per_run: int = 5
+    telegram_article_alert_limit_per_run: int = 2
 
 
 class ThresholdSettings(BaseModel):
@@ -120,6 +130,9 @@ class DiscoverySettings(BaseModel):
     # Off by default: the discovery stage only joins run_pipeline_once when
     # explicitly enabled. `sentinel discover` can always run it standalone.
     enabled: bool = False
+    blocked_article_false_positive_threshold: int = 1
+    blocked_host_false_positive_threshold: int = 2
+    blocked_host_max_score: float = 0.35
     profiles: list[DiscoveryProfile] = Field(default_factory=list)
 
 
@@ -211,6 +224,7 @@ class KarpathySettings(BaseModel):
 
 class SentinelSettings(BaseModel):
     schedule: ScheduleSettings = Field(default_factory=ScheduleSettings)
+    workflow: WorkflowSettings = Field(default_factory=WorkflowSettings)
     thresholds: ThresholdSettings = Field(default_factory=ThresholdSettings)
     sources: SourceSettings = Field(default_factory=SourceSettings)
     discovery: DiscoverySettings = Field(default_factory=DiscoverySettings)

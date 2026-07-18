@@ -1058,8 +1058,14 @@ async def test_memory_sync_folds_feedback_and_informs_triage(db_session_factory)
     assert written >= 3  # source x2, extraction_mode, keyword rows
 
     scores = await store.source_scores()
+    host_scores = await store.publisher_host_scores()
+    blocked_urls = await store.blocked_article_urls(min_false_positives=1)
+    blocked_hosts = await store.blocked_publisher_hosts(min_false_positives=2, max_score=0.35)
     assert scores["discovery:good.vendor.test"] == pytest.approx(3 / 4)  # (2+1)/(2+2)
     assert scores["discovery:noisy.vendor.test"] == pytest.approx(1 / 5)  # (0+1)/(3+2)
+    assert host_scores["good.vendor.test"] == pytest.approx(3 / 4)
+    assert "https://noisy.vendor.test/post-2" in blocked_urls
+    assert "noisy.vendor.test" in blocked_hosts
 
     # Sync is idempotent.
     await store.sync()
@@ -1091,8 +1097,21 @@ async def test_memory_sync_folds_feedback_and_informs_triage(db_session_factory)
         )
 
     memory_scores = await store.source_scores()
-    good = agent._score_candidate(profile, writeup("discovery:good.vendor.test"), weights=weights, memory_scores=memory_scores)
-    noisy = agent._score_candidate(profile, writeup("discovery:noisy.vendor.test"), weights=weights, memory_scores=memory_scores)
+    host_scores = await store.publisher_host_scores()
+    good = agent._score_candidate(
+        profile,
+        writeup("discovery:good.vendor.test"),
+        weights=weights,
+        memory_scores=memory_scores,
+        host_scores=host_scores,
+    )
+    noisy = agent._score_candidate(
+        profile,
+        writeup("discovery:noisy.vendor.test"),
+        weights=weights,
+        memory_scores=memory_scores,
+        host_scores=host_scores,
+    )
     assert good.score > noisy.score
 
 
