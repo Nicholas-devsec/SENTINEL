@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://arb1.arbitrum.io/rpc
+id: https-arb1-arbitrum-io-rpc
+status: experimental
+description: Web request to known-bad URL (source: discovery:www.ox.security)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://arb1.arbitrum.io/rpc"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

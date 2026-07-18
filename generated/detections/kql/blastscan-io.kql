@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "blastscan.io" or tostring(AdditionalFields) has "blastscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

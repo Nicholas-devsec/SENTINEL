@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rpc.bsquared.network" or tostring(AdditionalFields) has "rpc.bsquared.network"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

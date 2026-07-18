@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "explorer.cronos.org" or tostring(AdditionalFields) has "explorer.cronos.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

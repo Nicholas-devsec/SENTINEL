@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl startswith "https://rpc.berachain.com/"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator rpc.dogechain.dog
+id: rpc-dogechain-dog
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.ox.security)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "rpc.dogechain.dog"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1036.005

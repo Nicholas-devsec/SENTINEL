@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator forno.celo.org
+id: forno-celo-org
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.ox.security)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "forno.celo.org"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

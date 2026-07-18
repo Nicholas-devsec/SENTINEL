@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "babel-api.mainnet.iotex.io" or tostring(AdditionalFields) has "babel-api.mainnet.iotex.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

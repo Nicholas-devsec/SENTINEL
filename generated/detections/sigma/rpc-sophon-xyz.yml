@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator rpc.sophon.xyz
+id: rpc-sophon-xyz
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.ox.security)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "rpc.sophon.xyz"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

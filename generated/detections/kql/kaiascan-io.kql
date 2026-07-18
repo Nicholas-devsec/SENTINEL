@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "kaiascan.io" or tostring(AdditionalFields) has "kaiascan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

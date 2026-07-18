@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "api.wemix.com" or tostring(AdditionalFields) has "api.wemix.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

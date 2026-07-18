@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "explorer.gobob.xyz" or tostring(AdditionalFields) has "explorer.gobob.xyz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "token-claw.xyz" or tostring(AdditionalFields) has "token-claw.xyz"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

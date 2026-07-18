@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "explorer.zora.energy" or tostring(AdditionalFields) has "explorer.zora.energy"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

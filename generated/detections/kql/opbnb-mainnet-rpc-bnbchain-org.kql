@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "opbnb-mainnet-rpc.bnbchain.org" or tostring(AdditionalFields) has "opbnb-mainnet-rpc.bnbchain.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

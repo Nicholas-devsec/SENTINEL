@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://polygon-rpc.com/
+id: https-polygon-rpc-com
+status: experimental
+description: Web request to known-bad URL (source: discovery:www.ox.security)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://polygon-rpc.com/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1559.001
+  - attack.t1546.015
+  - attack.t1021.003

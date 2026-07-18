@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "optimistic.etherscan.io" or tostring(AdditionalFields) has "optimistic.etherscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "moonriver.moonscan.io" or tostring(AdditionalFields) has "moonriver.moonscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

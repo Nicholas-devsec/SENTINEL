@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "moonbeam.public.blastapi.io" or tostring(AdditionalFields) has "moonbeam.public.blastapi.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

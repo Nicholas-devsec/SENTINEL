@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "forno.celo.org" or tostring(AdditionalFields) has "forno.celo.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

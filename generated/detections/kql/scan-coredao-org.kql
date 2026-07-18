@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "scan.coredao.org" or tostring(AdditionalFields) has "scan.coredao.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

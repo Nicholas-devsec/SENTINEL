@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gnosisscan.io" or tostring(AdditionalFields) has "gnosisscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

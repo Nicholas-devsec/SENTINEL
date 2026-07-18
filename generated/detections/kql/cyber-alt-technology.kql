@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "cyber.alt.technology" or tostring(AdditionalFields) has "cyber.alt.technology"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

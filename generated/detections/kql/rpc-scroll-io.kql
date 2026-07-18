@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rpc.scroll.io" or tostring(AdditionalFields) has "rpc.scroll.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

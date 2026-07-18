@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "arbiscan.io" or tostring(AdditionalFields) has "arbiscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

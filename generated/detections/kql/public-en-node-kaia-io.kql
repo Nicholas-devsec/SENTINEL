@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "public-en.node.kaia.io" or tostring(AdditionalFields) has "public-en.node.kaia.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

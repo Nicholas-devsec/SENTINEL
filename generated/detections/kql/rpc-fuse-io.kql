@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rpc.fuse.io" or tostring(AdditionalFields) has "rpc.fuse.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

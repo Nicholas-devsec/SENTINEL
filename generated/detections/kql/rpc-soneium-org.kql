@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rpc.soneium.org" or tostring(AdditionalFields) has "rpc.soneium.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "rpc.merlinchain.io" or tostring(AdditionalFields) has "rpc.merlinchain.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

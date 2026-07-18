@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://meldcrypto.com/
+id: https-meldcrypto-com
+status: experimental
+description: Web request to known-bad URL (source: discovery:www.ox.security)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://meldcrypto.com/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1027.017
+  - attack.t1596.004
+  - attack.t1204.003

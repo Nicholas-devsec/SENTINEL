@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator api.mainnet.abs.xyz
+id: api-mainnet-abs-xyz
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.ox.security)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "api.mainnet.abs.xyz"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

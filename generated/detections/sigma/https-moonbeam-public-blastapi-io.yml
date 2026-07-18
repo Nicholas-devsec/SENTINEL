@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://moonbeam.public.blastapi.io/
+id: https-moonbeam-public-blastapi-io
+status: experimental
+description: Web request to known-bad URL (source: discovery:www.ox.security)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://moonbeam.public.blastapi.io/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

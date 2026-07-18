@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "astar.subscan.io" or tostring(AdditionalFields) has "astar.subscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

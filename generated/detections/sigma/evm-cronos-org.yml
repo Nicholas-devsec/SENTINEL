@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator evm.cronos.org
+id: evm-cronos-org
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.ox.security)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "evm.cronos.org"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

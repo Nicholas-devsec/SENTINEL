@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "explorer.mintchain.io" or tostring(AdditionalFields) has "explorer.mintchain.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

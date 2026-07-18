@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "berascan.com" or tostring(AdditionalFields) has "berascan.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

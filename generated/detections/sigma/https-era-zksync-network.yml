@@ -1,0 +1,18 @@
+title: SENTINEL URL indicator https://era.zksync.network/
+id: https-era-zksync-network
+status: experimental
+description: Web request to known-bad URL (source: discovery:www.ox.security)
+logsource:
+  category: proxy
+detection:
+  selection:
+    c-uri|contains: "https://era.zksync.network/"
+  condition: selection
+fields:
+  - c-uri
+  - src_ip
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

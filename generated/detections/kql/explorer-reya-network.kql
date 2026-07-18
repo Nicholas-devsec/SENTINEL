@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "explorer.reya.network" or tostring(AdditionalFields) has "explorer.reya.network"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

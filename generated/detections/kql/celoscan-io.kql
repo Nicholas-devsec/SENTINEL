@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "celoscan.io" or tostring(AdditionalFields) has "celoscan.io"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

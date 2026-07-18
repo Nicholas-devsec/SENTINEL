@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "mainnet.base.org" or tostring(AdditionalFields) has "mainnet.base.org"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
