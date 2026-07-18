@@ -63,8 +63,8 @@ async def karpathy_loop_job() -> None:
         logger.info("Scheduled karpathy run:\n%s", format_karpathy_report(report))
 
 
-def build_scheduler() -> AsyncIOScheduler:
-    settings = get_settings()
+def build_scheduler(*, settings=None) -> AsyncIOScheduler:
+    settings = settings or get_settings()
     scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
     pipeline_cron = str(settings.schedule.pipeline_cron or "").strip()
     if pipeline_cron:
@@ -89,8 +89,8 @@ def build_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
-def build_karpathy_scheduler() -> AsyncIOScheduler:
-    settings = get_settings()
+def build_karpathy_scheduler(*, settings=None) -> AsyncIOScheduler:
+    settings = settings or get_settings()
     scheduler = AsyncIOScheduler(timezone=settings.schedule.timezone)
     if settings.schedule.enable_karpathy_job:
         karpathy_cron = str(settings.schedule.karpathy_loop_cron or "").strip()
@@ -114,30 +114,27 @@ def build_karpathy_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
-async def main() -> None:
-    configure_logging()
-    scheduler = build_scheduler()
+async def _run_scheduler_forever(scheduler: AsyncIOScheduler, *, stop_event) -> None:
     scheduler.start()
     for job in scheduler.get_jobs():
         logger.info("Scheduler started job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
     try:
-        while True:
-            await __import__("asyncio").sleep(3600)
+        await stop_event.wait()
     finally:
         scheduler.shutdown()
 
 
-async def karpathy_main() -> None:
+async def main(*, stop_event=None) -> None:
     configure_logging()
-    scheduler = build_karpathy_scheduler()
-    scheduler.start()
-    for job in scheduler.get_jobs():
-        logger.info("Karpathy scheduler started job %s next_run=%s", job.id, getattr(job, "next_run_time", None))
-    try:
-        while True:
-            await __import__("asyncio").sleep(3600)
-    finally:
-        scheduler.shutdown()
+    await _run_scheduler_forever(build_scheduler(), stop_event=stop_event or __import__("asyncio").Event())
+
+
+async def karpathy_main(*, settings=None, stop_event=None) -> None:
+    configure_logging()
+    await _run_scheduler_forever(
+        build_karpathy_scheduler(settings=settings),
+        stop_event=stop_event or __import__("asyncio").Event(),
+    )
 
 
 if __name__ == "__main__":

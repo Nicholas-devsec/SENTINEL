@@ -266,6 +266,8 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
     commands = {command}
     if command == "scheduler":
         commands.update({"run-once", "telegram-listen"})
+    if command == "feedback-service":
+        commands.update({"telegram-listen", "karpathy-run"})
     if command == "cron-run":
         commands.add("run-once")
     if command == "karpathy-service":

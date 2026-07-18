@@ -19,6 +19,7 @@ from sentinel.runtime import (
     run_live_karpathy_loop,
     run_shadow_karpathy_validation,
 )
+from sentinel.services.feedback_service import run_feedback_service
 from sentinel.scheduler.cron import karpathy_main as karpathy_scheduler_main
 from sentinel.scheduler.cron import main as scheduler_main
 
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("scheduler", help="Run the APScheduler service loop")
     subcommands.add_parser("karpathy-service", help="Run only the long-lived scheduled Karpathy loop service")
     subcommands.add_parser("telegram-listen", help="Start Telegram polling to capture analyst callback feedback")
+    subcommands.add_parser("feedback-service", help="Run the combined Telegram feedback listener and Karpathy learning service")
     telegram_parser = subcommands.add_parser(
         "telegram-chat-id",
         help="Inspect recent Telegram bot updates and print discovered chat or channel IDs",
@@ -146,6 +148,9 @@ async def _dispatch(command: str, **kwargs) -> None:
         return
     if command == "telegram-listen":
         await run_telegram_listener(settings=settings)
+        return
+    if command == "feedback-service":
+        await run_feedback_service(settings=settings)
         return
     if command == "telegram-chat-id":
         token = settings.delivery.telegram_token.strip()

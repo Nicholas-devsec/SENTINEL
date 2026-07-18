@@ -170,6 +170,22 @@ async def test_cli_dispatch_starts_karpathy_service(monkeypatch, tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_cli_dispatch_starts_feedback_service(monkeypatch, tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    seen: list[str] = []
+
+    async def fake_run_feedback_service(*, settings):
+        seen.append(settings.delivery.telegram_chat_id)
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "run_feedback_service", fake_run_feedback_service)
+
+    await cli._dispatch("feedback-service")
+
+    assert seen == ["-100123"]
+
+
+@pytest.mark.asyncio
 async def test_cli_dispatch_prints_karpathy_status(monkeypatch, tmp_path: Path, capsys) -> None:
     settings = build_settings(tmp_path)
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
