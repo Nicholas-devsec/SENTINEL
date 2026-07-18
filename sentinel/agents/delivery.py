@@ -450,19 +450,35 @@ class DeliveryAgent(BaseAgent):
 
     def _select_digest_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         policy = self._alert_policy()
+        recent_items = [
+            item
+            for item in items
+            if self._within_last_24_hours(item.get("last_seen"))
+        ]
         qualified = [
             item
-            for item in items
-            if self._within_last_24_hours(item.get("last_seen"))
-            and policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
+            for item in recent_items
+            if policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
         ]
-        if qualified:
-            return qualified
+        backfill = [
+            item
+            for item in recent_items
+            if policy.qualifies_digest_backfill(item, is_web_discovery=self._is_web_discovery_item(item))
+        ]
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in [*qualified, *backfill]:
+            dedupe_key = str(item.get("id") or f"{item.get('type')}|{item.get('value')}|{item.get('reference_url')}")
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            selected.append(item)
+        if selected:
+            return selected
         return [
             item
-            for item in items
-            if self._within_last_24_hours(item.get("last_seen"))
-            and float(item.get("risk_score", 0.0)) >= FALLBACK_DIGEST_MIN_SCORE
+            for item in recent_items
+            if float(item.get("risk_score", 0.0)) >= FALLBACK_DIGEST_MIN_SCORE
         ]
 
     async def _load_ioc_row(self, session: Any, parsed_ioc_id: UUID | str) -> IOC | None:

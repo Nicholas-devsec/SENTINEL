@@ -32,6 +32,11 @@ class WorkflowSettings(BaseModel):
 
 class ThresholdSettings(BaseModel):
     alert_score: int = 60
+    digest_score: int = 25
+    digest_backfill_score: int = 20
+    curated_immediate_score: int = 35
+    corroborated_immediate_score: int = 40
+    curated_digest_score: int = 20
     rule_score: int = 50
     karpathy_experiments: int = 25
     karpathy_budget_mins: int = 30
@@ -144,12 +149,12 @@ class WeightSettings(BaseModel):
     # writeup IOCs (trust ~0.67) never passed. `context` rewards indicators
     # pulled from an explicit writeup IOC section; `corroboration` rewards
     # indicators seen by multiple independent sources.
-    vt_ratio: float = 0.30
-    abuse_confidence: float = 0.25
-    source_trust: float = 0.10
-    recency: float = 0.10
-    context: float = 0.15
-    corroboration: float = 0.10
+    vt_ratio: float = 0.20
+    abuse_confidence: float = 0.20
+    source_trust: float = 0.05
+    recency: float = 0.05
+    context: float = 0.30
+    corroboration: float = 0.20
 
 
 class EnrichmentSettings(BaseModel):

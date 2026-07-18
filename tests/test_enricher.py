@@ -281,10 +281,10 @@ async def test_corroboration_raises_score(default_weight_skill: Path) -> None:
     single = await agent.run([base], context_by_value={"45.155.204.9": {"corroboration_sources": 1}})
     multi = await agent.run([base], context_by_value={"45.155.204.9": {"corroboration_sources": 3}})
 
-    # Three independent sources add 0.10*1.0*100 = 10 points over a single source.
+    # Three independent sources add 0.20*1.0*100 = 20 points over a single source.
     assert multi[0].corroboration_sources == 3
     assert multi[0].risk_score > single[0].risk_score
-    assert round(multi[0].risk_score - single[0].risk_score, 1) == 10.0
+    assert round(multi[0].risk_score - single[0].risk_score, 1) == 20.0
 
 
 def test_rescore_from_stored_is_deterministic_and_local(default_weight_skill: Path) -> None:

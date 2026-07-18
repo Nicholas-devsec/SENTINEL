@@ -6,18 +6,14 @@ from typing import Any
 from sentinel.config import SentinelSettings
 
 
-MEDIUM_SEVERITY_MIN_SCORE = 40.0
-CURATED_IMMEDIATE_MIN_SCORE = 50.0
-CORROBORATED_CONTEXT_MIN_SCORE = 55.0
-CURATED_DIGEST_MIN_SCORE = 35.0
-
-
 @dataclass(frozen=True, slots=True)
 class AlertPolicy:
     immediate_min_score: float
     curated_immediate_min_score: float
     corroborated_context_min_score: float
     digest_min_score: float
+    curated_digest_min_score: float
+    digest_backfill_min_score: float
 
     def _provenance(self, item: dict[str, Any]) -> str:
         return str(item.get("provenance") or item.get("attributes", {}).get("provenance") or "").strip().lower()
@@ -57,7 +53,15 @@ class AlertPolicy:
         score = float(item.get("risk_score", 0.0))
         if score >= self.digest_min_score:
             return True
-        if self._is_curated_context(item) and score >= CURATED_DIGEST_MIN_SCORE:
+        if self._is_curated_context(item) and score >= self.curated_digest_min_score:
+            return True
+        return False
+
+    def qualifies_digest_backfill(self, item: dict[str, Any], *, is_web_discovery: bool = False) -> bool:
+        score = float(item.get("risk_score", 0.0))
+        if score >= self.digest_backfill_min_score:
+            return True
+        if self._is_curated_context(item) and score >= min(self.curated_digest_min_score, self.digest_backfill_min_score):
             return True
         return False
 
@@ -65,7 +69,9 @@ class AlertPolicy:
 def build_alert_policy(settings: SentinelSettings) -> AlertPolicy:
     return AlertPolicy(
         immediate_min_score=float(settings.thresholds.alert_score),
-        curated_immediate_min_score=CURATED_IMMEDIATE_MIN_SCORE,
-        corroborated_context_min_score=CORROBORATED_CONTEXT_MIN_SCORE,
-        digest_min_score=MEDIUM_SEVERITY_MIN_SCORE,
+        curated_immediate_min_score=float(settings.thresholds.curated_immediate_score),
+        corroborated_context_min_score=float(settings.thresholds.corroborated_immediate_score),
+        digest_min_score=float(settings.thresholds.digest_score),
+        curated_digest_min_score=float(settings.thresholds.curated_digest_score),
+        digest_backfill_min_score=float(settings.thresholds.digest_backfill_score),
     )
