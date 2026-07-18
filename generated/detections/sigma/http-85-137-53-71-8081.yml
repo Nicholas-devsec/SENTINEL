@@ -13,6 +13,6 @@ fields:
   - src_ip
 level: informational
 tags:
-  - attack.t1596.002
-  - attack.t1596
-  - attack.t1672
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

@@ -1,7 +1,7 @@
 title: SENTINEL domain indicator quirksturdy.icu
 id: quirksturdy-icu
 status: experimental
-description: DNS resolution of known-bad domain (source: gbhackers_blog)
+description: DNS resolution of known-bad domain (source: discovery:www.microsoft.com)
 logsource:
   category: dns_query
 detection:
@@ -13,6 +13,6 @@ fields:
   - QueryName
 level: informational
 tags:
-  - attack.t1596.002
-  - attack.t1583.001
-  - attack.t1136.002
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002
