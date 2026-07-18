@@ -76,11 +76,27 @@ class FakeQuery:
         self.answered = False
         self.answer_text = None
         self.show_alert = None
+        self.message = FakeCallbackMessage()
 
     async def answer(self, text: str | None = None, show_alert: bool | None = None) -> None:
         self.answered = True
         self.answer_text = text
         self.show_alert = show_alert
+
+
+class FakeCallbackMessage:
+    def __init__(self, text: str = "SENTINEL Alert") -> None:
+        self.text = text
+        self.edited_text: str | None = None
+        self.reply_markup = object()
+
+    async def edit_text(self, text: str, reply_markup=None) -> None:
+        self.text = text
+        self.edited_text = text
+        self.reply_markup = reply_markup
+
+    async def edit_reply_markup(self, reply_markup=None) -> None:
+        self.reply_markup = reply_markup
 
 
 class BrokenSessionFactory:
@@ -501,6 +517,9 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     assert query.answered is True
     assert query.answer_text == "Recorded FP and suppressed 1 IOC(s)"
     assert query.show_alert is True
+    assert query.message.edited_text is not None
+    assert "Feedback recorded: False Positive" in query.message.text
+    assert query.message.reply_markup is None
     assert "suppressed" in query.answer_text
     assert record == 1
     assert session_factory.storage[0].analyst_id == "42"
@@ -525,8 +544,10 @@ async def test_delivery_agent_acknowledges_duplicate_feedback_without_duplicatin
 
     assert first.answer_text == "Recorded: confirmed"
     assert first.show_alert is True
+    assert "Feedback recorded: True Positive" in first.message.text
     assert second.answer_text == "Already recorded: confirmed"
     assert second.show_alert is True
+    assert "Feedback already recorded: True Positive" in second.message.text
     assert len(session_factory.storage) == 1
     assert record.verdict == "confirmed"
 
@@ -551,6 +572,7 @@ async def test_delivery_agent_appends_retriage_feedback_event() -> None:
     assert len(session_factory.storage) == 2
     assert [item.verdict for item in session_factory.storage] == ["confirmed", "false_positive"]
     assert second.answer_text == "Recorded FP and suppressed 1 IOC(s)"
+    assert "Feedback recorded: False Positive" in second.message.text
     assert record == 1
 
 

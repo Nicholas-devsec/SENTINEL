@@ -679,10 +679,9 @@ class DeliveryAgent(BaseAgent):
                     analyst_id=analyst_id,
                     channel="telegram",
                 )
-                await query.answer(
-                    "Already suppressed" if not changed else f"Recorded FP and suppressed {affected} IOC(s)",
-                    show_alert=True,
-                )
+                ack_text = "Already suppressed" if not changed else f"Recorded FP and suppressed {affected} IOC(s)"
+                await query.answer(ack_text, show_alert=True)
+                await self._confirm_callback_message(query, verdict="false_positive", repeated=not changed)
                 return affected
             existing = await self._feedback_exists(
                 ioc_id=ioc_id,
@@ -700,6 +699,7 @@ class DeliveryAgent(BaseAgent):
                 self._feedback_ack_text(record.verdict, repeated=existing),
                 show_alert=True,
             )
+            await self._confirm_callback_message(query, verdict=record.verdict, repeated=existing)
             logger.info(
                 "Recorded Telegram feedback verdict=%s ioc_id=%s analyst_id=%s repeated=%s",
                 record.verdict,
@@ -795,6 +795,32 @@ class DeliveryAgent(BaseAgent):
             "false_positive": "false positive",
         }.get(verdict, verdict.replace("_", " "))
         prefix = "Already recorded" if repeated else "Recorded"
+        return f"{prefix}: {label}"
+
+    async def _confirm_callback_message(self, query: Any, *, verdict: str, repeated: bool) -> None:
+        message = getattr(query, "message", None)
+        if message is None:
+            return
+        try:
+            current_text = str(getattr(message, "text", "") or "")
+            confirmation = self._feedback_confirmation_note(verdict, repeated=repeated)
+            if current_text and confirmation not in current_text and hasattr(message, "edit_text"):
+                await message.edit_text(
+                    f"{current_text}\n\n{confirmation}",
+                    reply_markup=None,
+                )
+                return
+            if hasattr(message, "edit_reply_markup"):
+                await message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            logger.exception("Failed to update Telegram alert with callback confirmation")
+
+    def _feedback_confirmation_note(self, verdict: str, *, repeated: bool) -> str:
+        label = {
+            "confirmed": "True Positive",
+            "false_positive": "False Positive",
+        }.get(verdict, verdict.replace("_", " ").title())
+        prefix = "Feedback already recorded" if repeated else "Feedback recorded"
         return f"{prefix}: {label}"
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
