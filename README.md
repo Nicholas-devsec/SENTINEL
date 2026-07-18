@@ -103,14 +103,15 @@ than hammering the flaky public endpoint.
 ## Commands
 
 ```bash
+sentinel cron-run            # production one-shot pull/store/enrich/Telegram run
+sentinel feedback-service    # production always-on Telegram feedback + Karpathy learner
 sentinel run-once            # full pipeline: scrape -> validate -> enrich -> score -> rules -> deliver
-sentinel cron-run            # cron-friendly one-shot scrape/store/enrich/Telegram run
 sentinel scraper-diagnose    # per-feed fetch/kept/stale/balance diagnostics, no delivery
 sentinel daily-digest        # last-24h digest to Telegram
-sentinel scheduler           # long-lived pipeline scheduler (scrape cadence + daily digest)
-sentinel karpathy-service    # long-lived scheduled Karpathy loop service
+sentinel scheduler           # legacy combined scheduler for scrape cadence + daily digest
+sentinel karpathy-service    # debug-only: run only the Karpathy loop scheduler
 sentinel karpathy-status     # readiness, active lease, and recent Karpathy run history
-sentinel telegram-listen     # capture analyst feedback buttons
+sentinel telegram-listen     # debug-only: capture analyst feedback buttons without Karpathy
 sentinel karpathy-validate --loop source --scenario improve   # shadow-mode loop mechanics
 sentinel karpathy-run --loop source --max-experiments 1       # readiness-gated live loop
 ```
@@ -120,9 +121,23 @@ sentinel karpathy-run --loop source --max-experiments 1       # readiness-gated 
 ## Ops model
 
 - External cron: run `sentinel cron-run` at your chosen time, e.g. `0 7 * * *`.
-- Long-lived feedback process: run `sentinel telegram-listen` so analyst button clicks are captured.
-- Long-lived Karpathy process: run `sentinel karpathy-service` separately from ingestion/delivery.
+- Long-lived learning process: run `sentinel feedback-service` so analyst button clicks are captured and the Karpathy loop learns from them in the same service.
 - Operator inspection: run `sentinel karpathy-status --loop source` to see preflight state, active lease ownership, and recent experiment outcomes.
+
+Recommended production shape:
+
+```bash
+# 7:00 AM pull/store/alert run
+0 7 * * * cd /path/to/SENTINEL && env PYTHONPATH=. .venv/bin/python -m sentinel.cli cron-run
+```
+
+```bash
+# separate always-on feedback + learner service
+env PYTHONPATH=. .venv/bin/python -m sentinel.cli feedback-service
+```
+
+Legacy split-service commands remain available for debugging, but they are no
+longer the primary operator path.
 
 Telegram alert cards now include a dedicated `Remove IOC` button. That action
 purges the IOC plus its linked sightings and feedback rows from the database;
@@ -135,7 +150,7 @@ use `False Positive` when you want analyst learning without deleting the row.
   minimum delta plus replay guardrails on true-positive loss and false-positive
   increase.
 - Live runs acquire a DB-backed lease via `service_leases`, so duplicate
-  `karpathy-service` instances do not optimize concurrently.
+  `feedback-service` or `karpathy-service` instances do not optimize concurrently.
 - Experiment logs now carry skill hashes and keep/revert decision details so
   every promoted change can be traced back to the exact evaluated skill state.
 

@@ -120,10 +120,20 @@ Start with the `source` loop only.
 
 Recommended order:
 1. Run the live threat-intel pipeline.
-2. Keep `telegram-listen` running.
+2. Keep `feedback-service` running so Telegram feedback capture and Karpathy scheduling stay together.
 3. Collect analyst feedback from Telegram buttons.
-4. Once enough `confirmed` and `false_positive` verdicts exist across at least two sources, run one bounded `source` loop experiment.
+4. Once enough `confirmed` and `false_positive` verdicts exist across at least two sources, let the scheduled `source` loop evaluate bounded changes.
 5. Review the branch/worktree output manually before merging anything.
+
+Primary production commands:
+
+```bash
+env PYTHONPATH=. .venv/bin/python -m sentinel.cli cron-run
+env PYTHONPATH=. .venv/bin/python -m sentinel.cli feedback-service
+```
+
+Use `telegram-listen` and `karpathy-service` only when you want to debug the
+listener or learner independently.
 
 ## Why This Matters
 This is the part of SENTINEL that turns it from a static IOC pipeline into a measurable learning system. The value is not that the model edits text; the value is that each change is constrained, scored, audited, and only retained when it improves a real operational signal.
