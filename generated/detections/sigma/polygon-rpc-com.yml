@@ -13,6 +13,6 @@ fields:
   - QueryName
 level: informational
 tags:
+  - attack.t1596.002
   - attack.t1559.001
-  - attack.t1546.015
-  - attack.t1021.003
+  - attack.t1583.001

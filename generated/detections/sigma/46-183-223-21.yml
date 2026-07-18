@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 46.183.223.21
+id: 46-183-223-21
+status: experimental
+description: Outbound connection to known-bad IP (source: gbhackers_blog)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "46.183.223.21"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1596.002
+  - attack.t1136.002
+  - attack.t1583.001

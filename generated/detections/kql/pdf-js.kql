@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "pdf.js" or tostring(AdditionalFields) has "pdf.js"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

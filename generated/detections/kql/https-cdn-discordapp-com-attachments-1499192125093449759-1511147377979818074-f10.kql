@@ -1,0 +1,3 @@
+DeviceNetworkEvents
+| where RemoteUrl startswith "https://cdn.discordapp.com/attachments/1499192125093449759/1511147377979818074/F10097782_Request-9200090_0990.PDF.JS"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

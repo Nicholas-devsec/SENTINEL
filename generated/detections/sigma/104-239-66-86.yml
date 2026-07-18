@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 104.239.66.86
+id: 104-239-66-86
+status: experimental
+description: Outbound connection to known-bad IP (source: otx)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "104.239.66.86"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1615
+  - attack.t1069.002
+  - attack.t1098.007

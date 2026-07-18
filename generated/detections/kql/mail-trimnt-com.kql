@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "mail.trimnt.com" or tostring(AdditionalFields) has "mail.trimnt.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

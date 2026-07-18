@@ -1,0 +1,2 @@
+index=* sourcetype IN ("sysmon", "xmlwineventlog") file_hash="9674da676ee226ee456d35c774715d9b58655423806f281de19dc9ef899e9532"
+| stats count min(_time) as first_seen max(_time) as last_seen by host, file_name, file_hash

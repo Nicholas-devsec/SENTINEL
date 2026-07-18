@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for https://cdn.discordapp.com/attachments/1499192125093449759/1511147377979818074/F10097782_Request-9200090_0990.PDF.JS",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "domain",
+  "value": "cdn.discordapp.com"
+}

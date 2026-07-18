@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "mail.allportcargoservice" or tostring(AdditionalFields) has "mail.allportcargoservice"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
