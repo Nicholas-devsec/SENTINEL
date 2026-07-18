@@ -1,7 +1,7 @@
 title: SENTINEL file hash indicator d08a059e8b815e3b891505bc8777fc28
 id: d08a059e8b815e3b891505bc8777fc28
 status: experimental
-description: Execution of file with known-bad MD5 (source: gbhackers_blog)
+description: Execution of file with known-bad MD5 (source: securelist_blog)
 logsource:
   category: process_creation
 detection:

@@ -1,7 +1,7 @@
 title: SENTINEL domain indicator mail.taikei-rmc-co.biz
 id: mail-taikei-rmc-co-biz
 status: experimental
-description: DNS resolution of known-bad domain (source: otx)
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
 logsource:
   category: dns_query
 detection:
