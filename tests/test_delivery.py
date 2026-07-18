@@ -994,6 +994,7 @@ def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
         severity="informational",
         source_title="HelloNet campaign",
         reference_url="https://securelist.example/hellonet",
+        attributes={"article_ioc_count": 14},
         iocs=[
             {"type": "md5", "value": "16c211c96735f2fae9361b89bd7a31bf", "section_label": "HelloBackdoor"},
             {"type": "md5", "value": "6001829a128fe264b4403138700c11a8", "section_label": "HelloBackdoor Droppers"},
@@ -1006,6 +1007,7 @@ def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
     assert "HelloBackdoor" in rendered
     assert "HelloBackdoor Droppers" in rendered
     assert "wtsapi32.dll" in rendered
+    assert "More IOCs are present in the article (14 extracted total)." in rendered
     assert "[md5] 16c211c96735f2fae9361b89bd7a31bf" in rendered
     assert "[ipv4] 5.39.253.206" in rendered
 
@@ -1112,3 +1114,27 @@ def test_grouped_alert_message_renders_clean_sections_and_ioc_summaries() -> Non
     assert "- [sha256] " in rendered
     assert "malware artifact hash" in rendered
     assert "\nContext\n" in rendered
+
+
+def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_count() -> None:
+    from sentinel.delivery.telegram_bot import format_alert_message
+
+    rendered = format_alert_message(
+        value="evil[.]example",
+        ioc_type="domain",
+        source="discovery:example.com",
+        risk_score=41.2,
+        severity="informational",
+        last_seen="2026-07-18T08:15:00+00:00",
+        source_title="Discovery writeup",
+        reference_url="hxxps://example[.]com/report",
+        related_cves=[],
+        external_links={"VirusTotal": "https://www.virustotal.com/gui/domain/evil.example"},
+        mitre_techniques=[],
+        mitre_tactics=[],
+        attributes={"article_ioc_count": 12},
+    )
+
+    assert "Article https://example.com/report" in rendered
+    assert "- [domain] evil.example" in rendered
+    assert "More IOCs are present in the article (12 extracted total)." in rendered

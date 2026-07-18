@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sentinel.agents.base import BaseAgent
 from sentinel.agents.scraper import RawIOC
-from sentinel.db.models import IOC, IOCSighting
+from sentinel.db.models import IOC, IOCSighting, SourceMaterial
 
 
 PATTERN_LINE = re.compile(r"^- pattern:\s*(.+?)\s*$", re.IGNORECASE)
@@ -435,11 +435,14 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
             IOCSighting.source,
             IOCSighting.provenance,
             IOCSighting.attributes,
-        ).where(IOCSighting.ioc_id.in_(ids))
+            SourceMaterial.extracted_ioc_count,
+        )
+        .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
+        .where(IOCSighting.ioc_id.in_(ids))
     )
     context: dict[Any, dict[str, Any]] = {}
     distinct_sources: dict[Any, set[str]] = {}
-    for ioc_id, source, provenance, attributes in rows.all():
+    for ioc_id, source, provenance, attributes, extracted_ioc_count in rows.all():
         distinct_sources.setdefault(ioc_id, set()).add(source)
         extraction_mode = (attributes or {}).get("extraction_mode")
         # Curated IOC-section extractions get promoted to the strongest rank.
@@ -452,7 +455,10 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
                 "provenance": provenance,
                 "extraction_mode": extraction_mode,
                 "_rank": rank,
+                "article_ioc_count": int(extracted_ioc_count or 0),
             }
+        elif current is not None and int(extracted_ioc_count or 0) > int(current.get("article_ioc_count") or 0):
+            current["article_ioc_count"] = int(extracted_ioc_count or 0)
     for ioc_id, entry in context.items():
         entry.pop("_rank", None)
         entry["corroboration_sources"] = len(distinct_sources.get(ioc_id, {""}))

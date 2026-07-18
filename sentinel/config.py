@@ -104,6 +104,8 @@ class DiscoveryProfile(BaseModel):
     freshness_hours: int = 72
     max_candidates_per_source: int = 15
     max_pages_per_run: int = 6
+    max_iocs_per_page_ioc_section: int = 40
+    max_iocs_per_page_fallback: int = 15
     time_budget_seconds: int = 90
     per_page_timeout_seconds: int = 20
     # Strict profiles skip pages without an explicit IOC/indicators section;

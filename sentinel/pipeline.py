@@ -61,14 +61,20 @@ async def init_db() -> None:
     await ensure_schema(get_engine())
 
 
-async def _persist_writeups(writeups: list[RawWriteup]) -> dict[str, Any]:
+async def _persist_writeups(writeups: list[RawWriteup], raw_items: list[Any] | None = None) -> dict[str, Any]:
     """Get-or-create SourceMaterial rows; returns article url -> row id."""
     if not writeups:
         return {}
     url_to_id: dict[str, Any] = {}
+    extracted_counts: dict[str, int] = {}
+    for item in raw_items or []:
+        reference_url = str(getattr(item, "reference_url", None) or "").strip()
+        if reference_url:
+            extracted_counts[reference_url] = extracted_counts.get(reference_url, 0) + 1
     async with AsyncSessionFactory() as session:
         for writeup in writeups:
             row = await session.scalar(select(SourceMaterial).where(SourceMaterial.url == writeup.url))
+            extracted_ioc_count = extracted_counts.get(writeup.url, 0)
             if row is None:
                 row = SourceMaterial(
                     source=writeup.source,
@@ -83,9 +89,28 @@ async def _persist_writeups(writeups: list[RawWriteup]) -> dict[str, Any]:
                         "tags": writeup.tags,
                         "fetch_error": writeup.fetch_error,
                     },
+                    extracted_ioc_count=extracted_ioc_count,
                 )
                 session.add(row)
                 await session.flush()
+            else:
+                row.source = writeup.source
+                row.title = writeup.title or row.title
+                row.published_at = writeup.published_at or row.published_at
+                if writeup.content_text is not None:
+                    row.fetched_at = datetime.now(UTC)
+                    row.content_text = writeup.content_text
+                row.extraction_status = "failed" if writeup.fetch_error else "extracted"
+                row.extracted_ioc_count = extracted_ioc_count
+                metadata = dict(row.metadata_json or {})
+                metadata.update(
+                    {
+                        "summary": writeup.summary,
+                        "tags": writeup.tags,
+                        "fetch_error": writeup.fetch_error,
+                    }
+                )
+                row.metadata_json = metadata
             url_to_id[writeup.url] = row.id
         await session.commit()
     return url_to_id
@@ -191,7 +216,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             all_writeups.extend(discovery_report.writeups)
             discovered_count = len(discovery_report.items)
         stage_started = time.perf_counter()
-        source_material_ids = await _persist_writeups(all_writeups)
+        source_material_ids = await _persist_writeups(all_writeups, raw_items)
         validation_report = await agents["validator"].run_with_report(
             raw_items, source_material_ids=source_material_ids
         )
@@ -240,6 +265,8 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             payload["provenance"] = context.get("provenance")
             payload["extraction_mode"] = context.get("extraction_mode")
             payload.setdefault("attributes", {})
+            if context.get("article_ioc_count") is not None:
+                payload["attributes"]["article_ioc_count"] = int(context.get("article_ioc_count") or 0)
             if payload["provenance"] is not None:
                 payload["attributes"]["provenance"] = payload["provenance"]
             if payload["extraction_mode"] is not None:
@@ -389,6 +416,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                 "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
                 "corroboration_sources": (context_by_id.get(row.id) or {}).get("corroboration_sources", 1),
                 "attributes": {
+                    "article_ioc_count": int((context_by_id.get(row.id) or {}).get("article_ioc_count") or 0),
                     "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
                     "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
                 },

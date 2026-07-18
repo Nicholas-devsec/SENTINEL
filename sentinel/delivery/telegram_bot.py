@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
+from sentinel.agents.ioc_extract import refang
+
 
 MAX_TELEGRAM_MESSAGE_CHARS = 3500
 MAX_DIGEST_LINKS_PER_ITEM = 2
@@ -16,6 +18,7 @@ MAX_SOURCE_TITLE_CHARS = 90
 MAX_IOC_VALUE_CHARS = 120
 MAX_LINK_CHARS = 140
 MAX_GROUPED_IOCS = 12
+ARTICLE_IOC_NOTE_THRESHOLD = 10
 
 
 @dataclass(slots=True)
@@ -49,15 +52,31 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _normalize_ioc_display(value: str, ioc_type: str) -> str:
+    display = refang(value)
     if ioc_type != "url":
-        return value
-    parsed = urlparse(value)
+        return display
+    parsed = urlparse(display)
     if not parsed.scheme or not parsed.netloc:
-        return value
+        return display
     display = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
     if parsed.query:
         display += f"?{parsed.query}"
     return display
+
+
+def _normalize_link_display(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return refang(stripped)
+
+
+def _article_ioc_note(article_ioc_count: int | None) -> str | None:
+    if article_ioc_count is None or article_ioc_count <= ARTICLE_IOC_NOTE_THRESHOLD:
+        return None
+    return f"More IOCs are present in the article ({article_ioc_count} extracted total)."
 
 
 def _format_source_context(source: str, attributes: dict[str, Any] | None = None) -> str:
@@ -166,7 +185,9 @@ def format_alert_message(
     elif ioc_type in {"ipv4", "ipv6"}:
         findings.append("Shodan ports: none reported")
     findings_text = " | ".join(findings) if findings else "No external enrichment hits."
-    links = external_links or {}
+    attrs = attributes or {}
+    links = {name: _normalize_link_display(url) or "" for name, url in (external_links or {}).items()}
+    links = {name: url for name, url in links.items() if url}
     if links:
         intel_links = "\n".join(f"- {name}: {url}" for name, url in links.items())
     else:
@@ -184,6 +205,7 @@ def format_alert_message(
         attributes=attributes,
     )
     source_line = _format_source_context(source, attributes)
+    article_ioc_note = _article_ioc_note(int((attrs.get("article_ioc_count") or 0) or 0))
     observed_text = "Unknown"
     if last_seen is not None:
         if isinstance(last_seen, str):
@@ -204,19 +226,25 @@ def format_alert_message(
         f"Source {source_line}",
         f"Observed {observed_text} | Corroboration {corroboration_text}",
         f"CVEs {cves}",
-        f"Article {reference_url or 'None'}",
+        f"Article {_normalize_link_display(reference_url) or 'None'}",
         "",
         "IOC",
         f"- [{ioc_type}] {_truncate(_normalize_ioc_display(value, ioc_type), 140)}",
         f"  {summary}",
         "",
         "Context",
-        f"Findings {findings_text}",
-        "Intel Links",
-        intel_links,
-        f"ATT&CK {techniques}",
-        f"Tactics {tactics}",
     ]
+    if article_ioc_note:
+        lines.append(article_ioc_note)
+    lines.extend(
+        [
+            f"Findings {findings_text}",
+            "Intel Links",
+            intel_links,
+            f"ATT&CK {techniques}",
+            f"Tactics {tactics}",
+        ]
+    )
     return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
 
 
@@ -236,6 +264,7 @@ def format_grouped_alert_message(
     mitre_tactics: list[str] | None = None,
     attributes: dict[str, Any] | None = None,
 ) -> str:
+    attrs = attributes or {}
     techniques = ", ".join(mitre_techniques or []) if mitre_techniques else "None"
     tactics = ", ".join(mitre_tactics or []) if mitre_tactics else "None"
     cves = ", ".join(related_cves or []) if related_cves else "None"
@@ -256,7 +285,9 @@ def format_grouped_alert_message(
                 observed = observed.replace(tzinfo=UTC)
             observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
-    article_line = f"Article {reference_url}" if reference_url else "Article None"
+    article_ioc_count = int((attrs.get("article_ioc_count") or len(iocs)) or len(iocs))
+    article_ioc_note = _article_ioc_note(article_ioc_count)
+    article_line = f"Article {_normalize_link_display(reference_url)}" if reference_url else "Article None"
     lines = [
         heading,
         f"{source_title or 'Grouped writeup alert'}",
@@ -268,6 +299,8 @@ def format_grouped_alert_message(
         "",
         "IOCs",
     ]
+    if article_ioc_note:
+        lines.append(article_ioc_note)
     active_label: str | None = None
     for item in iocs[:MAX_GROUPED_IOCS]:
         ioc_type = str(item.get("type", "unknown"))

@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sentinel.agents.base import BaseAgent
 from sentinel.agents.ioc_extract import (
     DEFAULT_SECTION_SIGNALS,
+    _cell_indicator_token,
     extract_iocs_from_section,
     extract_iocs_from_text,
     find_ioc_section,
@@ -74,6 +75,9 @@ DEFAULT_GATING = {
     "min_section_iocs": 2.0,
     "min_fallback_iocs": 3.0,
     "min_body_words": 40.0,
+    "max_broad_page_iocs": 40.0,
+    "max_broad_page_unique_hosts": 25.0,
+    "max_broad_page_strong_iocs": 2.0,
 }
 
 DEFAULT_BROWSER_HEADERS = {
@@ -929,6 +933,9 @@ class DiscoveryAgent(BaseAgent):
         section = find_ioc_section(text, signals=self.section_signals())
         if section is not None:
             extracted = extract_iocs_from_section(section.text, exclude_hostnames=exclude)
+            if self._looks_like_broad_directory_page(extracted, gating=gating):
+                return [], section.signal, "weak"
+            extracted = extracted[: max(0, int(profile.max_iocs_per_page_ioc_section))]
             if len(extracted) >= gating["min_section_iocs"]:
                 return (
                     self._build_items(
@@ -948,6 +955,9 @@ class DiscoveryAgent(BaseAgent):
             "\n".join([writeup.title or "", writeup.summary or "", text]),
             exclude_hostnames=exclude,
         )
+        if self._looks_like_broad_directory_page(fallback, gating=gating):
+            return [], None, "weak"
+        fallback = fallback[: max(0, int(profile.max_iocs_per_page_fallback))]
         if len(fallback) >= gating["min_fallback_iocs"]:
             return (
                 self._build_items(
@@ -961,6 +971,37 @@ class DiscoveryAgent(BaseAgent):
                 None,
             )
         return [], None, "weak"
+
+    @staticmethod
+    def _entry_hostname(entry: Any) -> str | None:
+        value = str(getattr(entry, "value", "") or "").strip().lower()
+        entry_type = str(getattr(entry, "type", "") or "").strip().lower()
+        if entry_type == "url":
+            return (urlparse(value).hostname or "").lower() or None
+        if entry_type == "domain":
+            return value or None
+        return None
+
+    def _looks_like_broad_directory_page(self, extracted: list[Any], *, gating: dict[str, float]) -> bool:
+        if not extracted:
+            return False
+        max_page_iocs = int(gating.get("max_broad_page_iocs", DEFAULT_GATING["max_broad_page_iocs"]))
+        if len(extracted) < max_page_iocs:
+            return False
+        networkish = [entry for entry in extracted if str(getattr(entry, "type", "")).lower() in {"domain", "url"}]
+        if len(networkish) / len(extracted) < 0.85:
+            return False
+        unique_hosts = {
+            host
+            for host in (self._entry_hostname(entry) for entry in extracted)
+            if host
+        }
+        strong_types = {"ipv4", "ipv6", "md5", "sha1", "sha256", "cve"}
+        strong_count = sum(1 for entry in extracted if str(getattr(entry, "type", "")).lower() in strong_types)
+        return (
+            len(unique_hosts) >= int(gating.get("max_broad_page_unique_hosts", DEFAULT_GATING["max_broad_page_unique_hosts"]))
+            and strong_count <= int(gating.get("max_broad_page_strong_iocs", DEFAULT_GATING["max_broad_page_strong_iocs"]))
+        )
 
     # fetch_error marker prefixes _run_profile branches on for diagnostics.
     NON_ARTICLE_MARKER = "non_article:"
@@ -1025,6 +1066,7 @@ class DiscoveryAgent(BaseAgent):
                         "search_profile": profile.name,
                         "extraction_mode": extraction_mode,
                         "section_signal": section_signal,
+                        "ioc_section_label": getattr(entry, "section_label", None),
                         "matched_keywords": candidate.matched_keywords,
                         "triage_score": candidate.score,
                     },
@@ -1155,6 +1197,15 @@ class DiscoveryAgent(BaseAgent):
                 continue
             body_words = len(writeup.content_text.split())
             if failure_reason == "no_section" and body_words < min_body_words:
+                has_indicator_like_lines = any(_cell_indicator_token(line) is not None for line in writeup.content_text.splitlines())
+                if has_indicator_like_lines:
+                    diagnostic.skipped_no_section += 1
+                    self.logger.info(
+                        "Discovery page had no IOC section despite indicator-like lines: profile=%s url=%s",
+                        profile.name,
+                        writeup.url,
+                    )
+                    continue
                 # Fetched fine but there is no real article here (JS shell,
                 # consent page, boilerplate): distinct from a genuine article
                 # that simply lacks an IOC section.

@@ -619,7 +619,7 @@ async def test_discovery_extracts_from_feed_summary_when_article_fetch_is_blocke
     assert ("sha1", "55724b766dd1fe8bf9dd4cb7094b83b88d57d945") in values
     assert report.diagnostics[0].fetch_errors == 1
     assert report.diagnostics[0].pages_fetched == 0
-    assert report.diagnostics[0].iocs_extracted == 4
+    assert report.diagnostics[0].iocs_extracted == 3
     assert all(item.attributes["extraction_mode"] == "feed_summary" for item in report.items)
 
 
@@ -863,6 +863,49 @@ async def test_weak_section_page_counts_as_weak(db_session_factory) -> None:
     assert diagnostic.skipped_no_section == 0
     assert diagnostic.skipped_empty_body == 0
     assert report.items == []
+
+
+@pytest.mark.asyncio
+async def test_discovery_skips_broad_directory_style_ioc_page(db_session_factory) -> None:
+    broad_lines = "\n".join(
+        [f"explorer-{index}.example.com" for index in range(45)]
+    )
+    broad_article = f"""
+    <html><body>
+    <h1>Wallet phishing roundup</h1>
+    <h2>Indicators of Compromise</h2>
+    <pre>{broad_lines}</pre>
+    </body></html>
+    """
+    feed = [{"title": "Wallet phishing IOC roundup", "link": "https://blog.vendor.test/broad"}]
+    transport = httpx.MockTransport(routes(feed, {"/broad": broad_article}))
+    agent = build_agent(build_settings(), transport, db_session_factory)
+
+    report = await agent.run_with_report()
+
+    diagnostic = report.diagnostics[0]
+    assert report.items == []
+    assert diagnostic.skipped_weak == 1
+
+
+@pytest.mark.asyncio
+async def test_discovery_caps_legitimate_large_ioc_section_per_page(db_session_factory) -> None:
+    hashes = "\n".join([f"{index:032x}"[-32:] for index in range(60)])
+    large_article = f"""
+    <html><body>
+    <h1>Large malware appendix</h1>
+    <h2>Indicators of Compromise</h2>
+    <pre>{hashes}</pre>
+    </body></html>
+    """
+    feed = [{"title": "Large malware IOC appendix", "link": "https://blog.vendor.test/large"}]
+    transport = httpx.MockTransport(routes(feed, {"/large": large_article}))
+    agent = build_agent(build_settings(), transport, db_session_factory)
+
+    report = await agent.run_with_report()
+
+    assert len(report.items) == 40
+    assert all(item.attributes["extraction_mode"] == "ioc_section" for item in report.items)
 
 
 @pytest.mark.asyncio

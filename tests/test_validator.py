@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from sentinel.agents.scraper import RawIOC
 from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
-from sentinel.db.models import IOC, IOCSighting
+from sentinel.db.models import IOC, IOCSighting, SourceMaterial
 
 
 def as_utc(value: datetime) -> datetime:
@@ -341,6 +341,17 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
 
     ioc_id = uuid.uuid4()
     async with db_session_factory() as session:
+        material = SourceMaterial(
+            source="discovery:securelist.com",
+            url="https://securelist.example/hellonet",
+            title="HelloNet campaign",
+            published_at=datetime(2026, 7, 1, tzinfo=UTC),
+            extraction_status="extracted",
+            extracted_ioc_count=14,
+            metadata_json={},
+        )
+        session.add(material)
+        await session.flush()
         session.add(
             IOC(
                 id=ioc_id,
@@ -371,6 +382,7 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
                 source="discovery:securelist.com",
                 source_trust=0.67,
                 provenance="writeup",
+                source_material_id=material.id,
                 first_seen=datetime(2026, 7, 1, tzinfo=UTC),
                 last_seen=datetime(2026, 7, 1, tzinfo=UTC),
                 lineage_hash="lineage-writeup",
@@ -385,3 +397,4 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
     assert entry["corroboration_sources"] == 2
     assert entry["provenance"] == "writeup"
     assert entry["extraction_mode"] == "ioc_section"
+    assert entry["article_ioc_count"] == 14

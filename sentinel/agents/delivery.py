@@ -229,6 +229,14 @@ class DeliveryAgent(BaseAgent):
                     "corroboration_sources": max(
                         int(member.get("corroboration_sources", 1) or 1) for member in ordered
                     ),
+                    "attributes": {
+                        **dict(primary.get("attributes", {})),
+                        "article_ioc_count": max(
+                            int(member.get("attributes", {}).get("article_ioc_count", 0) or 0)
+                            for member in ordered
+                        )
+                        or len(ordered),
+                    },
                     "last_seen": max(
                         (
                             self._sort_last_seen_value(member.get("last_seen"))
@@ -320,6 +328,11 @@ class DeliveryAgent(BaseAgent):
         attributes["related_titles"] = related_titles
         attributes["related_urls"] = related_urls
         attributes["similar_article_count"] = len(related_urls) or len(related_titles) or 1
+        attributes["article_ioc_count"] = max(
+            int(base.get("attributes", {}).get("article_ioc_count", 0) or 0),
+            int(incoming.get("attributes", {}).get("article_ioc_count", 0) or 0),
+            len(merged_iocs),
+        )
         return {
             **primary,
             "grouped_iocs": sorted(
