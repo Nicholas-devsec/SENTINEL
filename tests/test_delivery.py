@@ -11,7 +11,7 @@ from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings
 from sentinel.db.models import FeedbackRecord
 from sentinel.delivery.email_digest import render_daily_digest
-from sentinel.delivery.telegram_bot import format_daily_digest_intro, format_daily_digest_message
+from sentinel.delivery.telegram_bot import build_feedback_markup, format_daily_digest_intro, format_daily_digest_message
 
 
 class FakeTelegramBot:
@@ -105,6 +105,16 @@ def build_settings() -> SentinelSettings:
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
         }
     )
+
+
+def test_feedback_markup_uses_true_positive_and_false_positive_labels() -> None:
+    markup = build_feedback_markup("ioc-123")
+    buttons = markup.inline_keyboard[0]
+
+    assert buttons[0].text == "True Positive"
+    assert buttons[0].callback_data == "confirmed:ioc-123"
+    assert buttons[1].text == "False Positive"
+    assert buttons[1].callback_data == "false_positive:ioc-123"
 
 
 @pytest.mark.asyncio
@@ -491,6 +501,7 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     assert query.answered is True
     assert query.answer_text == "Recorded FP and suppressed 1 IOC(s)"
     assert query.show_alert is True
+    assert "suppressed" in query.answer_text
     assert record == 1
     assert session_factory.storage[0].analyst_id == "42"
 

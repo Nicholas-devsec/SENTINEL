@@ -34,8 +34,8 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("TP", callback_data=f"confirmed:{ioc_id}"),
-                InlineKeyboardButton("FP", callback_data=f"false_positive:{ioc_id}"),
+                InlineKeyboardButton("True Positive", callback_data=f"confirmed:{ioc_id}"),
+                InlineKeyboardButton("False Positive", callback_data=f"false_positive:{ioc_id}"),
             ],
         ]
     )
