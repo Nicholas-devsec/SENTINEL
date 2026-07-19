@@ -180,6 +180,9 @@ class DeliverySettings(BaseModel):
     telegram_chat_id: str = "${TELEGRAM_CHAT_ID}"
     enable_telegram_immediate_alerts: bool = True
     telegram_max_alerts_per_run: int = 3
+    # Suppression window: an IOC that has already been alerted (immediate or
+    # digest) is not re-sent on any channel until this many hours have passed.
+    alert_resend_after_hours: int = 72
     telegram_daily_digest_limit: int = 10
     telegram_digest_candidate_pool_size: int = 250
     enable_email: bool = False
@@ -225,6 +228,9 @@ class KarpathySettings(BaseModel):
     lease_ttl_seconds: int = 1800
     replay_window_hours: int = 14 * 24
     status_history_limit: int = 5
+    # Fail closed when the labeled replay window is too small for a metric
+    # delta to mean anything: below this many labeled IOCs no patch is kept.
+    min_labeled_samples: int = 20
 
 
 class SentinelSettings(BaseModel):
@@ -293,7 +299,7 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("OPENAI_API_KEY", settings.openai.api_key)
 
-    if commands & {"discovery-memory", "rescore"}:
+    if commands & {"discovery-memory", "rescore", "status"}:
         _validate_required_value("DATABASE_URL", settings.db.url)
 
 

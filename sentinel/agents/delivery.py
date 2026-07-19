@@ -19,9 +19,10 @@ from sentinel.alert_policy import build_alert_policy
 from sentinel.agents.base import BaseAgent
 from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
-from sentinel.db.models import FeedbackRecord, IOC, IOCSighting
+from sentinel.db.models import AlertEvent, FeedbackRecord, IOC, IOCSighting
 from sentinel.delivery.email_digest import render_daily_digest, send_daily_digest
 from sentinel.delivery.telegram_bot import (
+    TELEGRAM_PARSE_MODE,
     build_feedback_markup,
     format_alert_message,
     format_grouped_alert_message,
@@ -203,6 +204,7 @@ class DeliveryAgent(BaseAgent):
             cards.append(
                 {
                     **primary,
+                    "grouped_ids": [str(member.get("id")) for member in ordered if member.get("id")],
                     "grouped_iocs": [
                         {
                             "type": member["type"],
@@ -395,6 +397,86 @@ class DeliveryAgent(BaseAgent):
 
     def _is_web_discovery_item(self, item: dict[str, Any]) -> bool:
         return str(item.get("source") or "").strip().lower().startswith("discovery:")
+
+    # -- alert ledger -------------------------------------------------------
+    #
+    # Feed items linger in source windows for days, so the same IOC would be
+    # re-selected and re-sent on every cron run without a persistent record of
+    # what was already delivered. The ledger also keeps immediate alerts from
+    # being double-counted into the next daily digest.
+
+    def _card_ioc_ids(self, card: dict[str, Any]) -> list[str]:
+        grouped_ids = card.get("grouped_ids") or []
+        if grouped_ids:
+            return [str(ioc_id) for ioc_id in grouped_ids if ioc_id]
+        ioc_id = card.get("id")
+        return [str(ioc_id)] if ioc_id else []
+
+    async def _recently_alerted_ids(self, ioc_ids: list[str]) -> set[str]:
+        parsed: list[UUID] = []
+        for raw in ioc_ids:
+            try:
+                parsed.append(UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+        if not parsed:
+            return set()
+        cutoff = datetime.now(UTC) - timedelta(
+            hours=max(1, int(self.settings.delivery.alert_resend_after_hours))
+        )
+        async with self.session_factory() as session:
+            if not hasattr(session, "execute"):
+                return set()
+            rows = await session.execute(
+                select(AlertEvent.ioc_id)
+                .where(AlertEvent.ioc_id.in_(parsed))
+                .where(AlertEvent.sent_at >= cutoff)
+            )
+            return {str(ioc_id) for (ioc_id,) in rows.all()}
+
+    async def _filter_recently_alerted(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        recently = await self._recently_alerted_ids(
+            [str(item.get("id")) for item in items if item.get("id")]
+        )
+        if not recently:
+            return items
+        kept = [item for item in items if str(item.get("id") or "") not in recently]
+        suppressed = len(items) - len(kept)
+        if suppressed:
+            self.logger.info(
+                "Alert ledger suppressed %s already-alerted IOC(s) within the %sh resend window",
+                suppressed,
+                self.settings.delivery.alert_resend_after_hours,
+            )
+        return kept
+
+    async def _record_alert_events(self, cards: list[dict[str, Any]], *, alert_kind: str) -> None:
+        now = datetime.now(UTC)
+        events: list[AlertEvent] = []
+        for card in cards:
+            for ioc_id in self._card_ioc_ids(card):
+                try:
+                    parsed = UUID(str(ioc_id))
+                except (TypeError, ValueError):
+                    continue
+                events.append(
+                    AlertEvent(
+                        ioc_id=parsed,
+                        channel="telegram",
+                        alert_kind=alert_kind,
+                        reference_url=str(card.get("reference_url") or "") or None,
+                        risk_score=float(card.get("risk_score", 0.0) or 0.0),
+                        sent_at=now,
+                    )
+                )
+        if not events:
+            return
+        async with self.session_factory() as session:
+            if not hasattr(session, "execute"):
+                return
+            for event in events:
+                session.add(event)
+            await session.commit()
 
     def _alert_policy(self):
         return build_alert_policy(self.settings)
@@ -626,8 +708,10 @@ class DeliveryAgent(BaseAgent):
             await self.telegram_bot.send_message(
                 chat_id=self.settings.delivery.telegram_chat_id,
                 text=message,
+                parse_mode=TELEGRAM_PARSE_MODE,
                 reply_markup=self._build_markup(item.get("id")),
             )
+            await self._record_alert_events([item], alert_kind="immediate")
             return True
         except TelegramError as exc:
             self.logger.warning("Telegram alert delivery failed for %s: %s", item["value"], type(exc).__name__)
@@ -824,6 +908,7 @@ class DeliveryAgent(BaseAgent):
         return f"{prefix}: {label}"
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
+        items = await self._filter_recently_alerted(items)
         digest_cards = self._dedupe_digest_cards(items)
         top_items = self._apply_delivery_limits(digest_cards, apply_burst_cap=False)[
             : self.settings.delivery.telegram_daily_digest_limit
@@ -885,10 +970,12 @@ class DeliveryAgent(BaseAgent):
                     await self.telegram_bot.send_message(
                         chat_id=self.settings.delivery.telegram_chat_id,
                         text=message,
+                        parse_mode=TELEGRAM_PARSE_MODE,
                         reply_markup=self._build_markup(item.get("id")),
                     )
                     if index < len(top_items):
                         await asyncio.sleep(0.75)
+                await self._record_alert_events(top_items, alert_kind="digest")
                 result["telegram"] = {"status": "sent", "sent": True}
             except TelegramError as exc:
                 self.logger.warning("Telegram daily digest delivery failed: %s", type(exc).__name__)
@@ -914,6 +1001,7 @@ class DeliveryAgent(BaseAgent):
         immediate: list[dict[str, Any]] = []
         if self.settings.delivery.enable_telegram_immediate_alerts:
             immediate_candidates = self._select_immediate_candidates(items)
+            immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)
             immediate = self._apply_delivery_limits(immediate)
         digest_candidates = self._select_digest_candidates(items)

@@ -2,22 +2,44 @@
 ## 1. Run `sentinel.cli cron-run` from cron at the time configured below.
 ## 2. Run `sentinel.cli feedback-service` as a separate always-on service for
 ##    Telegram TP/FP capture plus Karpathy learning.
+##
+## Primary operator knobs live in two sections:
+## - `schedule`: when the pipeline and learner run
+## - `workflow`: how many feed/article items are stored and alerted per run
+##
+## For a typical daily setup, most operators only need to change:
+## - `schedule.pipeline_cron`
+## - `schedule.daily_digest_cron`
+## - `schedule.karpathy_loop_cron`
+## - `workflow.feed_ioc_store_limit_per_run`
+## - `workflow.article_store_limit_per_run`
+## - `workflow.telegram_feed_alert_limit_per_run`
+## - `workflow.telegram_article_alert_limit_per_run`
 
 schedule:
+  # Fallback cadence used only when `pipeline_cron` is blank.
   scrape_interval_hours: 4
+  # Main production scrape/store/alert schedule.
   pipeline_cron: "0 7 * * *"
+  # Legacy fallback used only when `daily_digest_cron` is blank.
   daily_digest_time: "07:00"
+  # Optional separate digest message schedule.
   daily_digest_cron: "5 7 * * *"
   timezone: "America/Vancouver"
   karpathy_loop_day: "sunday"
+  # Used by `feedback-service` when Karpathy scheduling is enabled.
   karpathy_loop_cron: "0 3 * * 0"
   enable_karpathy_job: false
   karpathy_loop_type: "source"
 
 workflow:
+  # How many feed-origin IOCs are allowed into the DB each cron run.
   feed_ioc_store_limit_per_run: 250
+  # How many article/writeup discoveries are allowed into the DB each cron run.
   article_store_limit_per_run: 5
+  # Telegram delivery budget for feed-origin alerts per cron run.
   telegram_feed_alert_limit_per_run: 5
+  # Telegram delivery budget for article/writeup alerts per cron run.
   telegram_article_alert_limit_per_run: 2
 
 thresholds:
@@ -204,6 +226,9 @@ delivery:
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
   enable_telegram_immediate_alerts: true
   telegram_max_alerts_per_run: 3
+  # An IOC already alerted (immediate or digest) is not re-sent until this
+  # many hours pass; the alert_events ledger enforces it across cron runs.
+  alert_resend_after_hours: 72
   telegram_daily_digest_limit: 5
   telegram_digest_candidate_pool_size: 250
   enable_email: false
@@ -244,3 +269,6 @@ karpathy:
   lease_ttl_seconds: 1800
   replay_window_hours: 336
   status_history_limit: 5
+  # Fail closed below this many labeled IOCs in the replay window: with a
+  # tiny labeled set, a metric delta is noise and no patch is kept.
+  min_labeled_samples: 20

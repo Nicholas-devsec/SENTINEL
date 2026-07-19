@@ -233,6 +233,32 @@ class EnrichmentAgent(BaseAgent):
             parts.append(str(whois_result))
         return "\n".join(parts)
 
+    def score_components(
+        self,
+        *,
+        weights: dict[str, float],
+        vt_ratio: float,
+        abuse_confidence: int | None,
+        source_trust: float,
+        recency_score: float,
+        context_score: float = 0.0,
+        corroboration: float = 0.0,
+    ) -> dict[str, float]:
+        """Per-component contribution to the risk score, in score points.
+
+        Summing the values (and clamping to [0, 100]) yields the risk score;
+        keeping the parts makes every score explainable to an analyst.
+        """
+        abuse_score = (abuse_confidence or 0) / 100
+        return {
+            "vt_ratio": round(weights.get("vt_ratio", 0.0) * vt_ratio * 100, 2),
+            "abuse_confidence": round(weights.get("abuse_confidence", 0.0) * abuse_score * 100, 2),
+            "source_trust": round(weights.get("source_trust", 0.0) * source_trust * 100, 2),
+            "recency": round(weights.get("recency", 0.0) * recency_score * 100, 2),
+            "context": round(weights.get("context", 0.0) * context_score * 100, 2),
+            "corroboration": round(weights.get("corroboration", 0.0) * corroboration * 100, 2),
+        }
+
     def _score_ioc(
         self,
         *,
@@ -244,16 +270,16 @@ class EnrichmentAgent(BaseAgent):
         context_score: float = 0.0,
         corroboration: float = 0.0,
     ) -> float:
-        abuse_score = (abuse_confidence or 0) / 100
-        raw_score = (
-            weights.get("vt_ratio", 0.0) * vt_ratio
-            + weights.get("abuse_confidence", 0.0) * abuse_score
-            + weights.get("source_trust", 0.0) * source_trust
-            + weights.get("recency", 0.0) * recency_score
-            + weights.get("context", 0.0) * context_score
-            + weights.get("corroboration", 0.0) * corroboration
+        components = self.score_components(
+            weights=weights,
+            vt_ratio=vt_ratio,
+            abuse_confidence=abuse_confidence,
+            source_trust=source_trust,
+            recency_score=recency_score,
+            context_score=context_score,
+            corroboration=corroboration,
         )
-        return round(max(0.0, min(100.0, raw_score * 100)), 2)
+        return round(max(0.0, min(100.0, sum(components.values()))), 2)
 
     @staticmethod
     def _context_from(context: dict[str, Any] | None) -> tuple[float, int]:
@@ -333,7 +359,7 @@ class EnrichmentAgent(BaseAgent):
 
         vt_detections, vt_ratio = self._extract_vt_metrics(provider_results.get("virustotal"))
         abuse_confidence = self._extract_abuse_confidence(provider_results.get("abuseipdb"))
-        risk_score = self._score_ioc(
+        score_breakdown = self.score_components(
             weights=weights,
             vt_ratio=vt_ratio,
             abuse_confidence=abuse_confidence,
@@ -342,6 +368,9 @@ class EnrichmentAgent(BaseAgent):
             context_score=context_score,
             corroboration=corroboration_component(corroboration_sources),
         )
+        risk_score = round(max(0.0, min(100.0, sum(score_breakdown.values()))), 2)
+        attributes = dict(ioc.get("attributes", {}))
+        attributes["score_breakdown"] = score_breakdown
         return EnrichedIOC(
             value=ioc["value"],
             type=ioc["type"],
@@ -366,7 +395,7 @@ class EnrichmentAgent(BaseAgent):
             ),
             provider_results=provider_results,
             provider_errors=provider_errors,
-            attributes=dict(ioc.get("attributes", {})),
+            attributes=attributes,
             context_score=context_score,
             corroboration_sources=corroboration_sources,
         )
@@ -387,8 +416,31 @@ class EnrichmentAgent(BaseAgent):
         Used to re-level existing rows under the current weights/context without
         re-hitting VirusTotal/AbuseIPDB (and without burning their quota).
         """
+        components = self.breakdown_from_stored(
+            weights=weights,
+            vt_ratio=vt_ratio,
+            abuse_confidence=abuse_confidence,
+            source_trust=source_trust,
+            first_seen=first_seen,
+            last_seen=last_seen,
+            context=context,
+        )
+        return round(max(0.0, min(100.0, sum(components.values()))), 2)
+
+    def breakdown_from_stored(
+        self,
+        *,
+        weights: dict[str, float],
+        vt_ratio: float | None,
+        abuse_confidence: int | None,
+        source_trust: float,
+        first_seen: datetime,
+        last_seen: datetime,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, float]:
+        """Per-component score contributions from already-stored evidence."""
         context_score, corroboration_sources = self._context_from(context)
-        return self._score_ioc(
+        return self.score_components(
             weights=weights,
             vt_ratio=vt_ratio or 0.0,
             abuse_confidence=abuse_confidence,

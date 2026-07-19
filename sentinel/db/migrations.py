@@ -26,6 +26,7 @@ SCHEMA_MIGRATIONS_TABLE = "schema_migrations"
 ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     "iocs": {
         "vt_ratio": "FLOAT",
+        "score_breakdown": "JSON",
     },
     "feedback_records": {
         "source": "VARCHAR(255)",

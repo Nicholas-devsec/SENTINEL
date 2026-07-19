@@ -72,7 +72,10 @@ async def seed_labeled_data(db_session_factory) -> None:
 def build_evaluator(db_session_factory, skill_path: Path) -> ReplayEvaluator:
     settings = SentinelSettings.model_validate(
         {
-            "thresholds": {"alert_score": 35},
+            # This fixture's seeded scores are built around a 70-point alert
+            # threshold (see seed_labeled_data); keep it pinned independently
+            # of the production default in config.yaml.
+            "thresholds": {"alert_score": 70},
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
         }
     )

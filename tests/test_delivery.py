@@ -186,7 +186,8 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
     assert result.digest_candidates == 2
     assert len(telegram_bot.messages) == 1
     assert "SENTINEL Alert" in telegram_bot.messages[0]["text"]
-    assert "\nIntel Links\n" in telegram_bot.messages[0]["text"]
+    assert "<b>Evidence</b>:" in telegram_bot.messages[0]["text"]
+    assert telegram_bot.messages[0]["parse_mode"] == "HTML"
     assert telegram_bot.messages[0]["reply_markup"] is not None
 
 
@@ -260,9 +261,10 @@ async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> 
     assert result.immediate_alerts == 1
     assert len(telegram_bot.messages) == 1
     assert "CyberPress SharkLoader in-memory beacon attack" in telegram_bot.messages[0]["text"]
-    assert "HIGH | Score 84.00 | 2 IOC(s)" in telegram_bot.messages[0]["text"]
-    assert "[md5] c559cc68986933200fd5d9e4388e2f58" in telegram_bot.messages[0]["text"]
-    assert "[md5] b3352b42432dedc4a519f011dc8b5d5a" in telegram_bot.messages[0]["text"]
+    assert "<b>HIGH</b> · Score 84.00" in telegram_bot.messages[0]["text"]
+    assert "<b>IOCs (2)</b>" in telegram_bot.messages[0]["text"]
+    assert "<code>c559cc68986933200fd5d9e4388e2f58</code> [md5]" in telegram_bot.messages[0]["text"]
+    assert "<code>b3352b42432dedc4a519f011dc8b5d5a</code> [md5]" in telegram_bot.messages[0]["text"]
     assert "malware artifact hash" in telegram_bot.messages[0]["text"]
     assert telegram_bot.messages[0]["reply_markup"] is not None
 
@@ -312,9 +314,10 @@ async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_articl
 
     assert result.immediate_alerts == 1
     assert len(telegram_bot.messages) == 1
-    assert "HIGH | Score 74.00 | 2 IOC(s)" in telegram_bot.messages[0]["text"]
-    assert "[md5] c559cc68986933200fd5d9e4388e2f58" in telegram_bot.messages[0]["text"]
-    assert "[md5] b3352b42432dedc4a519f011dc8b5d5a" in telegram_bot.messages[0]["text"]
+    assert "<b>HIGH</b> · Score 74.00" in telegram_bot.messages[0]["text"]
+    assert "<b>IOCs (2)</b>" in telegram_bot.messages[0]["text"]
+    assert "<code>c559cc68986933200fd5d9e4388e2f58</code> [md5]" in telegram_bot.messages[0]["text"]
+    assert "<code>b3352b42432dedc4a519f011dc8b5d5a</code> [md5]" in telegram_bot.messages[0]["text"]
 
 
 @pytest.mark.asyncio
@@ -698,13 +701,13 @@ async def test_delivery_agent_daily_digest_sends_top_5_by_risk_score() -> None:
     assert len(telegram_bot.messages) == 6
     assert "Delivering 5 analyst-ready IOC card(s)" in telegram_bot.messages[0]["text"]
     assert "SENTINEL Daily Digest 1/5" in telegram_bot.messages[1]["text"]
-    assert "- [domain] ioc-11" in telegram_bot.messages[1]["text"]
+    assert "<code>ioc-11</code> [domain]" in telegram_bot.messages[1]["text"]
     assert "SENTINEL Daily Digest 5/5" in telegram_bot.messages[5]["text"]
-    assert "- [domain] ioc-7" in telegram_bot.messages[5]["text"]
+    assert "<code>ioc-7</code> [domain]" in telegram_bot.messages[5]["text"]
     joined = "\n".join(message["text"] for message in telegram_bot.messages)
-    assert "- [domain] ioc-0" not in joined
-    assert "- [domain] ioc-2" not in joined
-    assert "- [domain] ioc-6" not in joined
+    assert "<code>ioc-0</code>" not in joined
+    assert "<code>ioc-2</code>" not in joined
+    assert "<code>ioc-6</code>" not in joined
 
 
 @pytest.mark.asyncio
@@ -789,9 +792,9 @@ async def test_delivery_agent_daily_digest_groups_all_iocs_from_same_article() -
     assert response["count"] == 1
     assert len(telegram_bot.messages) == 2
     assert "SENTINEL Daily Digest 1/1" in telegram_bot.messages[1]["text"]
-    assert "2 IOC(s)" in telegram_bot.messages[1]["text"]
-    assert "alpha.bad.example" in telegram_bot.messages[1]["text"]
-    assert "beta.bad.example" in telegram_bot.messages[1]["text"]
+    assert "<b>IOCs (2)</b>" in telegram_bot.messages[1]["text"]
+    assert "alpha[.]bad[.]example" in telegram_bot.messages[1]["text"]
+    assert "beta[.]bad[.]example" in telegram_bot.messages[1]["text"]
 
 
 @pytest.mark.asyncio
@@ -842,9 +845,9 @@ async def test_delivery_agent_daily_digest_merges_same_campaign_across_duplicate
     assert response["count"] == 1
     assert len(telegram_bot.messages) == 2
     assert "1/1" in telegram_bot.messages[1]["text"]
-    assert "2 IOC(s)" in telegram_bot.messages[1]["text"]
-    assert "goserpent-a.bad.example" in telegram_bot.messages[1]["text"]
-    assert "goserpent-b.bad.example" in telegram_bot.messages[1]["text"]
+    assert "<b>IOCs (2)</b>" in telegram_bot.messages[1]["text"]
+    assert "goserpent-a[.]bad[.]example" in telegram_bot.messages[1]["text"]
+    assert "goserpent-b[.]bad[.]example" in telegram_bot.messages[1]["text"]
 
 
 @pytest.mark.asyncio
@@ -999,17 +1002,17 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
         mitre_tactics=[],
     )
 
-    assert "INFORMATIONAL | Score 24.19 | 1 IOC" in rendered
-    assert "Source feodotracker" in rendered
+    assert "🔵 <b>INFORMATIONAL</b> · Score 24.19" in rendered
+    assert "<i>feodotracker</i>" in rendered
     assert "AbuseIPDB confidence: 0%" in rendered
     assert "Shodan ports: none reported" in rendered
-    assert "https://www.shodan.io/host/162.243.103.246" in rendered
-    assert "Observed 2026-04-15 07:30 UTC | Corroboration 1 source(s)" in rendered
+    assert '<a href="https://www.shodan.io/host/162.243.103.246">Shodan</a>' in rendered
+    assert "Observed 2026-04-15 07:30 UTC · Corroboration 1 source(s)" in rendered
     assert "Feodo IP Blocklist" in rendered
-    assert "Article https://feodotracker.abuse.ch/" in rendered
-    assert "CVEs CVE-2026-12345" in rendered
-    assert "\nIOC\n" in rendered
-    assert "- [ipv4] 162.243.103.246" in rendered
+    assert '<a href="https://feodotracker.abuse.ch/">Article</a>' in rendered
+    assert "CVEs: CVE-2026-12345" in rendered
+    # The indicator itself is defanged so chat clients cannot auto-link it.
+    assert "<code>162[.]243[.]103[.]246</code> [ipv4]" in rendered
     assert "IPv4 infrastructure indicator" in rendered
 
 
@@ -1032,12 +1035,12 @@ def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
         mitre_tactics=[],
     )
 
-    assert "HelloBackdoor" in rendered
-    assert "HelloBackdoor Droppers" in rendered
-    assert "wtsapi32.dll" in rendered
+    assert "<u>HelloBackdoor</u>" in rendered
+    assert "<u>HelloBackdoor Droppers</u>" in rendered
+    assert "<u>wtsapi32.dll</u>" in rendered
     assert "More IOCs are present in the article (14 extracted total)." in rendered
-    assert "[md5] 16c211c96735f2fae9361b89bd7a31bf" in rendered
-    assert "[ipv4] 5.39.253.206" in rendered
+    assert "<code>16c211c96735f2fae9361b89bd7a31bf</code> [md5]" in rendered
+    assert "<code>5[.]39[.]253[.]206</code> [ipv4]" in rendered
 
 
 def test_format_alert_message_shows_hash_intel_links() -> None:
@@ -1064,13 +1067,13 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
         mitre_tactics=["execution"],
     )
 
-    assert "CRITICAL | Score 91.00 | 1 IOC" in rendered
+    assert "🔴 <b>CRITICAL</b> · Score 91.00" in rendered
     assert "VirusTotal detections: 18" in rendered
     assert "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
     assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
-    assert "Observed 2026-04-15 08:15 UTC | Corroboration 1 source(s)" in rendered
+    assert "Observed 2026-04-15 08:15 UTC · Corroboration 1 source(s)" in rendered
     assert "Stealer Campaign Impacting SLTT macOS Users" in rendered
-    assert "- [sha256] deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
+    assert "<code>deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef</code> [sha256]" in rendered
     assert "malware artifact hash" in rendered
 
 
@@ -1104,9 +1107,9 @@ def test_format_alert_message_uses_threatfox_metadata_for_single_ioc_summary() -
         },
     )
 
-    assert "MEDIUM | Score 63.80 | 1 IOC" in rendered
-    assert "Source ThreatFox | botnet_cc | Mirai (Katana)" in rendered
-    assert "- [ipv4] 94.154.43.12" in rendered
+    assert "🟡 <b>MEDIUM</b> · Score 63.80" in rendered
+    assert "<i>ThreatFox | botnet_cc | Mirai (Katana)</i>" in rendered
+    assert "<code>94[.]154[.]43[.]12</code> [ipv4]" in rendered
     assert "botnet C2 IP tied to Mirai" in rendered
 
 
@@ -1131,17 +1134,19 @@ def test_grouped_alert_message_renders_clean_sections_and_ioc_summaries() -> Non
         mitre_tactics=["resource development"],
     )
 
-    assert "HIGH | Score 78.00 | 3 IOC(s)" in rendered
-    assert "Observed 2026-07-05 00:58 UTC | Corroboration 1 source(s)" in rendered
-    assert "Article https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/" in rendered
-    assert "\nIOCs\n" in rendered
-    assert "- [url] https://github.com/antivirus-free-bitdefender" in rendered
+    assert "🟠 <b>HIGH</b> · Score 78.00" in rendered
+    assert "Observed 2026-07-05 00:58 UTC · Corroboration 1 source(s)" in rendered
+    assert (
+        '<a href="https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/">Article</a>'
+        in rendered
+    )
+    assert "<b>IOCs (3)</b>" in rendered
+    assert "<code>hxxps://github[.]com/antivirus-free-bitdefender</code> [url]" in rendered
     assert "GitHub repo or path used by attacker" in rendered
-    assert "- [domain] bentleyvazquezpvey.github.io" in rendered
+    assert "<code>bentleyvazquezpvey[.]github[.]io</code> [domain]" in rendered
     assert "domain hosting attacker-controlled content" in rendered
-    assert "- [sha256] " in rendered
+    assert f"<code>{'a' * 64}</code> [sha256]" in rendered
     assert "malware artifact hash" in rendered
-    assert "\nContext\n" in rendered
 
 
 def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_count() -> None:
@@ -1163,6 +1168,8 @@ def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_cou
         attributes={"article_ioc_count": 12},
     )
 
-    assert "Article https://example.com/report" in rendered
-    assert "- [domain] evil.example" in rendered
+    # Article links are refanged into clickable anchors; the IOC itself stays
+    # defanged so the alert never contains a live malicious link.
+    assert '<a href="https://example.com/report">Article</a>' in rendered
+    assert "<code>evil[.]example</code> [domain]" in rendered
     assert "More IOCs are present in the article (12 extracted total)." in rendered

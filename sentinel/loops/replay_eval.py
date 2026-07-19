@@ -150,6 +150,38 @@ class ReplayEvaluator:
         adjusted = item.risk_score_stored + self.trust_weight * 100.0 * (trust_now - item.source_trust_stored)
         return max(0.0, min(100.0, adjusted))
 
+    def _confusion_metric(self, labeled: list[LabeledIOC], trust_scores: dict[str, float]) -> float:
+        tp = fp = fn = 0
+        for item in labeled:
+            predicted_alert = self._replay_score(item, trust_scores) >= self.alert_threshold
+            actually_bad = item.verdict == "confirmed"
+            if predicted_alert and actually_bad:
+                tp += 1
+            elif predicted_alert and not actually_bad:
+                fp += 1
+            elif not predicted_alert and actually_bad:
+                fn += 1
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        return _f_beta(precision, recall, self.beta)
+
+    async def sweep(self, source: str, candidate_trusts: list[float]) -> dict[float, float]:
+        """Replay metric for each candidate trust value of one source.
+
+        This is the deterministic baseline the LLM proposal is judged against:
+        because the replay metric is directly computable for any trust value,
+        the grid optimum is known, and an experiment log can show whether the
+        proposed trust matched it.
+        """
+        trust_scores = parse_trust_scores(self.skill_path.read_text(encoding="utf-8"))
+        labeled = await self._load_labeled()
+        results: dict[float, float] = {}
+        for candidate in candidate_trusts:
+            clamped = round(max(0.0, min(1.0, float(candidate))), 2)
+            overridden = {**trust_scores, source.lower(): clamped}
+            results[clamped] = self._confusion_metric(labeled, overridden)
+        return results
+
     async def evaluate(self) -> ReplayEvalResult:
         trust_scores = parse_trust_scores(self.skill_path.read_text(encoding="utf-8"))
         labeled = await self._load_labeled()

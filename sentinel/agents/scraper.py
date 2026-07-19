@@ -985,16 +985,24 @@ class ScraperAgent(BaseAgent):
         return processed, extracted, diagnostic
 
     async def _load_feedback_suppressions(self) -> tuple[set[str], set[str]]:
+        # Fail open: suppression memory is an optimization, and an unreadable
+        # database (fresh install, missing table, outage) must never abort the
+        # scrape itself.
         try:
             from sentinel.db.session import AsyncSessionFactory
-        except Exception:
+
+            async with AsyncSessionFactory() as session:
+                rows = (
+                    await session.scalars(
+                        select(DiscoveryMemory).where(DiscoveryMemory.kind.in_(["article_url", "publisher_host"]))
+                    )
+                ).all()
+        except Exception as exc:
+            self.logger.warning(
+                "Feedback suppression memory unavailable; scraping without suppressions: %s",
+                type(exc).__name__,
+            )
             return set(), set()
-        async with AsyncSessionFactory() as session:
-            rows = (
-                await session.scalars(
-                    select(DiscoveryMemory).where(DiscoveryMemory.kind.in_(["article_url", "publisher_host"]))
-                )
-            ).all()
         blocked_urls: set[str] = set()
         blocked_hosts: set[str] = set()
         for row in rows:

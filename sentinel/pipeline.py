@@ -19,7 +19,7 @@ from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent
 from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.migrations import ensure_schema
-from sentinel.db.models import IOC, SourceMaterial
+from sentinel.db.models import IOC, PipelineRun, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory, get_engine
 from sentinel.integrations.mitre_attack import MitreAttackRepository
 from telegram import Bot
@@ -106,6 +106,45 @@ async def init_db() -> None:
     await ensure_schema(get_engine())
 
 
+async def _start_pipeline_run() -> Any | None:
+    """Best-effort run-ledger row; a ledger failure must never block the run."""
+    try:
+        async with AsyncSessionFactory() as session:
+            row = PipelineRun(started_at=datetime.now(UTC), status="running")
+            session.add(row)
+            await session.commit()
+            return row.id
+    except Exception:
+        logger.exception("Failed to record pipeline run start; continuing without ledger row")
+        return None
+
+
+async def _finish_pipeline_run(
+    run_id: Any | None,
+    *,
+    status: str,
+    result: PipelineResult | None = None,
+    error: str | None = None,
+) -> None:
+    if run_id is None:
+        return
+    try:
+        async with AsyncSessionFactory() as session:
+            row = await session.get(PipelineRun, run_id)
+            if row is None:
+                return
+            row.finished_at = datetime.now(UTC)
+            row.status = status
+            row.error = error
+            if result is not None:
+                counts = asdict(result)
+                row.stage_durations = counts.pop("stage_durations", None) or {}
+                row.counts = counts
+            await session.commit()
+    except Exception:
+        logger.exception("Failed to finalize pipeline run ledger row %s", run_id)
+
+
 async def _persist_writeups(writeups: list[RawWriteup], raw_items: list[Any] | None = None) -> dict[str, Any]:
     """Get-or-create SourceMaterial rows; returns article url -> row id."""
     if not writeups:
@@ -174,6 +213,9 @@ async def _persist_enrichment(enriched_items: list[EnrichedIOC]) -> list[IOC]:
             row.vt_ratio = enriched.vt_ratio
             row.shodan_ports = enriched.shodan_ports
             row.abuse_confidence = enriched.abuse_confidence
+            breakdown = enriched.attributes.get("score_breakdown")
+            if breakdown is not None:
+                row.score_breakdown = breakdown
             persisted.append(row)
         await session.commit()
         return persisted
@@ -240,6 +282,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
     agents = build_agents(settings)
     stage_durations: dict[str, float] = {}
     run_started = time.perf_counter()
+    run_id = await _start_pipeline_run()
     try:
         stage_started = time.perf_counter()
         scrape_report: ScrapeReport = await agents["scraper"].run_with_diagnostics()
@@ -341,7 +384,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             delivery_result.immediate_alerts,
             stage_durations,
         )
-        return PipelineResult(
+        result = PipelineResult(
             scraped=len(raw_items),
             validated=len(validation_report.new_iocs),
             enriched=len(enriched_items),
@@ -355,6 +398,11 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             discovered=discovered_count,
             stage_durations=stage_durations,
         )
+        await _finish_pipeline_run(run_id, status="succeeded", result=result)
+        return result
+    except Exception as exc:
+        await _finish_pipeline_run(run_id, status="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
     finally:
         for key in ("scraper", "enricher", "rule_generator", "delivery"):
             closer = getattr(agents[key], "aclose", None)
@@ -391,7 +439,7 @@ async def rescore_existing_iocs(settings: SentinelSettings | None = None) -> Res
             context_by_id = await get_scoring_context(session, [row.id for row in rows])
             for row in rows:
                 before = float(row.risk_score or 0.0)
-                new_score = enricher.rescore_from_stored(
+                breakdown = enricher.breakdown_from_stored(
                     weights=weights,
                     vt_ratio=row.vt_ratio,
                     abuse_confidence=row.abuse_confidence,
@@ -400,6 +448,8 @@ async def rescore_existing_iocs(settings: SentinelSettings | None = None) -> Res
                     last_seen=row.last_seen,
                     context=context_by_id.get(row.id),
                 )
+                new_score = round(max(0.0, min(100.0, sum(breakdown.values()))), 2)
+                row.score_breakdown = breakdown
                 before_sum.setdefault(row.source, []).append(before)
                 after_sum.setdefault(row.source, []).append(new_score)
                 if abs(new_score - before) > 1e-6:
@@ -470,6 +520,7 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                     "article_ioc_count": int((context_by_id.get(row.id) or {}).get("article_ioc_count") or 0),
                     "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
                     "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
+                    "score_breakdown": getattr(row, "score_breakdown", None),
                 },
             }
             for row in rows

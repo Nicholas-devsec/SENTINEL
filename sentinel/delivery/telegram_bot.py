@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_module
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import re
@@ -19,6 +20,25 @@ MAX_IOC_VALUE_CHARS = 120
 MAX_LINK_CHARS = 140
 MAX_GROUPED_IOCS = 12
 ARTICLE_IOC_NOTE_THRESHOLD = 10
+TELEGRAM_PARSE_MODE = "HTML"
+
+SEVERITY_EMOJI = {
+    "critical": "🔴",
+    "high": "🟠",
+    "medium": "🟡",
+    "low": "🔵",
+    "informational": "🔵",
+}
+
+# Human-readable labels for score_breakdown components, in display priority.
+SCORE_COMPONENT_LABELS = {
+    "context": "article context",
+    "corroboration": "corroboration",
+    "vt_ratio": "VirusTotal",
+    "abuse_confidence": "AbuseIPDB",
+    "source_trust": "source trust",
+    "recency": "recency",
+}
 
 
 @dataclass(slots=True)
@@ -37,6 +57,9 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("True Positive", callback_data=f"confirmed:{ioc_id}"),
                 InlineKeyboardButton("False Positive", callback_data=f"false_positive:{ioc_id}"),
             ],
+            [
+                InlineKeyboardButton("Needs Review", callback_data=f"needs_review:{ioc_id}"),
+            ],
         ]
     )
 
@@ -45,6 +68,66 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def _escape(text: str) -> str:
+    return html_module.escape(str(text), quote=True)
+
+
+def defang(value: str, ioc_type: str) -> str:
+    """Render an indicator so chat clients cannot auto-link or auto-fetch it.
+
+    Alerts must never contain live malicious hyperlinks: an accidental tap on
+    a C2 URL from a phone is a real incident. Hashes and CVEs are inert and
+    pass through unchanged.
+    """
+    clean = refang(value)
+    if ioc_type in {"domain", "ipv4", "ipv6"}:
+        return clean.replace(".", "[.]")
+    if ioc_type == "url":
+        parsed = urlparse(clean)
+        if not parsed.scheme or not parsed.netloc:
+            return clean.replace("http", "hxxp").replace(".", "[.]")
+        scheme = parsed.scheme.replace("http", "hxxp")
+        netloc = parsed.netloc.replace(".", "[.]")
+        rest = parsed.path or "/"
+        if parsed.query:
+            rest += f"?{parsed.query}"
+        return f"{scheme}://{netloc}{rest}"
+    return clean
+
+
+def _fit_message(lines: list[str], *, limit: int = MAX_TELEGRAM_MESSAGE_CHARS) -> str:
+    """Join lines, dropping whole trailing lines to stay under Telegram's cap.
+
+    Truncating on line boundaries keeps the per-line HTML tags balanced; a raw
+    character slice could cut an open tag and make Telegram reject the message.
+    """
+    message = "\n".join(lines)
+    if len(message) <= limit:
+        return message
+    kept = list(lines)
+    suffix = "…"
+    while kept and len("\n".join([*kept, suffix])) > limit:
+        kept.pop()
+    return "\n".join([*kept, suffix])
+
+
+def _why_line(attributes: dict[str, Any] | None, *, top_n: int = 3) -> str | None:
+    """Top contributing evidence behind the risk score, from score_breakdown."""
+    breakdown = ((attributes or {}).get("score_breakdown") or {})
+    if not isinstance(breakdown, dict):
+        return None
+    contributions = [
+        (SCORE_COMPONENT_LABELS.get(name, name), float(points))
+        for name, points in breakdown.items()
+        if isinstance(points, (int, float)) and float(points) >= 0.5
+    ]
+    if not contributions:
+        return None
+    contributions.sort(key=lambda pair: pair[1], reverse=True)
+    parts = [f"{label} +{points:.1f}" for label, points in contributions[:top_n]]
+    return " · ".join(parts)
 
 
 def _normalize_ioc_display(value: str, ioc_type: str) -> str:
@@ -169,8 +252,8 @@ def format_alert_message(
     mitre_tactics: list[str],
     attributes: dict[str, Any] | None = None,
 ) -> str:
-    techniques = ", ".join(mitre_techniques) if mitre_techniques else "None"
-    tactics = ", ".join(mitre_tactics) if mitre_tactics else "None"
+    attrs = attributes or {}
+    emoji = SEVERITY_EMOJI.get(str(severity).lower(), "⚪")
     findings: list[str] = []
     if vt_detections is not None:
         findings.append(f"VirusTotal detections: {vt_detections}")
@@ -181,18 +264,15 @@ def format_alert_message(
     elif ioc_type in {"ipv4", "ipv6"}:
         findings.append("Shodan ports: none reported")
     findings_text = " | ".join(findings) if findings else "No external enrichment hits."
-    attrs = attributes or {}
-    links = {name: _normalize_link_display(url) or "" for name, url in (external_links or {}).items()}
-    links = {name: url for name, url in links.items() if url}
-    if links:
-        intel_links = "\n".join(f"- {name}: {url}" for name, url in links.items())
-    else:
-        intel_links = "- None"
-    cves = ", ".join(related_cves or []) if related_cves else "None"
-    source_context = source_title or "None"
-    corroboration_text = (
-        f"{corroboration_sources} source(s)" if corroboration_sources is not None else "1 source(s)"
-    )
+    link_anchors = [
+        f'<a href="{_escape(url)}">{_escape(name)}</a>'
+        for name, url in ((name, _normalize_link_display(url)) for name, url in (external_links or {}).items())
+        if url
+    ]
+    article_href = _normalize_link_display(reference_url)
+    if article_href:
+        link_anchors.append(f'<a href="{_escape(article_href)}">Article</a>')
+    corroboration_text = f"{corroboration_sources if corroboration_sources is not None else 1} source(s)"
     summary = summarize_ioc(
         value=value,
         ioc_type=ioc_type,
@@ -202,46 +282,54 @@ def format_alert_message(
     )
     source_line = _format_source_context(source, attributes)
     article_ioc_note = _article_ioc_note(int((attrs.get("article_ioc_count") or 0) or 0))
-    observed_text = "Unknown"
-    if last_seen is not None:
-        if isinstance(last_seen, str):
-            try:
-                observed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
-            except ValueError:
-                observed = None
-        else:
-            observed = last_seen
-        if observed is not None:
-            if observed.tzinfo is None:
-                observed = observed.replace(tzinfo=UTC)
-            observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    observed_text = _format_observed(last_seen)
+    why = _why_line(attrs)
     lines = [
-        heading,
-        f"{source_context}",
-        f"{severity.upper()} | Score {risk_score:.2f} | 1 IOC",
-        f"Source {source_line}",
-        f"Observed {observed_text} | Corroboration {corroboration_text}",
-        f"CVEs {cves}",
-        f"Article {_normalize_link_display(reference_url) or 'None'}",
-        "",
-        "IOC",
-        f"- [{ioc_type}] {_truncate(_normalize_ioc_display(value, ioc_type), 140)}",
-        f"  {summary}",
-        "",
-        "Context",
+        f"{emoji} <b>{_escape(str(severity).upper())}</b> · Score {risk_score:.2f} · {_escape(heading)}",
     ]
-    if article_ioc_note:
-        lines.append(article_ioc_note)
+    if source_title:
+        lines.append(f"<b>{_escape(_truncate(str(source_title), MAX_SOURCE_TITLE_CHARS))}</b>")
+    lines.append(f"<i>{_escape(source_line)}</i>")
+    lines.append(f"Observed {observed_text} · Corroboration {corroboration_text}")
+    if related_cves:
+        lines.append(f"CVEs: {_escape(', '.join(related_cves))}")
     lines.extend(
         [
-            f"Findings {findings_text}",
-            "Intel Links",
-            intel_links,
-            f"ATT&CK {techniques}",
-            f"Tactics {tactics}",
+            "",
+            f"<code>{_escape(_truncate(defang(value, ioc_type), MAX_IOC_VALUE_CHARS))}</code> [{_escape(ioc_type)}]",
+            f"↳ {_escape(summary)}",
         ]
     )
-    return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
+    if article_ioc_note:
+        lines.append(_escape(article_ioc_note))
+    if why:
+        lines.extend(["", f"<b>Why this score</b>: {_escape(why)}"])
+    lines.extend(["", f"<b>Evidence</b>: {_escape(findings_text)}"])
+    if link_anchors:
+        lines.append("<b>Pivots</b>: " + " · ".join(link_anchors))
+    if mitre_techniques or mitre_tactics:
+        techniques = ", ".join(mitre_techniques) if mitre_techniques else "None"
+        tactics = ", ".join(mitre_tactics) if mitre_tactics else "None"
+        lines.append(f"<b>ATT&amp;CK</b>: {_escape(techniques)} · {_escape(tactics)}")
+    return _fit_message(lines)
+
+
+def _format_observed(last_seen: datetime | str | None) -> str:
+    if last_seen is None:
+        return "Unknown"
+    observed: datetime | None
+    if isinstance(last_seen, str):
+        try:
+            observed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+        except ValueError:
+            observed = None
+    else:
+        observed = last_seen
+    if observed is None:
+        return "Unknown"
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=UTC)
+    return observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def format_grouped_alert_message(
@@ -261,49 +349,33 @@ def format_grouped_alert_message(
     attributes: dict[str, Any] | None = None,
 ) -> str:
     attrs = attributes or {}
-    techniques = ", ".join(mitre_techniques or []) if mitre_techniques else "None"
-    tactics = ", ".join(mitre_tactics or []) if mitre_tactics else "None"
-    cves = ", ".join(related_cves or []) if related_cves else "None"
-    corroboration_text = (
-        f"{corroboration_sources} source(s)" if corroboration_sources is not None else "1 source(s)"
-    )
-    observed_text = "Unknown"
-    if last_seen is not None:
-        if isinstance(last_seen, str):
-            try:
-                observed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
-            except ValueError:
-                observed = None
-        else:
-            observed = last_seen
-        if observed is not None:
-            if observed.tzinfo is None:
-                observed = observed.replace(tzinfo=UTC)
-            observed_text = observed.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    emoji = SEVERITY_EMOJI.get(str(severity).lower(), "⚪")
+    corroboration_text = f"{corroboration_sources if corroboration_sources is not None else 1} source(s)"
+    observed_text = _format_observed(last_seen)
 
     article_ioc_count = int((attrs.get("article_ioc_count") or len(iocs)) or len(iocs))
     article_ioc_note = _article_ioc_note(article_ioc_count)
-    article_line = f"Article {_normalize_link_display(reference_url)}" if reference_url else "Article None"
+    article_href = _normalize_link_display(reference_url)
+    why = _why_line(attrs)
     lines = [
-        heading,
-        f"{source_title or 'Grouped writeup alert'}",
-        f"{severity.upper()} | Score {risk_score:.2f} | {len(iocs)} IOC(s)",
-        f"Source {source}",
-        f"Observed {observed_text} | Corroboration {corroboration_text}",
-        f"CVEs {cves}",
-        article_line,
-        "",
-        "IOCs",
+        f"{emoji} <b>{_escape(str(severity).upper())}</b> · Score {risk_score:.2f} · {_escape(heading)}",
+        f"<b>{_escape(_truncate(str(source_title or 'Grouped writeup alert'), MAX_SOURCE_TITLE_CHARS))}</b>",
+        f"<i>{_escape(source)}</i>",
+        f"Observed {observed_text} · Corroboration {corroboration_text}",
     ]
+    if related_cves:
+        lines.append(f"CVEs: {_escape(', '.join(related_cves))}")
+    if article_href:
+        lines.append(f'📄 <a href="{_escape(article_href)}">Article</a>')
+    lines.extend(["", f"<b>IOCs ({len(iocs)})</b>"])
     if article_ioc_note:
-        lines.append(article_ioc_note)
+        lines.append(_escape(article_ioc_note))
     active_label: str | None = None
     for item in iocs[:MAX_GROUPED_IOCS]:
         ioc_type = str(item.get("type", "unknown"))
-        value = _normalize_ioc_display(str(item.get("value", "")), ioc_type)
         section_label = str(item.get("section_label") or "").strip() or None
         if section_label and section_label != active_label:
-            lines.append(section_label)
+            lines.append(f"<u>{_escape(section_label)}</u>")
             active_label = section_label
         summary = summarize_ioc(
             value=str(item.get("value", "")),
@@ -311,20 +383,18 @@ def format_grouped_alert_message(
             source_title=source_title,
             reference_url=reference_url,
         )
-        lines.append(f"- [{ioc_type}] {_truncate(value, 140)}")
-        lines.append(f"  {summary}")
+        display_value = _truncate(defang(str(item.get("value", "")), ioc_type), MAX_IOC_VALUE_CHARS)
+        lines.append(f"<code>{_escape(display_value)}</code> [{_escape(ioc_type)}]")
+        lines.append(f"↳ {_escape(summary)}")
     if len(iocs) > MAX_GROUPED_IOCS:
-        lines.append(f"- ... and {len(iocs) - MAX_GROUPED_IOCS} more")
-    lines.extend(
-        [
-            "",
-            "Context",
-            "Grouped by shared article/source link to avoid duplicate alert spam.",
-            f"ATT&CK {techniques}",
-            f"Tactics {tactics}",
-        ]
-    )
-    return "\n".join(lines)[:MAX_TELEGRAM_MESSAGE_CHARS]
+        lines.append(f"… and {len(iocs) - MAX_GROUPED_IOCS} more")
+    if why:
+        lines.extend(["", f"<b>Why this score</b>: {_escape(why)}"])
+    if mitre_techniques or mitre_tactics:
+        techniques = ", ".join(mitre_techniques or []) if mitre_techniques else "None"
+        tactics = ", ".join(mitre_tactics or []) if mitre_tactics else "None"
+        lines.append(f"<b>ATT&amp;CK</b>: {_escape(techniques)} · {_escape(tactics)}")
+    return _fit_message(lines)
 
 
 def format_daily_digest_intro(*, generated_at: str, count: int, limit: int) -> str:

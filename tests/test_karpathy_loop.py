@@ -179,8 +179,10 @@ async def test_karpathy_loop_reverts_failed_patch_and_stops_after_three_small_de
     outcomes = await loop.optimize(max_experiments=10)
 
     assert len(outcomes) == 3
-    assert all(outcome.kept for outcome in outcomes)
-    assert (temp_repo / "skills/detection.SKILL.md").read_text(encoding="utf-8") != original
+    # Deltas below karpathy.min_keep_delta are noise: every patch is reverted
+    # and the loop stops after three consecutive negligible deltas.
+    assert not any(outcome.kept for outcome in outcomes)
+    assert (temp_repo / "skills/detection.SKILL.md").read_text(encoding="utf-8") == original
     assert len(sessions.experiment_logs) == 3
 
 

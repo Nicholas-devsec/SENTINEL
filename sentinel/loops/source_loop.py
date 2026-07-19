@@ -105,10 +105,32 @@ class SourceQualityLoop(ThreatIntelLoop):
             return await self.metric_override()
         # Replay: recompute labeled-window alerting under the trust scores
         # currently in the skill file, so a trust patch changes this number.
-        result = await self._build_replay_evaluator().evaluate()
+        evaluator = self._build_replay_evaluator()
+        result = await evaluator.evaluate()
         self._last_eval_details = result.to_details()
-        # Keep feedback_count reporting for the run report.
         if self.target_source is not None:
+            current_trust = result.trust_scores.get(self.target_source)
+            if current_trust is not None:
+                # Deterministic baseline: sweep the same +/-0.05 action space
+                # the LLM is allowed, so every experiment log records how the
+                # proposal compares to the known grid optimum.
+                grid = sorted(
+                    {
+                        round(max(0.0, min(1.0, current_trust + step / 100.0)), 2)
+                        for step in range(-5, 6)
+                    }
+                )
+                sweep = await evaluator.sweep(self.target_source, grid)
+                best_trust = max(
+                    sweep,
+                    key=lambda trust: (sweep[trust], -abs(trust - current_trust)),
+                )
+                self._last_eval_details["trust_sweep"] = {
+                    "grid": {f"{trust:.2f}": round(metric, 4) for trust, metric in sweep.items()},
+                    "grid_best_trust": best_trust,
+                    "grid_best_metric": round(sweep[best_trust], 4),
+                }
+            # Keep feedback_count reporting for the run report.
             await self._source_feedback_stats()
         return result.metric
 
@@ -189,6 +211,20 @@ class SourceQualityLoop(ThreatIntelLoop):
         eval_details_before: dict | None,
         eval_details_after: dict | None,
     ) -> KeepDecision:
+        # Fail closed on tiny labeled windows: with a handful of labels a
+        # +0.01 metric delta is indistinguishable from noise. Only enforced
+        # when replay details are present (metric_override paths skip it).
+        total_labeled = (eval_details_after or {}).get("total_labeled")
+        min_labeled = int(self.settings.karpathy.min_labeled_samples)
+        if total_labeled is not None and int(total_labeled) < min_labeled:
+            return KeepDecision(
+                kept=False,
+                reason=f"insufficient_labeled_data:{total_labeled}<{min_labeled}",
+                details={
+                    "total_labeled": int(total_labeled),
+                    "min_labeled_samples": min_labeled,
+                },
+            )
         base = super().decide_keep(
             proposal=proposal,
             metric_before=metric_before,

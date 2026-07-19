@@ -15,7 +15,16 @@ from sqlalchemy import case, func, select
 
 from sentinel.agents.scorer import build_external_links_for_ioc
 from sentinel.config import SentinelSettings
-from sentinel.db.models import ExperimentLog, FeedbackRecord, IOC, IOCSighting, ServiceLease, SourceMaterial
+from sentinel.db.models import (
+    AlertEvent,
+    ExperimentLog,
+    FeedbackRecord,
+    IOC,
+    IOCSighting,
+    PipelineRun,
+    ServiceLease,
+    SourceMaterial,
+)
 from sentinel.db.session import AsyncSessionFactory
 from sentinel.loops.detection_loop import DetectionEffectivenessLoop
 from sentinel.loops.karpathy_loop import ExperimentOutcome
@@ -1009,6 +1018,106 @@ async def run_live_karpathy_loop(
         lock_status=f"acquired:{lease_holder}",
     )
     return readiness, report
+
+
+@dataclass(slots=True)
+class OpsStatusReport:
+    pipeline_runs: list[dict[str, Any]]
+    alerts_24h: dict[str, int]
+    feedback_7d: dict[str, int]
+    recent_experiments: list[dict[str, Any]]
+
+
+async def collect_ops_status(*, limit: int = 5, session_factory: Any | None = None) -> OpsStatusReport:
+    """One-query-away operational answer to 'is the pipeline healthy?'."""
+    factory = session_factory or AsyncSessionFactory
+    now = datetime.now(UTC)
+    async with factory() as session:
+        runs = list(
+            (
+                await session.scalars(
+                    select(PipelineRun).order_by(PipelineRun.started_at.desc()).limit(limit)
+                )
+            ).all()
+        )
+        alert_rows = (
+            await session.execute(
+                select(AlertEvent.alert_kind, func.count())
+                .where(AlertEvent.sent_at >= now - timedelta(hours=24))
+                .group_by(AlertEvent.alert_kind)
+            )
+        ).all()
+        feedback_rows = (
+            await session.execute(
+                select(FeedbackRecord.verdict, func.count())
+                .where(FeedbackRecord.timestamp >= now - timedelta(days=7))
+                .group_by(FeedbackRecord.verdict)
+            )
+        ).all()
+        experiments = list(
+            (
+                await session.scalars(
+                    select(ExperimentLog).order_by(ExperimentLog.timestamp.desc()).limit(limit)
+                )
+            ).all()
+        )
+    return OpsStatusReport(
+        pipeline_runs=[
+            {
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "status": run.status,
+                "counts": dict(run.counts or {}),
+                "total_seconds": (run.stage_durations or {}).get("total"),
+                "error": run.error,
+            }
+            for run in runs
+        ],
+        alerts_24h={kind: int(count) for kind, count in alert_rows},
+        feedback_7d={verdict: int(count) for verdict, count in feedback_rows},
+        recent_experiments=[
+            {
+                "timestamp": experiment.timestamp,
+                "loop_type": experiment.loop_type,
+                "kept": experiment.kept,
+                "delta": experiment.delta,
+                "target": experiment.target,
+            }
+            for experiment in experiments
+        ],
+    )
+
+
+def format_ops_status(report: OpsStatusReport) -> str:
+    lines = ["SENTINEL status", "", "Recent pipeline runs:"]
+    if not report.pipeline_runs:
+        lines.append("- none recorded")
+    for run in report.pipeline_runs:
+        counts = run["counts"]
+        summary = (
+            f"scraped={counts.get('scraped', 0)} validated={counts.get('validated', 0)} "
+            f"alerts={counts.get('immediate_alerts', 0)} digest_candidates={counts.get('digest_candidates', 0)}"
+        )
+        duration = f" duration={run['total_seconds']}s" if run.get("total_seconds") is not None else ""
+        error = f" error={run['error']}" if run.get("error") else ""
+        lines.append(
+            f"- {run['started_at'].isoformat()} status={run['status']} {summary}{duration}{error}"
+        )
+    lines.append("")
+    alerts = ", ".join(f"{kind}={count}" for kind, count in sorted(report.alerts_24h.items())) or "none"
+    lines.append(f"Alerts sent (24h): {alerts}")
+    feedback = ", ".join(f"{verdict}={count}" for verdict, count in sorted(report.feedback_7d.items())) or "none"
+    lines.append(f"Analyst feedback (7d): {feedback}")
+    lines.append("")
+    lines.append("Recent Karpathy experiments:")
+    if not report.recent_experiments:
+        lines.append("- none recorded")
+    for experiment in report.recent_experiments:
+        lines.append(
+            f"- {experiment['timestamp'].isoformat()} loop={experiment['loop_type']} "
+            f"target={experiment['target'] or 'n/a'} kept={str(experiment['kept']).lower()} delta={experiment['delta']:.4f}"
+        )
+    return "\n".join(lines)
 
 
 async def load_real_sample_iocs(

@@ -96,7 +96,7 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
-    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups, raw_items=None: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=[validated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=[validated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
@@ -191,7 +191,7 @@ async def test_run_pipeline_once_reprocesses_corroborated_iocs(monkeypatch) -> N
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
-    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups, raw_items=None: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=[corroborated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=[corroborated_row]))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
@@ -323,7 +323,7 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
-    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups, raw_items=None: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=validated_rows))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=validated_rows))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
@@ -408,7 +408,7 @@ async def test_run_pipeline_once_aligns_delivery_payload_by_ioc_identity(monkeyp
 
     monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
     monkeypatch.setattr("sentinel.pipeline.build_agents", lambda settings=None: agents)
-    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups: __import__("asyncio").sleep(0, result={}))
+    monkeypatch.setattr("sentinel.pipeline._persist_writeups", lambda writeups, raw_items=None: __import__("asyncio").sleep(0, result={}))
     monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda enriched_items: __import__("asyncio").sleep(0, result=validated_rows))
     monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda scored_items: __import__("asyncio").sleep(0, result=persisted_rows_reordered))
     monkeypatch.setattr("sentinel.pipeline._persist_generated", lambda generated_items: __import__("asyncio").sleep(0))
