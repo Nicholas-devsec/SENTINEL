@@ -8,7 +8,7 @@ import pytest
 
 from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.scorer import ScoredIOC
-from sentinel.config import SentinelSettings
+from sentinel.config import FeedConfig, SentinelSettings
 from sentinel.db.models import FeedbackRecord
 from sentinel.delivery.email_digest import render_daily_digest
 from sentinel.delivery.telegram_bot import build_feedback_markup, format_daily_digest_intro, format_daily_digest_message
@@ -88,11 +88,13 @@ class FakeCallbackMessage:
     def __init__(self, text: str = "SENTINEL Alert") -> None:
         self.text = text
         self.edited_text: str | None = None
+        self.parse_mode: str | None = None
         self.reply_markup = object()
 
-    async def edit_text(self, text: str, reply_markup=None) -> None:
+    async def edit_text(self, text: str, parse_mode=None, reply_markup=None) -> None:
         self.text = text
         self.edited_text = text
+        self.parse_mode = parse_mode
         self.reply_markup = reply_markup
 
     async def edit_reply_markup(self, reply_markup=None) -> None:
@@ -481,6 +483,57 @@ async def test_delivery_agent_uses_recent_medium_score_fallback_for_digest_when_
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_promotes_fresh_trusted_feed_feedback_candidate_when_no_immediate_alerts() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 70
+    settings.thresholds.feedback_candidate_score = 19
+    settings.workflow.telegram_feed_alert_limit_per_run = 2
+    settings.delivery.telegram_max_alerts_per_run = 2
+    settings.sources.feeds = [
+        FeedConfig(name="threatfox", url="https://threatfox.example/api", trust=0.94, enabled=True),
+        FeedConfig(name="weak-feed", url="https://weak.example/feed", trust=0.50, enabled=True),
+    ]
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "137.184.135.42",
+            "type": "ipv4",
+            "source": "threatfox",
+            "risk_score": 24.0,
+            "severity": "informational",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+        {
+            "id": str(uuid4()),
+            "value": "low.example",
+            "type": "domain",
+            "source": "weak-feed",
+            "risk_score": 24.0,
+            "severity": "informational",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert len(telegram_bot.messages) == 1
+    assert "SENTINEL Feedback Candidate" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_can_disable_immediate_telegram_alerts() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
@@ -522,6 +575,7 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     assert query.show_alert is True
     assert query.message.edited_text is not None
     assert "Feedback recorded: False Positive" in query.message.text
+    assert query.message.parse_mode == "HTML"
     assert query.message.reply_markup is None
     assert "suppressed" in query.answer_text
     assert record == 1

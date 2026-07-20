@@ -31,11 +31,12 @@ class WorkflowSettings(BaseModel):
 
 
 class ThresholdSettings(BaseModel):
-    alert_score: int = 60
+    alert_score: int = 38
+    feedback_candidate_score: int = 19
     digest_score: int = 25
     digest_backfill_score: int = 20
-    curated_immediate_score: int = 35
-    corroborated_immediate_score: int = 40
+    curated_immediate_score: int = 28
+    corroborated_immediate_score: int = 32
     curated_digest_score: int = 20
     rule_score: int = 50
     karpathy_experiments: int = 25
@@ -179,7 +180,7 @@ class DeliverySettings(BaseModel):
     telegram_token: str = "${TELEGRAM_BOT_TOKEN}"
     telegram_chat_id: str = "${TELEGRAM_CHAT_ID}"
     enable_telegram_immediate_alerts: bool = True
-    telegram_max_alerts_per_run: int = 3
+    telegram_max_alerts_per_run: int = 5
     # Suppression window: an IOC that has already been alerted (immediate or
     # digest) is not re-sent on any channel until this many hours have passed.
     alert_resend_after_hours: int = 72

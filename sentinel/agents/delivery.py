@@ -481,6 +481,13 @@ class DeliveryAgent(BaseAgent):
     def _alert_policy(self):
         return build_alert_policy(self.settings)
 
+    def _trusted_feedback_sources(self) -> set[str]:
+        return {
+            feed.name.lower()
+            for feed in self.settings.sources.feeds
+            if feed.enabled and float(feed.trust) >= 0.90
+        }
+
     def _select_immediate_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         policy = self._alert_policy()
         qualified = [
@@ -512,6 +519,30 @@ class DeliveryAgent(BaseAgent):
             seen_ids.add(dedupe_key)
             selected.append(item)
         return selected
+
+    def _select_feedback_backfill_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        floor = float(self.settings.thresholds.feedback_candidate_score)
+        trusted_sources = self._trusted_feedback_sources()
+        candidates: list[dict[str, Any]] = []
+        for item in items:
+            source = str(item.get("source") or "").strip().lower()
+            if source not in trusted_sources:
+                continue
+            if not self._within_last_24_hours(item.get("last_seen")):
+                continue
+            if float(item.get("risk_score", 0.0)) < floor:
+                continue
+            attributes = dict(item.get("attributes", {}))
+            attributes["delivery_reason"] = "feedback_backfill"
+            candidates.append({**item, "attributes": attributes})
+        candidates.sort(
+            key=lambda item: (
+                float(item.get("risk_score", 0.0)),
+                self._sort_last_seen_value(item.get("last_seen")),
+            ),
+            reverse=True,
+        )
+        return candidates
 
     def _apply_delivery_limits(self, cards: list[dict[str, Any]], *, apply_burst_cap: bool = True) -> list[dict[str, Any]]:
         feed_limit = max(0, int(self.settings.workflow.telegram_feed_alert_limit_per_run))
@@ -669,8 +700,14 @@ class DeliveryAgent(BaseAgent):
         if self.telegram_bot is None:
             return False
         grouped_iocs = item.get("grouped_iocs") or []
+        heading = (
+            "SENTINEL Feedback Candidate"
+            if item.get("attributes", {}).get("delivery_reason") == "feedback_backfill"
+            else "SENTINEL Alert"
+        )
         if grouped_iocs:
             message = format_grouped_alert_message(
+                heading=heading,
                 source=item["source"],
                 risk_score=item["risk_score"],
                 severity=item["severity"],
@@ -686,6 +723,7 @@ class DeliveryAgent(BaseAgent):
             )
         else:
             message = format_alert_message(
+                heading=heading,
                 value=item["value"],
                 ioc_type=item["type"],
                 source=item["source"],
@@ -891,6 +929,7 @@ class DeliveryAgent(BaseAgent):
             if current_text and confirmation not in current_text and hasattr(message, "edit_text"):
                 await message.edit_text(
                     f"{current_text}\n\n{confirmation}",
+                    parse_mode=TELEGRAM_PARSE_MODE,
                     reply_markup=None,
                 )
                 return
@@ -1001,6 +1040,8 @@ class DeliveryAgent(BaseAgent):
         immediate: list[dict[str, Any]] = []
         if self.settings.delivery.enable_telegram_immediate_alerts:
             immediate_candidates = self._select_immediate_candidates(items)
+            if not immediate_candidates:
+                immediate_candidates = self._select_feedback_backfill_candidates(items)
             immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)
             immediate = self._apply_delivery_limits(immediate)
