@@ -87,18 +87,39 @@ class FakeQuery:
 class FakeCallbackMessage:
     def __init__(self, text: str = "SENTINEL Alert") -> None:
         self.text = text
+        self.html_text = text
+        self.caption = None
+        self.html_caption = None
         self.edited_text: str | None = None
+        self.edited_caption: str | None = None
         self.parse_mode: str | None = None
         self.reply_markup = object()
+        self.replies: list[dict] = []
 
     async def edit_text(self, text: str, parse_mode=None, reply_markup=None) -> None:
         self.text = text
+        self.html_text = text
         self.edited_text = text
+        self.parse_mode = parse_mode
+        self.reply_markup = reply_markup
+
+    async def edit_caption(self, caption: str, parse_mode=None, reply_markup=None) -> None:
+        self.caption = caption
+        self.html_caption = caption
+        self.edited_caption = caption
         self.parse_mode = parse_mode
         self.reply_markup = reply_markup
 
     async def edit_reply_markup(self, reply_markup=None) -> None:
         self.reply_markup = reply_markup
+
+    async def reply_text(self, text: str, **kwargs) -> None:
+        self.replies.append({"text": text, **kwargs})
+
+
+class BrokenEditCallbackMessage(FakeCallbackMessage):
+    async def edit_text(self, text: str, parse_mode=None, reply_markup=None) -> None:
+        raise RuntimeError("edit rejected")
 
 
 class BrokenSessionFactory:
@@ -606,6 +627,53 @@ async def test_delivery_agent_acknowledges_duplicate_feedback_without_duplicatin
     assert second.show_alert is True
     assert "Feedback already recorded: True Positive" in second.message.text
     assert len(session_factory.storage) == 1
+    assert record.verdict == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_confirms_needs_review_callback() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"needs_review:{ioc_id}", user_id="42")
+
+    record = await agent.handle_callback_query(query)
+
+    assert query.answer_text == "Recorded: needs review"
+    assert query.show_alert is True
+    assert "Feedback recorded: Needs Review" in query.message.text
+    assert query.message.reply_markup is None
+    assert record.verdict == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_sends_confirmation_reply_when_message_edit_fails() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"confirmed:{ioc_id}", user_id="42")
+    query.message = BrokenEditCallbackMessage()
+
+    record = await agent.handle_callback_query(query)
+
+    assert query.answer_text == "Recorded: confirmed"
+    assert query.show_alert is True
+    assert query.message.replies == [
+        {
+            "text": "Feedback confirmation: Feedback recorded: True Positive",
+            "disable_notification": True,
+        }
+    ]
     assert record.verdict == "confirmed"
 
 

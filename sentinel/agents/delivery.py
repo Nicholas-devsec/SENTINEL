@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from dataclasses import asdict, dataclass
@@ -965,25 +966,57 @@ class DeliveryAgent(BaseAgent):
         message = getattr(query, "message", None)
         if message is None:
             return
+        confirmation = self._feedback_confirmation_note(verdict, repeated=repeated)
+        confirmation_html = f"<b>{html.escape(confirmation)}</b>"
         try:
+            current_html = str(getattr(message, "html_text", None) or "")
             current_text = str(getattr(message, "text", "") or "")
-            confirmation = self._feedback_confirmation_note(verdict, repeated=repeated)
-            if current_text and confirmation not in current_text and hasattr(message, "edit_text"):
+            if not current_html and current_text:
+                current_html = html.escape(current_text)
+            if current_html and confirmation not in current_text and hasattr(message, "edit_text"):
                 await message.edit_text(
-                    f"{current_text}\n\n{confirmation}",
+                    f"{current_html}\n\n{confirmation_html}",
+                    parse_mode=TELEGRAM_PARSE_MODE,
+                    reply_markup=None,
+                )
+                return
+            current_caption_html = str(getattr(message, "html_caption", None) or "")
+            current_caption = str(getattr(message, "caption", "") or "")
+            if not current_caption_html and current_caption:
+                current_caption_html = html.escape(current_caption)
+            if current_caption_html and confirmation not in current_caption and hasattr(message, "edit_caption"):
+                await message.edit_caption(
+                    caption=f"{current_caption_html}\n\n{confirmation_html}",
                     parse_mode=TELEGRAM_PARSE_MODE,
                     reply_markup=None,
                 )
                 return
             if hasattr(message, "edit_reply_markup"):
                 await message.edit_reply_markup(reply_markup=None)
+                await self._send_callback_confirmation_reply(message, confirmation)
+                return
+            await self._send_callback_confirmation_reply(message, confirmation)
         except Exception:
             logger.exception("Failed to update Telegram alert with callback confirmation")
+            await self._send_callback_confirmation_reply(message, confirmation)
+
+    async def _send_callback_confirmation_reply(self, message: Any, confirmation: str) -> None:
+        reply_text = getattr(message, "reply_text", None)
+        if reply_text is None:
+            return
+        try:
+            await reply_text(
+                f"Feedback confirmation: {confirmation}",
+                disable_notification=True,
+            )
+        except Exception:
+            logger.exception("Failed to send Telegram callback confirmation reply")
 
     def _feedback_confirmation_note(self, verdict: str, *, repeated: bool) -> str:
         label = {
             "confirmed": "True Positive",
             "false_positive": "False Positive",
+            "needs_review": "Needs Review",
         }.get(verdict, verdict.replace("_", " ").title())
         prefix = "Feedback already recorded" if repeated else "Feedback recorded"
         return f"{prefix}: {label}"
