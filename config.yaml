@@ -20,7 +20,7 @@ schedule:
   # Fallback cadence used only when `pipeline_cron` is blank.
   scrape_interval_hours: 4
   # Main production scrape/store/alert schedule.
-  pipeline_cron: "0 7 * * *"
+  pipeline_cron: "5 0 * * *"
   # Legacy fallback used only when `daily_digest_cron` is blank.
   daily_digest_time: "07:00"
   # Optional separate digest message schedule.
@@ -36,11 +36,11 @@ workflow:
   # How many feed-origin IOCs are allowed into the DB each cron run.
   feed_ioc_store_limit_per_run: 250
   # How many article/writeup discoveries are allowed into the DB each cron run.
-  article_store_limit_per_run: 5
+  article_store_limit_per_run: 1
   # Telegram delivery budget for feed-origin alerts per cron run.
   telegram_feed_alert_limit_per_run: 5
   # Telegram delivery budget for article/writeup alerts per cron run.
-  telegram_article_alert_limit_per_run: 2
+  telegram_article_alert_limit_per_run: 1
   # Optional per-type Telegram budgets inside the feed alert budget.
   telegram_type_limits_per_run:
     ipv4: 2
