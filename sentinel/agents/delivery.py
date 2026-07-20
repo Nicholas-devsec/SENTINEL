@@ -32,7 +32,7 @@ from sentinel.delivery.telegram_bot import (
 
 logger = logging.getLogger(__name__)
 FALLBACK_DIGEST_MIN_SCORE = 25.0
-HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
+HASH_TYPES = {"md5", "sha1", "sha256"}
 CAMPAIGN_STOPWORDS = {
     "about",
     "access",
@@ -401,7 +401,7 @@ class DeliveryAgent(BaseAgent):
 
     def _hash_family_key(self, item: dict[str, Any]) -> str | None:
         ioc_type = str(item.get("type") or "").strip().lower()
-        if ioc_type not in HASH_TYPE_PRIORITY:
+        if ioc_type not in HASH_TYPES:
             return None
         attributes = item.get("attributes") or {}
         family = attributes.get("hash_family") if isinstance(attributes, dict) else None
@@ -416,15 +416,6 @@ class DeliveryAgent(BaseAgent):
         value = str(item.get("value") or "").strip().lower()
         return value or None
 
-    def _hash_variant_rank(self, item: dict[str, Any]) -> tuple[int, float, datetime, str]:
-        ioc_type = str(item.get("type") or "").strip().lower()
-        return (
-            HASH_TYPE_PRIORITY.get(ioc_type, 0),
-            float(item.get("risk_score", 0.0) or 0.0),
-            self._sort_last_seen_value(item.get("last_seen")),
-            str(item.get("value") or ""),
-        )
-
     def _dedupe_hash_family_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_family: dict[str, dict[str, Any]] = {}
         passthrough: list[dict[str, Any]] = []
@@ -434,7 +425,7 @@ class DeliveryAgent(BaseAgent):
                 passthrough.append(item)
                 continue
             existing = by_family.get(family_key)
-            if existing is None or self._hash_variant_rank(item) > self._hash_variant_rank(existing):
+            if existing is None:
                 by_family[family_key] = item
         deduped = [*passthrough, *by_family.values()]
         deduped.sort(

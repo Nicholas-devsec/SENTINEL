@@ -26,7 +26,7 @@ from telegram import Bot
 
 
 logger = logging.getLogger(__name__)
-HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
+HASH_TYPES = {"md5", "sha1", "sha256"}
 
 
 @dataclass(slots=True)
@@ -50,6 +50,38 @@ def _is_article_item(item: Any) -> bool:
     return provenance in {"writeup", "discovery"} and bool(str(getattr(item, "reference_url", None) or "").strip())
 
 
+def _raw_feed_hash_family_key(item: Any) -> tuple[str, str, str, str, int] | None:
+    source = str(getattr(item, "source", "") or "").strip().lower()
+    ioc_type = str(getattr(item, "type", "") or "").strip().lower()
+    if source != "threatfox" or ioc_type not in HASH_TYPES:
+        return None
+    attrs = getattr(item, "attributes", {}) or {}
+    original_reference = str(attrs.get("reference_url_original") or "").strip().lower()
+    malware = str(attrs.get("malware") or attrs.get("malware_printable") or "").strip().lower()
+    threat_type = str(attrs.get("threat_type") or getattr(item, "description", "") or "").strip().lower()
+    reporter = str(attrs.get("reporter") or "").strip().lower()
+    if not (original_reference or malware or threat_type):
+        return None
+    first_seen = getattr(item, "first_seen", datetime.now(UTC))
+    first_seen = first_seen if first_seen.tzinfo else first_seen.replace(tzinfo=UTC)
+    five_second_bucket = int(first_seen.timestamp()) // 5
+    context = original_reference or malware or threat_type
+    return (source, context, threat_type, reporter, five_second_bucket)
+
+
+def _dedupe_feed_hash_families_before_limit(items: list[Any]) -> list[Any]:
+    seen_families: set[tuple[str, str, str, str, int]] = set()
+    deduped: list[Any] = []
+    for item in items:
+        family_key = _raw_feed_hash_family_key(item)
+        if family_key is not None:
+            if family_key in seen_families:
+                continue
+            seen_families.add(family_key)
+        deduped.append(item)
+    return deduped
+
+
 def _apply_workflow_limits(
     settings: SentinelSettings,
     *,
@@ -62,6 +94,7 @@ def _apply_workflow_limits(
     feed_items = [item for item in raw_items if not _is_article_item(item)]
     article_items = [item for item in raw_items if _is_article_item(item)]
 
+    feed_items = _dedupe_feed_hash_families_before_limit(feed_items)
     if feed_limit > 0:
         feed_items = feed_items[:feed_limit]
     else:
@@ -224,7 +257,7 @@ async def _persist_enrichment(enriched_items: list[EnrichedIOC]) -> list[IOC]:
 
 def _enriched_hash_family_key(item: EnrichedIOC) -> str | None:
     ioc_type = str(getattr(item, "type", "") or "").lower()
-    if ioc_type not in HASH_TYPE_PRIORITY:
+    if ioc_type not in HASH_TYPES:
         return None
     attributes = getattr(item, "attributes", {}) or {}
     family = attributes.get("hash_family")
@@ -239,15 +272,6 @@ def _enriched_hash_family_key(item: EnrichedIOC) -> str | None:
     return str(getattr(item, "value", "") or "").strip().lower()
 
 
-def _enriched_hash_rank(item: EnrichedIOC) -> tuple[int, float, datetime, str]:
-    return (
-        HASH_TYPE_PRIORITY.get(str(getattr(item, "type", "") or "").lower(), 0),
-        float(getattr(item, "risk_score", 0.0) or 0.0),
-        item.last_seen if item.last_seen.tzinfo else item.last_seen.replace(tzinfo=UTC),
-        item.value,
-    )
-
-
 def _dedupe_enriched_hash_families(enriched_items: list[EnrichedIOC]) -> tuple[list[EnrichedIOC], list[EnrichedIOC]]:
     by_family: dict[str, EnrichedIOC] = {}
     family_members: dict[str, list[EnrichedIOC]] = {}
@@ -259,7 +283,7 @@ def _dedupe_enriched_hash_families(enriched_items: list[EnrichedIOC]) -> tuple[l
             continue
         family_members.setdefault(family_key, []).append(item)
         existing = by_family.get(family_key)
-        if existing is None or _enriched_hash_rank(item) > _enriched_hash_rank(existing):
+        if existing is None:
             by_family[family_key] = item
 
     kept_ids = {id(item) for item in by_family.values()}

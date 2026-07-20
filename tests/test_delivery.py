@@ -837,8 +837,8 @@ async def test_delivery_agent_suppresses_duplicate_file_hash_variants() -> None:
 
     assert result.immediate_alerts == 1
     rendered = "\n".join(message["text"] for message in telegram_bot.messages)
-    assert family["sha256"] in rendered
-    assert family["md5"] not in rendered
+    assert family["md5"] in rendered
+    assert family["sha256"] not in rendered
     assert family["sha1"] not in rendered
 
 

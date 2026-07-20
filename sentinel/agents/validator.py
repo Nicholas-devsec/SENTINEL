@@ -27,7 +27,6 @@ DOMAIN_RE = re.compile(
     re.IGNORECASE,
 )
 LOCAL_HOSTS = {"localhost", "localhost.localdomain"}
-HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
 
 
 @dataclass(slots=True)
@@ -270,7 +269,7 @@ class ValidationAgent(BaseAgent):
         file. When the original reference/malware metadata and first-seen window
         line up, keep the strongest hash and avoid storing three alertable IOCs.
         """
-        if item.source.lower() != "threatfox" or item.type.lower() not in HASH_TYPE_PRIORITY:
+        if item.source.lower() != "threatfox" or item.type.lower() not in {"md5", "sha1", "sha256"}:
             return None
         attrs = item.attributes or {}
         original_reference = str(attrs.get("reference_url_original") or "").strip().lower()
@@ -284,14 +283,6 @@ class ValidationAgent(BaseAgent):
         context = original_reference or malware or threat_type
         return (item.source.lower(), context, threat_type, reporter, five_second_bucket)
 
-    @staticmethod
-    def _feed_hash_rank(item: ValidatedIOC) -> tuple[int, datetime, str]:
-        return (
-            HASH_TYPE_PRIORITY.get(item.type.lower(), 0),
-            item.last_seen if item.last_seen.tzinfo else item.last_seen.replace(tzinfo=UTC),
-            item.value,
-        )
-
     def _dedupe_feed_hash_families(self, items: list[ValidatedIOC]) -> list[ValidatedIOC]:
         by_family: dict[tuple[str, str, str, str, int], ValidatedIOC] = {}
         for item in items:
@@ -299,7 +290,7 @@ class ValidationAgent(BaseAgent):
             if family_key is None:
                 continue
             existing = by_family.get(family_key)
-            if existing is None or self._feed_hash_rank(item) > self._feed_hash_rank(existing):
+            if existing is None:
                 by_family[family_key] = item
         kept_ids = {id(item) for item in by_family.values()}
         deduped = [item for item in items if id(item) in kept_ids or self._feed_hash_family_key(item) is None]

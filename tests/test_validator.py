@@ -339,7 +339,7 @@ async def test_validator_collapses_threatfox_hash_variants_before_persistence(ag
     persisted = await agent.run(inputs)
 
     assert [(ioc.type, ioc.value) for ioc in persisted] == [
-        ("sha256", "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0")
+        ("md5", "8c21b2fbded2faeb6db2e7a20c513cdb")
     ]
 
 

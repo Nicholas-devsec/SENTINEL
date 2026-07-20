@@ -5,10 +5,17 @@ from datetime import UTC, datetime
 import pytest
 
 from sentinel.agents.enricher import EnrichedIOC
-from sentinel.agents.scraper import ScrapeReport
+from sentinel.agents.scraper import RawIOC, ScrapeReport
 from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
-from sentinel.pipeline import PipelineResult, _dedupe_enriched_hash_families, build_agents, run_daily_digest, run_pipeline_once
+from sentinel.pipeline import (
+    PipelineResult,
+    _apply_workflow_limits,
+    _dedupe_enriched_hash_families,
+    build_agents,
+    run_daily_digest,
+    run_pipeline_once,
+)
 
 
 class FakeAgent:
@@ -53,7 +60,7 @@ async def test_pipeline_result_dataclass_shape() -> None:
     assert result.immediate_alerts == 1
 
 
-def test_pipeline_dedupes_enriched_file_hash_families_to_sha256() -> None:
+def test_pipeline_dedupes_enriched_file_hash_families_to_first_seen() -> None:
     now = datetime.now(UTC)
     family = {
         "md5": "8c21b2fbded2faeb6db2e7a20c513cdb",
@@ -91,10 +98,46 @@ def test_pipeline_dedupes_enriched_file_hash_families_to_sha256() -> None:
     )
 
     assert [(item.type, item.value) for item in kept] == [
-        ("sha256", family["sha256"]),
+        ("md5", family["md5"]),
         ("ipv4", "137.184.135.42"),
     ]
-    assert {item.type for item in suppressed} == {"md5", "sha1"}
+    assert {item.type for item in suppressed} == {"sha1", "sha256"}
+
+
+def test_workflow_feed_limit_refills_after_hash_family_dedupe() -> None:
+    now = datetime.now(UTC)
+    settings = SentinelSettings.model_validate(
+        {
+            "workflow": {
+                "feed_ioc_store_limit_per_run": 3,
+                "article_store_limit_per_run": 0,
+                "telegram_feed_alert_limit_per_run": 3,
+                "telegram_article_alert_limit_per_run": 0,
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
+    shared = {
+        "reference_url_original": "https://vendor.example/sample-report",
+        "threat_type": "payload",
+        "malware": "sample-family",
+        "reporter": "abuse_ch",
+    }
+    raw_items = [
+        RawIOC("a" * 32, "md5", "threatfox", 0.94, now, now, attributes=shared),
+        RawIOC("b" * 40, "sha1", "threatfox", 0.94, now, now, attributes=shared),
+        RawIOC("c" * 64, "sha256", "threatfox", 0.94, now, now, attributes=shared),
+        RawIOC("1.1.1.1", "ipv4", "threatfox", 0.94, now, now),
+        RawIOC("2.2.2.2", "ipv4", "urlhaus", 0.91, now, now),
+    ]
+
+    limited, _ = _apply_workflow_limits(settings, raw_items=raw_items, writeups=[])
+
+    assert [(item.type, item.value) for item in limited] == [
+        ("md5", "a" * 32),
+        ("ipv4", "1.1.1.1"),
+        ("ipv4", "2.2.2.2"),
+    ]
 
 
 def test_build_agents_requires_mitre_stix_path() -> None:
