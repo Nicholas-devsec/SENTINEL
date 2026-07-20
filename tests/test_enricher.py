@@ -152,6 +152,47 @@ async def test_enrichment_agent_merges_provider_results_and_scores(enrichment_sk
 
 
 @pytest.mark.asyncio
+async def test_enrichment_agent_records_vt_file_hash_family(enrichment_skill: Path) -> None:
+    now = datetime.now(UTC)
+    agent = EnrichmentAgent(
+        skill_path=str(enrichment_skill),
+        settings=build_settings(),
+        virustotal_client=FakeVirusTotalClient(
+            {
+                "attributes": {
+                    "md5": "8c21b2fbded2faeb6db2e7a20c513cdb",
+                    "sha1": "38b837cc5fe814ca9580f9029386aa405f8e94df",
+                    "sha256": "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0",
+                    "last_analysis_stats": {"malicious": 66, "suspicious": 0, "harmless": 0, "undetected": 0},
+                }
+            }
+        ),
+        shodan_client=FakeShodanClient({}),
+        abuseipdb_client=FakeAbuseIPDBClient({}),
+        whois_client=FakeWhoisClient({}),
+    )
+
+    enriched = await agent.run(
+        [
+            {
+                "value": "8c21b2fbded2faeb6db2e7a20c513cdb",
+                "type": "md5",
+                "source": "threatfox",
+                "source_trust": 0.95,
+                "first_seen": now,
+                "last_seen": now,
+            }
+        ]
+    )
+
+    family = enriched[0].attributes["hash_family"]
+    assert family["md5"] == "8c21b2fbded2faeb6db2e7a20c513cdb"
+    assert family["sha1"] == "38b837cc5fe814ca9580f9029386aa405f8e94df"
+    assert family["sha256"] == "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0"
+    assert enriched[0].attributes["hash_family_key"] == family["sha256"]
+
+
+@pytest.mark.asyncio
 async def test_enrichment_agent_handles_partial_provider_failures(enrichment_skill: Path) -> None:
     now = datetime.now(UTC)
     agent = EnrichmentAgent(

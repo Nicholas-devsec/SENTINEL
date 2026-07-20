@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy import or_
 
 from sentinel.agents.delivery import DeliveryAgent
@@ -19,13 +19,14 @@ from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent
 from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.migrations import ensure_schema
-from sentinel.db.models import IOC, PipelineRun, SourceMaterial
+from sentinel.db.models import AlertEvent, FeedbackRecord, IOC, IOCSighting, PipelineRun, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory, get_engine
 from sentinel.integrations.mitre_attack import MitreAttackRepository
 from telegram import Bot
 
 
 logger = logging.getLogger(__name__)
+HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
 
 
 @dataclass(slots=True)
@@ -221,6 +222,74 @@ async def _persist_enrichment(enriched_items: list[EnrichedIOC]) -> list[IOC]:
         return persisted
 
 
+def _enriched_hash_family_key(item: EnrichedIOC) -> str | None:
+    ioc_type = str(getattr(item, "type", "") or "").lower()
+    if ioc_type not in HASH_TYPE_PRIORITY:
+        return None
+    attributes = getattr(item, "attributes", {}) or {}
+    family = attributes.get("hash_family")
+    if isinstance(family, dict):
+        for hash_type in ("sha256", "sha1", "md5"):
+            value = family.get(hash_type)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
+    explicit_key = attributes.get("hash_family_key")
+    if isinstance(explicit_key, str) and explicit_key.strip():
+        return explicit_key.strip().lower()
+    return str(getattr(item, "value", "") or "").strip().lower()
+
+
+def _enriched_hash_rank(item: EnrichedIOC) -> tuple[int, float, datetime, str]:
+    return (
+        HASH_TYPE_PRIORITY.get(str(getattr(item, "type", "") or "").lower(), 0),
+        float(getattr(item, "risk_score", 0.0) or 0.0),
+        item.last_seen if item.last_seen.tzinfo else item.last_seen.replace(tzinfo=UTC),
+        item.value,
+    )
+
+
+def _dedupe_enriched_hash_families(enriched_items: list[EnrichedIOC]) -> tuple[list[EnrichedIOC], list[EnrichedIOC]]:
+    by_family: dict[str, EnrichedIOC] = {}
+    family_members: dict[str, list[EnrichedIOC]] = {}
+    passthrough: list[EnrichedIOC] = []
+    for item in enriched_items:
+        family_key = _enriched_hash_family_key(item)
+        if family_key is None:
+            passthrough.append(item)
+            continue
+        family_members.setdefault(family_key, []).append(item)
+        existing = by_family.get(family_key)
+        if existing is None or _enriched_hash_rank(item) > _enriched_hash_rank(existing):
+            by_family[family_key] = item
+
+    kept_ids = {id(item) for item in by_family.values()}
+    kept = [item for item in enriched_items if id(item) in kept_ids or _enriched_hash_family_key(item) is None]
+    suppressed = [
+        member
+        for family_key, members in family_members.items()
+        for member in members
+        if member is not by_family[family_key]
+    ]
+    return kept, suppressed
+
+
+async def _delete_ioc_rows(items: list[EnrichedIOC]) -> int:
+    if not items:
+        return 0
+    dedupe_hashes = [hashlib.sha256(item.value.encode("utf-8")).hexdigest() for item in items]
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(IOC.id).where(IOC.dedupe_hash.in_(dedupe_hashes)))
+        ids = [ioc_id for (ioc_id,) in result.all()]
+        if not ids:
+            return 0
+        await session.execute(delete(AlertEvent).where(AlertEvent.ioc_id.in_(ids)))
+        await session.execute(delete(FeedbackRecord).where(FeedbackRecord.ioc_id.in_(ids)))
+        await session.execute(delete(IOCSighting).where(IOCSighting.ioc_id.in_(ids)))
+        await session.execute(delete(IOC).where(IOC.id.in_(ids)))
+        await session.commit()
+        return len(ids)
+
+
 async def _persist_scoring(scored_items: list[ScoredIOC]) -> list[IOC]:
     async with AsyncSessionFactory() as session:
         persisted: list[IOC] = []
@@ -331,6 +400,13 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
         enriched_items: list[EnrichedIOC] = await agents["enricher"].run(
             ordered_rows, context_by_value=context_by_value
         )
+        enriched_items, suppressed_hash_variants = _dedupe_enriched_hash_families(enriched_items)
+        deleted_hash_variants = await _delete_ioc_rows(suppressed_hash_variants)
+        if deleted_hash_variants:
+            logger.info(
+                "Suppressed %s duplicate file-hash variant IOC row(s) after enrichment",
+                deleted_hash_variants,
+            )
         stage_durations["enrich"] = round(time.perf_counter() - stage_started, 2)
         stage_started = time.perf_counter()
         await _persist_enrichment(enriched_items)

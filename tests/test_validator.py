@@ -290,6 +290,59 @@ async def test_validator_accepts_ipv6_and_sha256_iocs(agent: ValidationAgent) ->
     }
 
 
+@pytest.mark.asyncio
+async def test_validator_collapses_threatfox_hash_variants_before_persistence(agent: ValidationAgent) -> None:
+    first_seen = datetime(2026, 7, 20, 1, 16, 12, tzinfo=UTC)
+    shared_attributes = {
+        "reference_url_original": "https://vendor.example/sample-report",
+        "threat_type": "payload",
+        "malware": "sample-family",
+        "malware_printable": "Sample Family",
+        "reporter": "abuse_ch",
+    }
+    inputs = [
+        RawIOC(
+            value="8c21b2fbded2faeb6db2e7a20c513cdb",
+            type="md5",
+            source="threatfox",
+            source_trust=0.95,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            description="Indicator that identifies a malware sample (payload)",
+            reference_url="https://threatfox.abuse.ch/ioc/1854020/",
+            attributes=shared_attributes,
+        ),
+        RawIOC(
+            value="38b837cc5fe814ca9580f9029386aa405f8e94df",
+            type="sha1",
+            source="threatfox",
+            source_trust=0.95,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            description="Indicator that identifies a malware sample (payload)",
+            reference_url="https://threatfox.abuse.ch/ioc/1854019/",
+            attributes=shared_attributes,
+        ),
+        RawIOC(
+            value="b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0",
+            type="sha256",
+            source="threatfox",
+            source_trust=0.95,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            description="Indicator that identifies a malware sample (payload)",
+            reference_url="https://threatfox.abuse.ch/ioc/1854018/",
+            attributes=shared_attributes,
+        ),
+    ]
+
+    persisted = await agent.run(inputs)
+
+    assert [(ioc.type, ioc.value) for ioc in persisted] == [
+        ("sha256", "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0")
+    ]
+
+
 def test_validator_rejects_generic_github_root_urls(agent: ValidationAgent) -> None:
     assert agent.normalize_ioc("url", "https://github.com/") is None
     assert agent.normalize_ioc("url", "https://bentleyvazquezpvey.github.io/") is None

@@ -208,6 +208,19 @@ class EnrichmentAgent(BaseAgent):
             return None
         return int(confidence)
 
+    def _extract_vt_hash_family(self, ioc: dict[str, Any], vt_result: dict[str, Any] | None) -> dict[str, str]:
+        """Return related file hashes from VirusTotal so one sample alerts once."""
+        if ioc["type"] not in {"md5", "sha1", "sha256"}:
+            return {}
+        attributes = (vt_result or {}).get("attributes", vt_result or {})
+        family: dict[str, str] = {}
+        for hash_type in ("md5", "sha1", "sha256"):
+            value = attributes.get(hash_type)
+            if isinstance(value, str) and value.strip():
+                family[hash_type] = value.strip().lower()
+        family[str(ioc["type"]).lower()] = str(ioc["value"]).strip().lower()
+        return family
+
     def _compute_recency_score(self, first_seen: datetime, last_seen: datetime) -> float:
         reference = max(first_seen, last_seen)
         age_seconds = max((datetime.now(UTC) - reference).total_seconds(), 0.0)
@@ -371,6 +384,10 @@ class EnrichmentAgent(BaseAgent):
         risk_score = round(max(0.0, min(100.0, sum(score_breakdown.values()))), 2)
         attributes = dict(ioc.get("attributes", {}))
         attributes["score_breakdown"] = score_breakdown
+        hash_family = self._extract_vt_hash_family(ioc, provider_results.get("virustotal"))
+        if hash_family:
+            attributes["hash_family"] = hash_family
+            attributes["hash_family_key"] = hash_family.get("sha256") or hash_family.get("sha1") or hash_family.get("md5")
         return EnrichedIOC(
             value=ioc["value"],
             type=ioc["type"],

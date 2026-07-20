@@ -799,6 +799,50 @@ async def test_delivery_agent_applies_separate_article_and_feed_limits() -> None
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_suppresses_duplicate_file_hash_variants() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings()
+    settings.delivery.telegram_max_alerts_per_run = 5
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    family = {
+        "md5": "8c21b2fbded2faeb6db2e7a20c513cdb",
+        "sha1": "38b837cc5fe814ca9580f9029386aa405f8e94df",
+        "sha256": "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0",
+    }
+    base = {
+        "source": "threatfox",
+        "risk_score": 90.0,
+        "severity": "high",
+        "source_title": "Indicator that identifies a malware sample",
+        "last_seen": now,
+        "attributes": {"provenance": "feed", "hash_family": family, "hash_family_key": family["sha256"]},
+        "related_cves": [],
+        "external_links": {},
+        "mitre_techniques": [],
+        "mitre_tactics": [],
+    }
+    items = [
+        {**base, "id": str(uuid4()), "value": family["md5"], "type": "md5"},
+        {**base, "id": str(uuid4()), "value": family["sha256"], "type": "sha256"},
+        {**base, "id": str(uuid4()), "value": family["sha1"], "type": "sha1"},
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    rendered = "\n".join(message["text"] for message in telegram_bot.messages)
+    assert family["sha256"] in rendered
+    assert family["md5"] not in rendered
+    assert family["sha1"] not in rendered
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_daily_digest_groups_all_iocs_from_same_article() -> None:
     telegram_bot = FakeTelegramBot()
     agent = DeliveryAgent(

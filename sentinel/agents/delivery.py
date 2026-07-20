@@ -32,6 +32,7 @@ from sentinel.delivery.telegram_bot import (
 
 logger = logging.getLogger(__name__)
 FALLBACK_DIGEST_MIN_SCORE = 25.0
+HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
 CAMPAIGN_STOPWORDS = {
     "about",
     "access",
@@ -398,6 +399,56 @@ class DeliveryAgent(BaseAgent):
     def _is_web_discovery_item(self, item: dict[str, Any]) -> bool:
         return str(item.get("source") or "").strip().lower().startswith("discovery:")
 
+    def _hash_family_key(self, item: dict[str, Any]) -> str | None:
+        ioc_type = str(item.get("type") or "").strip().lower()
+        if ioc_type not in HASH_TYPE_PRIORITY:
+            return None
+        attributes = item.get("attributes") or {}
+        family = attributes.get("hash_family") if isinstance(attributes, dict) else None
+        if isinstance(family, dict):
+            for hash_type in ("sha256", "sha1", "md5"):
+                value = family.get(hash_type)
+                if isinstance(value, str) and value.strip():
+                    return value.strip().lower()
+        explicit_key = attributes.get("hash_family_key") if isinstance(attributes, dict) else None
+        if isinstance(explicit_key, str) and explicit_key.strip():
+            return explicit_key.strip().lower()
+        value = str(item.get("value") or "").strip().lower()
+        return value or None
+
+    def _hash_variant_rank(self, item: dict[str, Any]) -> tuple[int, float, datetime, str]:
+        ioc_type = str(item.get("type") or "").strip().lower()
+        return (
+            HASH_TYPE_PRIORITY.get(ioc_type, 0),
+            float(item.get("risk_score", 0.0) or 0.0),
+            self._sort_last_seen_value(item.get("last_seen")),
+            str(item.get("value") or ""),
+        )
+
+    def _dedupe_hash_family_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_family: dict[str, dict[str, Any]] = {}
+        passthrough: list[dict[str, Any]] = []
+        for item in items:
+            family_key = self._hash_family_key(item)
+            if family_key is None:
+                passthrough.append(item)
+                continue
+            existing = by_family.get(family_key)
+            if existing is None or self._hash_variant_rank(item) > self._hash_variant_rank(existing):
+                by_family[family_key] = item
+        deduped = [*passthrough, *by_family.values()]
+        deduped.sort(
+            key=lambda item: (
+                float(item.get("risk_score", 0.0) or 0.0),
+                self._sort_last_seen_value(item.get("last_seen")),
+            ),
+            reverse=True,
+        )
+        suppressed = len(items) - len(deduped)
+        if suppressed:
+            self.logger.info("Suppressed %s duplicate file-hash variant alert candidate(s)", suppressed)
+        return deduped
+
     # -- alert ledger -------------------------------------------------------
     #
     # Feed items linger in source windows for days, so the same IOC would be
@@ -587,10 +638,10 @@ class DeliveryAgent(BaseAgent):
             seen.add(dedupe_key)
             selected.append(item)
         if selected:
-            return selected
+            return self._dedupe_hash_family_candidates(selected)
         return [
             item
-            for item in recent_items
+            for item in self._dedupe_hash_family_candidates(recent_items)
             if float(item.get("risk_score", 0.0)) >= FALLBACK_DIGEST_MIN_SCORE
         ]
 
@@ -1042,6 +1093,7 @@ class DeliveryAgent(BaseAgent):
             immediate_candidates = self._select_immediate_candidates(items)
             if not immediate_candidates:
                 immediate_candidates = self._select_feedback_backfill_candidates(items)
+            immediate_candidates = self._dedupe_hash_family_candidates(immediate_candidates)
             immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)
             immediate = self._apply_delivery_limits(immediate)

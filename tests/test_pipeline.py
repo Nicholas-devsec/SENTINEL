@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from sentinel.agents.enricher import EnrichedIOC
 from sentinel.agents.scraper import ScrapeReport
 from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
-from sentinel.pipeline import PipelineResult, build_agents, run_daily_digest, run_pipeline_once
+from sentinel.pipeline import PipelineResult, _dedupe_enriched_hash_families, build_agents, run_daily_digest, run_pipeline_once
 
 
 class FakeAgent:
@@ -48,6 +51,50 @@ async def test_pipeline_result_dataclass_shape() -> None:
 
     assert result.generated == 1
     assert result.immediate_alerts == 1
+
+
+def test_pipeline_dedupes_enriched_file_hash_families_to_sha256() -> None:
+    now = datetime.now(UTC)
+    family = {
+        "md5": "8c21b2fbded2faeb6db2e7a20c513cdb",
+        "sha1": "38b837cc5fe814ca9580f9029386aa405f8e94df",
+        "sha256": "b59653f1e2b8dae784ca4211199d2887ea676d27e7af9d057a625cf9281c17e0",
+    }
+
+    def make_hash(value: str, ioc_type: str) -> EnrichedIOC:
+        return EnrichedIOC(
+            value=value,
+            type=ioc_type,
+            source="threatfox",
+            source_trust=0.95,
+            first_seen=now,
+            last_seen=now,
+            risk_score=90.0,
+            attributes={"hash_family": family, "hash_family_key": family["sha256"]},
+        )
+
+    kept, suppressed = _dedupe_enriched_hash_families(
+        [
+            make_hash(family["md5"], "md5"),
+            make_hash(family["sha1"], "sha1"),
+            make_hash(family["sha256"], "sha256"),
+            EnrichedIOC(
+                value="137.184.135.42",
+                type="ipv4",
+                source="threatfox",
+                source_trust=0.95,
+                first_seen=now,
+                last_seen=now,
+                risk_score=50.0,
+            ),
+        ]
+    )
+
+    assert [(item.type, item.value) for item in kept] == [
+        ("sha256", family["sha256"]),
+        ("ipv4", "137.184.135.42"),
+    ]
+    assert {item.type for item in suppressed} == {"md5", "sha1"}
 
 
 def test_build_agents_requires_mitre_stix_path() -> None:

@@ -27,6 +27,7 @@ DOMAIN_RE = re.compile(
     re.IGNORECASE,
 )
 LOCAL_HOSTS = {"localhost", "localhost.localdomain"}
+HASH_TYPE_PRIORITY = {"sha256": 3, "sha1": 2, "md5": 1}
 
 
 @dataclass(slots=True)
@@ -261,6 +262,52 @@ class ValidationAgent(BaseAgent):
             provenance=item.provenance,
         )
 
+    @staticmethod
+    def _feed_hash_family_key(item: ValidatedIOC) -> tuple[str, str, str, str, int] | None:
+        """Best-effort same-sample key for feed rows before enrichment exists.
+
+        ThreatFox can publish MD5/SHA1/SHA256 as separate IOC rows for the same
+        file. When the original reference/malware metadata and first-seen window
+        line up, keep the strongest hash and avoid storing three alertable IOCs.
+        """
+        if item.source.lower() != "threatfox" or item.type.lower() not in HASH_TYPE_PRIORITY:
+            return None
+        attrs = item.attributes or {}
+        original_reference = str(attrs.get("reference_url_original") or "").strip().lower()
+        malware = str(attrs.get("malware") or attrs.get("malware_printable") or "").strip().lower()
+        threat_type = str(attrs.get("threat_type") or item.source_title or "").strip().lower()
+        reporter = str(attrs.get("reporter") or "").strip().lower()
+        if not (original_reference or malware or threat_type):
+            return None
+        first_seen = item.first_seen if item.first_seen.tzinfo else item.first_seen.replace(tzinfo=UTC)
+        five_second_bucket = int(first_seen.timestamp()) // 5
+        context = original_reference or malware or threat_type
+        return (item.source.lower(), context, threat_type, reporter, five_second_bucket)
+
+    @staticmethod
+    def _feed_hash_rank(item: ValidatedIOC) -> tuple[int, datetime, str]:
+        return (
+            HASH_TYPE_PRIORITY.get(item.type.lower(), 0),
+            item.last_seen if item.last_seen.tzinfo else item.last_seen.replace(tzinfo=UTC),
+            item.value,
+        )
+
+    def _dedupe_feed_hash_families(self, items: list[ValidatedIOC]) -> list[ValidatedIOC]:
+        by_family: dict[tuple[str, str, str, str, int], ValidatedIOC] = {}
+        for item in items:
+            family_key = self._feed_hash_family_key(item)
+            if family_key is None:
+                continue
+            existing = by_family.get(family_key)
+            if existing is None or self._feed_hash_rank(item) > self._feed_hash_rank(existing):
+                by_family[family_key] = item
+        kept_ids = {id(item) for item in by_family.values()}
+        deduped = [item for item in items if id(item) in kept_ids or self._feed_hash_family_key(item) is None]
+        suppressed = len(items) - len(deduped)
+        if suppressed:
+            self.logger.info("Suppressed %s duplicate feed file-hash variant IOC(s) before persistence", suppressed)
+        return deduped
+
     @asynccontextmanager
     async def _session_scope(self):
         async with self.session_factory() as session:
@@ -387,6 +434,7 @@ class ValidationAgent(BaseAgent):
             if result is None:
                 continue
             validated.append(result)
+        validated = self._dedupe_feed_hash_families(validated)
         async with self._session_scope() as session:
             return await self._persist_validated(
                 session, validated, source_material_ids=source_material_ids
