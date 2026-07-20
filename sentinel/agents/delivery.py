@@ -587,6 +587,37 @@ class DeliveryAgent(BaseAgent):
         )
         return candidates
 
+    def _normalized_type_limits(self, type_limits: dict[str, int] | None) -> dict[str, int]:
+        limits: dict[str, int] = {}
+        for raw_key, raw_limit in (type_limits or {}).items():
+            key = str(raw_key).strip().lower()
+            if not key:
+                continue
+            limits[key] = max(0, int(raw_limit))
+        return limits
+
+    def _type_bucket_for(self, item_type: str) -> str:
+        normalized = str(item_type or "").strip().lower()
+        if normalized in HASH_TYPES:
+            return "hash"
+        return normalized
+
+    def _apply_type_limits(self, cards: list[dict[str, Any]], type_limits: dict[str, int] | None) -> list[dict[str, Any]]:
+        limits = self._normalized_type_limits(type_limits)
+        if not limits:
+            return cards
+        counts = {key: 0 for key in limits}
+        selected: list[dict[str, Any]] = []
+        for card in cards:
+            bucket = self._type_bucket_for(str(card.get("type") or ""))
+            if bucket not in limits:
+                continue
+            if counts[bucket] >= limits[bucket]:
+                continue
+            counts[bucket] += 1
+            selected.append(card)
+        return selected
+
     def _apply_delivery_limits(self, cards: list[dict[str, Any]], *, apply_burst_cap: bool = True) -> list[dict[str, Any]]:
         feed_limit = max(0, int(self.settings.workflow.telegram_feed_alert_limit_per_run))
         article_limit = max(0, int(self.settings.workflow.telegram_article_alert_limit_per_run))
@@ -597,6 +628,7 @@ class DeliveryAgent(BaseAgent):
                 article_cards.append(card)
             else:
                 feed_cards.append(card)
+        feed_cards = self._apply_type_limits(feed_cards, self.settings.workflow.telegram_type_limits_per_run)
         limited = [*feed_cards[:feed_limit], *article_cards[:article_limit]]
         limited.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
         burst_cap = max(0, int(self.settings.delivery.telegram_max_alerts_per_run))

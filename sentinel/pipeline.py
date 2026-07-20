@@ -82,6 +82,40 @@ def _dedupe_feed_hash_families_before_limit(items: list[Any]) -> list[Any]:
     return deduped
 
 
+def _normalized_type_limits(type_limits: dict[str, int] | None) -> dict[str, int]:
+    limits: dict[str, int] = {}
+    for raw_key, raw_limit in (type_limits or {}).items():
+        key = str(raw_key).strip().lower()
+        if not key:
+            continue
+        limits[key] = max(0, int(raw_limit))
+    return limits
+
+
+def _type_bucket_for(item_type: str) -> str:
+    normalized = str(item_type or "").strip().lower()
+    if normalized in HASH_TYPES:
+        return "hash"
+    return normalized
+
+
+def _apply_type_limits(items: list[Any], type_limits: dict[str, int] | None) -> list[Any]:
+    limits = _normalized_type_limits(type_limits)
+    if not limits:
+        return items
+    counts = {key: 0 for key in limits}
+    selected: list[Any] = []
+    for item in items:
+        bucket = _type_bucket_for(str(getattr(item, "type", "") or ""))
+        if bucket not in limits:
+            continue
+        if counts[bucket] >= limits[bucket]:
+            continue
+        counts[bucket] += 1
+        selected.append(item)
+    return selected
+
+
 def _apply_workflow_limits(
     settings: SentinelSettings,
     *,
@@ -95,6 +129,7 @@ def _apply_workflow_limits(
     article_items = [item for item in raw_items if _is_article_item(item)]
 
     feed_items = _dedupe_feed_hash_families_before_limit(feed_items)
+    feed_items = _apply_type_limits(feed_items, settings.workflow.store_type_limits_per_run)
     if feed_limit > 0:
         feed_items = feed_items[:feed_limit]
     else:

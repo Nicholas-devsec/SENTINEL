@@ -28,6 +28,8 @@ class WorkflowSettings(BaseModel):
     article_store_limit_per_run: int = 5
     telegram_feed_alert_limit_per_run: int = 5
     telegram_article_alert_limit_per_run: int = 2
+    telegram_type_limits_per_run: dict[str, int] = Field(default_factory=dict)
+    store_type_limits_per_run: dict[str, int] = Field(default_factory=dict)
 
 
 class ThresholdSettings(BaseModel):

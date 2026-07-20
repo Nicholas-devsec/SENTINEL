@@ -41,6 +41,16 @@ workflow:
   telegram_feed_alert_limit_per_run: 5
   # Telegram delivery budget for article/writeup alerts per cron run.
   telegram_article_alert_limit_per_run: 2
+  # Optional per-type Telegram budgets inside the feed alert budget.
+  telegram_type_limits_per_run:
+    ipv4: 2
+    domain: 1
+    hash: 1
+  # Optional per-type DB store budgets inside the feed IOC store budget.
+  store_type_limits_per_run:
+    ipv4: 100
+    domain: 50
+    hash: 50
 
 thresholds:
   alert_score: 38

@@ -140,6 +140,38 @@ def test_workflow_feed_limit_refills_after_hash_family_dedupe() -> None:
     ]
 
 
+def test_workflow_store_type_limits_shape_feed_ioc_mix() -> None:
+    now = datetime.now(UTC)
+    settings = SentinelSettings.model_validate(
+        {
+            "workflow": {
+                "feed_ioc_store_limit_per_run": 10,
+                "article_store_limit_per_run": 0,
+                "store_type_limits_per_run": {"ipv4": 2, "domain": 1, "hash": 1},
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
+    raw_items = [
+        RawIOC("1.1.1.1", "ipv4", "threatfox", 0.94, now, now),
+        RawIOC("2.2.2.2", "ipv4", "threatfox", 0.94, now, now),
+        RawIOC("3.3.3.3", "ipv4", "threatfox", 0.94, now, now),
+        RawIOC("first.example", "domain", "urlhaus", 0.91, now, now),
+        RawIOC("second.example", "domain", "urlhaus", 0.91, now, now),
+        RawIOC("a" * 32, "md5", "threatfox", 0.94, now, now),
+        RawIOC("b" * 64, "sha256", "threatfox", 0.94, now, now),
+    ]
+
+    limited, _ = _apply_workflow_limits(settings, raw_items=raw_items, writeups=[])
+
+    assert [(item.type, item.value) for item in limited] == [
+        ("ipv4", "1.1.1.1"),
+        ("ipv4", "2.2.2.2"),
+        ("domain", "first.example"),
+        ("md5", "a" * 32),
+    ]
+
+
 def test_build_agents_requires_mitre_stix_path() -> None:
     settings = SentinelSettings.model_validate(
         {

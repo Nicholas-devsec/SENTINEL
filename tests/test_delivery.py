@@ -867,6 +867,46 @@ async def test_delivery_agent_applies_separate_article_and_feed_limits() -> None
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_applies_feed_type_alert_limits() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.delivery.telegram_daily_digest_limit = 10
+    settings.workflow.telegram_feed_alert_limit_per_run = 10
+    settings.workflow.telegram_article_alert_limit_per_run = 1
+    settings.workflow.telegram_type_limits_per_run = {"ipv4": 2, "domain": 1, "hash": 1}
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {"id": str(uuid4()), "value": "1.1.1.1", "type": "ipv4", "source": "threatfox", "risk_score": 90.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "2.2.2.2", "type": "ipv4", "source": "threatfox", "risk_score": 89.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "3.3.3.3", "type": "ipv4", "source": "threatfox", "risk_score": 88.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "first.example", "type": "domain", "source": "urlhaus", "risk_score": 87.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "second.example", "type": "domain", "source": "urlhaus", "risk_score": 86.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "a" * 32, "type": "md5", "source": "threatfox", "risk_score": 85.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "b" * 64, "type": "sha256", "source": "threatfox", "risk_score": 84.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "article.example", "type": "domain", "source": "securelist_blog", "risk_score": 83.0, "severity": "high", "last_seen": now, "reference_url": "https://a.example/report", "source_title": "Article A", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+    ]
+
+    response = await agent.daily_digest(items)
+
+    assert response["count"] == 5
+    rendered = "\n".join(message["text"] for message in telegram_bot.messages)
+    assert "1[.]1[.]1[.]1" in rendered
+    assert "2[.]2[.]2[.]2" in rendered
+    assert "3[.]3[.]3[.]3" not in rendered
+    assert "first[.]example" in rendered
+    assert "second[.]example" not in rendered
+    assert "a" * 32 in rendered
+    assert "b" * 64 not in rendered
+    assert "Article A" in rendered
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_suppresses_duplicate_file_hash_variants() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings()
