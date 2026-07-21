@@ -198,6 +198,17 @@ class DeliverySettings(BaseModel):
     email_to: list[str] = Field(default_factory=lambda: ["analyst@yourdomain.com"])
 
 
+class RetentionSettings(BaseModel):
+    enabled: bool = True
+    prune_on_cron: bool = True
+    unalerted_feed_ioc_ttl_days: int = 5
+    alerted_ioc_ttl_days: int = 90
+    article_ioc_ttl_days: int = 30
+    feedback_ioc_ttl_days: int = 180
+    source_material_ttl_days: int = 30
+    keep_feedback_labeled: bool = True
+
+
 class AnthropicSettings(BaseModel):
     api_key: str = "${ANTHROPIC_API_KEY}"
     model: str = "claude-sonnet-4-20250514"
@@ -249,6 +260,7 @@ class SentinelSettings(BaseModel):
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
     crowdstrike: CrowdStrikeSettings = Field(default_factory=CrowdStrikeSettings)
     delivery: DeliverySettings = Field(default_factory=DeliverySettings)
+    retention: RetentionSettings = Field(default_factory=RetentionSettings)
     anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     mitre: MitreSettings = Field(default_factory=MitreSettings)

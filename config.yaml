@@ -289,6 +289,28 @@ delivery:
   email_to:
     - analyst@yourdomain.com
 
+retention:
+  enabled: true
+  # Run pruning automatically at the end of each cron-run after delivery.
+  prune_on_cron: true
+  # Feed-only IOCs that were never alerted or labeled are cheap context and can
+  # be pruned aggressively to prevent DB bloat.
+  unalerted_feed_ioc_ttl_days: 5
+  # Alerted IOCs stay longer because they explain operator history and support
+  # resend suppression / replay evaluation.
+  alerted_ioc_ttl_days: 90
+  # Article/writeup-linked IOCs stay longer because they carry campaign/source
+  # context that helps scoring and Karpathy learning.
+  article_ioc_ttl_days: 30
+  # Feedback-labeled IOCs are the highest-value training examples.
+  feedback_ioc_ttl_days: 180
+  # Keep TP/FP/Needs Review rows indefinitely by default; set false to let
+  # `feedback_ioc_ttl_days` eventually prune labeled examples.
+  keep_feedback_labeled: true
+  # Source material is retained longer than raw feed noise, but old unreferenced
+  # articles are removed after this TTL.
+  source_material_ttl_days: 30
+
 anthropic:
   api_key: ${ANTHROPIC_API_KEY}
   model: claude-sonnet-4-20250514

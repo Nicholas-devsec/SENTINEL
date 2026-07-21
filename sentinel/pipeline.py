@@ -22,6 +22,7 @@ from sentinel.db.migrations import ensure_schema
 from sentinel.db.models import AlertEvent, FeedbackRecord, IOC, IOCSighting, PipelineRun, SourceMaterial
 from sentinel.db.session import AsyncSessionFactory, get_engine
 from sentinel.integrations.mitre_attack import MitreAttackRepository
+from sentinel.retention import prune_retention
 from telegram import Bot
 
 
@@ -42,6 +43,8 @@ class PipelineResult:
     sightings: int = 0
     corroborated: int = 0
     discovered: int = 0
+    pruned_iocs: int = 0
+    pruned_source_materials: int = 0
     stage_durations: dict[str, float] | None = field(default=None, compare=False)
 
 
@@ -578,9 +581,23 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
         stage_started = time.perf_counter()
         delivery_result = await agents["delivery"].run(delivery_payload)
         stage_durations["deliver"] = round(time.perf_counter() - stage_started, 2)
+        pruned_iocs = 0
+        pruned_source_materials = 0
+        if settings.retention.enabled and settings.retention.prune_on_cron:
+            try:
+                stage_started = time.perf_counter()
+                retention_result = await prune_retention(
+                    settings=settings.retention,
+                    session_factory=AsyncSessionFactory,
+                )
+                pruned_iocs = retention_result.pruned_iocs
+                pruned_source_materials = retention_result.pruned_source_materials
+                stage_durations["retention"] = round(time.perf_counter() - stage_started, 2)
+            except Exception:
+                logger.exception("Retention pruning failed; continuing pipeline completion")
         stage_durations["total"] = round(time.perf_counter() - run_started, 2)
         logger.info(
-            "Pipeline completed scraped=%s validated_new=%s corroborated=%s processed=%s enriched=%s scored=%s generated=%s immediate_alerts=%s durations=%s",
+            "Pipeline completed scraped=%s validated_new=%s corroborated=%s processed=%s enriched=%s scored=%s generated=%s immediate_alerts=%s pruned_iocs=%s pruned_source_materials=%s durations=%s",
             len(raw_items),
             len(validation_report.new_iocs),
             len(validation_report.corroborated_iocs),
@@ -589,6 +606,8 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             len(scored_items),
             len(generated),
             delivery_result.immediate_alerts,
+            pruned_iocs,
+            pruned_source_materials,
             stage_durations,
         )
         result = PipelineResult(
@@ -603,6 +622,8 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             sightings=validation_report.sightings_recorded,
             corroborated=len(validation_report.corroborated_iocs),
             discovered=discovered_count,
+            pruned_iocs=pruned_iocs,
+            pruned_source_materials=pruned_source_materials,
             stage_durations=stage_durations,
         )
         await _finish_pipeline_run(run_id, status="succeeded", result=result)
