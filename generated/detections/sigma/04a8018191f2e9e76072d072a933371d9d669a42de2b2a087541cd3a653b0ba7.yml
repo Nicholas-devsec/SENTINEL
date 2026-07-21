@@ -12,8 +12,8 @@ fields:
   - Image
   - CommandLine
   - Hashes
-level: medium
+level: informational
 tags:
-  - attack.t1593.002
-  - attack.t1036.004
-  - attack.t1036.005
+  - attack.t1596.002
+  - attack.t1596
+  - attack.t1672

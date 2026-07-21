@@ -12,8 +12,8 @@ detection:
 fields:
   - Image
   - DestinationPort
-level: medium
+level: informational
 tags:
   - attack.t1571
   - attack.t1110.001
-  - attack.t1110.003
+  - attack.t1110.004
