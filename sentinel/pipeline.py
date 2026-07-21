@@ -50,6 +50,28 @@ def _is_article_item(item: Any) -> bool:
     return provenance in {"writeup", "discovery"} and bool(str(getattr(item, "reference_url", None) or "").strip())
 
 
+def _is_discovery_article_item(item: Any) -> bool:
+    provenance = str(getattr(item, "provenance", None) or "").strip().lower()
+    source = str(getattr(item, "source", "") or "").strip().lower()
+    return provenance == "discovery" or source.startswith("discovery:")
+
+
+def _is_discovery_writeup(writeup: RawWriteup) -> bool:
+    return str(writeup.source or "").strip().lower().startswith("discovery:")
+
+
+def _has_split_article_store_limits(settings: SentinelSettings) -> bool:
+    workflow = settings.workflow
+    return (
+        workflow.feed_article_store_limit_per_run is not None
+        or workflow.discovery_article_store_limit_per_run is not None
+    )
+
+
+def _article_store_limit(value: int | None) -> int:
+    return max(0, int(value or 0))
+
+
 def _raw_feed_hash_family_key(item: Any) -> tuple[str, str, str, str, int] | None:
     source = str(getattr(item, "source", "") or "").strip().lower()
     ioc_type = str(getattr(item, "type", "") or "").strip().lower()
@@ -123,7 +145,6 @@ def _apply_workflow_limits(
     writeups: list[RawWriteup],
 ) -> tuple[list[Any], list[RawWriteup]]:
     feed_limit = max(0, int(settings.workflow.feed_ioc_store_limit_per_run))
-    article_limit = max(0, int(settings.workflow.article_store_limit_per_run))
 
     feed_items = [item for item in raw_items if not _is_article_item(item)]
     article_items = [item for item in raw_items if _is_article_item(item)]
@@ -135,6 +156,58 @@ def _apply_workflow_limits(
     else:
         feed_items = []
 
+    def limit_article_bucket(
+        *,
+        bucket_items: list[Any],
+        bucket_writeups: list[RawWriteup],
+        limit: int,
+    ) -> tuple[list[Any], list[RawWriteup]]:
+        article_url_order: list[str] = []
+        seen_urls: set[str] = set()
+        for item in bucket_items:
+            url = str(getattr(item, "reference_url", None) or "").strip()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                article_url_order.append(url)
+        for writeup in bucket_writeups:
+            url = str(writeup.url or "").strip()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                article_url_order.append(url)
+
+        kept_article_urls = set(article_url_order[:limit]) if limit > 0 else set()
+        return (
+            [
+                item
+                for item in bucket_items
+                if str(getattr(item, "reference_url", None) or "").strip() in kept_article_urls
+            ],
+            [writeup for writeup in bucket_writeups if str(writeup.url or "").strip() in kept_article_urls],
+        )
+
+    if _has_split_article_store_limits(settings):
+        feed_article_limit = _article_store_limit(settings.workflow.feed_article_store_limit_per_run)
+        discovery_article_limit = _article_store_limit(settings.workflow.discovery_article_store_limit_per_run)
+        feed_article_items = [item for item in article_items if not _is_discovery_article_item(item)]
+        discovery_article_items = [item for item in article_items if _is_discovery_article_item(item)]
+        feed_writeups = [writeup for writeup in writeups if not _is_discovery_writeup(writeup)]
+        discovery_writeups = [writeup for writeup in writeups if _is_discovery_writeup(writeup)]
+        kept_feed_article_items, kept_feed_writeups = limit_article_bucket(
+            bucket_items=feed_article_items,
+            bucket_writeups=feed_writeups,
+            limit=feed_article_limit,
+        )
+        kept_discovery_article_items, kept_discovery_writeups = limit_article_bucket(
+            bucket_items=discovery_article_items,
+            bucket_writeups=discovery_writeups,
+            limit=discovery_article_limit,
+        )
+        return (
+            [*feed_items, *kept_feed_article_items, *kept_discovery_article_items],
+            [*kept_feed_writeups, *kept_discovery_writeups],
+        )
+
+    article_limit = max(0, int(settings.workflow.article_store_limit_per_run))
     article_url_order: list[str] = []
     seen_urls: set[str] = set()
     for item in article_items:

@@ -12,9 +12,11 @@
 ## - `schedule.daily_digest_cron`
 ## - `schedule.karpathy_loop_cron`
 ## - `workflow.feed_ioc_store_limit_per_run`
-## - `workflow.article_store_limit_per_run`
+## - `workflow.feed_article_store_limit_per_run`
+## - `workflow.discovery_article_store_limit_per_run`
 ## - `workflow.telegram_feed_alert_limit_per_run`
-## - `workflow.telegram_article_alert_limit_per_run`
+## - `workflow.telegram_feed_article_alert_limit_per_run`
+## - `workflow.telegram_discovery_article_alert_limit_per_run`
 
 schedule:
   # Fallback cadence used only when `pipeline_cron` is blank.
@@ -35,11 +37,23 @@ schedule:
 workflow:
   # How many feed-origin IOCs are allowed into the DB each cron run.
   feed_ioc_store_limit_per_run: 250
-  # How many article/writeup discoveries are allowed into the DB each cron run.
+  # How many article/writeups from configured source feeds are allowed into
+  # the DB each cron run. These are RSS/blog entries from `sources.feeds`.
+  feed_article_store_limit_per_run: 1
+  # How many discovery/open-web articles are allowed into the DB each cron run.
+  # These come from `discovery.profiles[*].feeds` and `search_providers`.
+  discovery_article_store_limit_per_run: 1
+  # Legacy pooled article/writeup DB budget. Used only when the two split
+  # article store limits above are omitted from config.
   article_store_limit_per_run: 1
   # Telegram delivery budget for feed-origin alerts per cron run.
   telegram_feed_alert_limit_per_run: 5
-  # Telegram delivery budget for article/writeup alerts per cron run.
+  # Telegram delivery budget for configured-feed article/writeup alerts.
+  telegram_feed_article_alert_limit_per_run: 1
+  # Telegram delivery budget for discovery/open-web article alerts.
+  telegram_discovery_article_alert_limit_per_run: 1
+  # Legacy pooled article/writeup Telegram budget. Used only when the two split
+  # article Telegram limits above are omitted from config.
   telegram_article_alert_limit_per_run: 1
   # Optional per-type Telegram budgets inside the feed alert budget.
   telegram_type_limits_per_run:
@@ -145,6 +159,18 @@ sources:
       url: https://www.rapid7.com/blog/rss/
       trust: 0.66
       enabled: true
+    - name: proofpoint_threat_insight
+      url: https://www.proofpoint.com/us/threat-insight-blog.xml
+      trust: 0.68
+      enabled: true
+    - name: dfir_report
+      url: https://thedfirreport.com/feed/
+      trust: 0.69
+      enabled: true
+    - name: elastic_security_labs
+      url: https://www.elastic.co/security-labs/rss/feed.xml
+      trust: 0.67
+      enabled: true
     - name: gbhackers_blog
       url: https://gbhackers.com/feed/
       trust: 0.64
@@ -181,6 +207,9 @@ discovery:
         - https://www.rapid7.com/blog/rss/
         - https://www.crowdstrike.com/blog/feed/
         - https://www.sentinelone.com/blog/feed/
+        - https://www.proofpoint.com/us/threat-insight-blog.xml
+        - https://thedfirreport.com/feed/
+        - https://www.elastic.co/security-labs/rss/feed.xml
         - https://gbhackers.com/feed/
       search_providers:
         - name: open_web_recent

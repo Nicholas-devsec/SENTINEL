@@ -179,6 +179,12 @@ class DeliveryAgent(BaseAgent):
         grouped = item.get("grouped_iocs") or []
         return bool(reference_url) and (provenance in {"writeup", "discovery"} or bool(grouped))
 
+    def _is_discovery_article_card(self, item: dict[str, Any]) -> bool:
+        attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        provenance = str(item.get("provenance") or attrs.get("provenance") or "").strip().lower()
+        source = str(item.get("source") or "").strip().lower()
+        return provenance == "discovery" or source.startswith("discovery:")
+
     def _group_immediate_alerts(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         singles: list[dict[str, Any]] = []
@@ -620,16 +626,32 @@ class DeliveryAgent(BaseAgent):
 
     def _apply_delivery_limits(self, cards: list[dict[str, Any]], *, apply_burst_cap: bool = True) -> list[dict[str, Any]]:
         feed_limit = max(0, int(self.settings.workflow.telegram_feed_alert_limit_per_run))
-        article_limit = max(0, int(self.settings.workflow.telegram_article_alert_limit_per_run))
         feed_cards: list[dict[str, Any]] = []
-        article_cards: list[dict[str, Any]] = []
+        feed_article_cards: list[dict[str, Any]] = []
+        discovery_article_cards: list[dict[str, Any]] = []
         for card in cards:
             if self._is_article_card(card):
-                article_cards.append(card)
+                if self._is_discovery_article_card(card):
+                    discovery_article_cards.append(card)
+                else:
+                    feed_article_cards.append(card)
             else:
                 feed_cards.append(card)
         feed_cards = self._apply_type_limits(feed_cards, self.settings.workflow.telegram_type_limits_per_run)
-        limited = [*feed_cards[:feed_limit], *article_cards[:article_limit]]
+        if (
+            self.settings.workflow.telegram_feed_article_alert_limit_per_run is not None
+            or self.settings.workflow.telegram_discovery_article_alert_limit_per_run is not None
+        ):
+            feed_article_limit = max(0, int(self.settings.workflow.telegram_feed_article_alert_limit_per_run or 0))
+            discovery_article_limit = max(0, int(self.settings.workflow.telegram_discovery_article_alert_limit_per_run or 0))
+            article_cards = [
+                *feed_article_cards[:feed_article_limit],
+                *discovery_article_cards[:discovery_article_limit],
+            ]
+        else:
+            article_limit = max(0, int(self.settings.workflow.telegram_article_alert_limit_per_run))
+            article_cards = [*feed_article_cards, *discovery_article_cards][:article_limit]
+        limited = [*feed_cards[:feed_limit], *article_cards]
         limited.sort(key=lambda item: float(item.get("risk_score", 0.0)), reverse=True)
         burst_cap = max(0, int(self.settings.delivery.telegram_max_alerts_per_run))
         if apply_burst_cap and burst_cap > 0:

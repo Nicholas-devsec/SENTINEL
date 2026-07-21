@@ -218,6 +218,70 @@ def test_workflow_article_limit_prefers_articles_with_extracted_iocs() -> None:
     assert limited_writeups == [ioc_writeup]
 
 
+def test_workflow_split_article_limits_keep_feed_and_discovery_buckets() -> None:
+    now = datetime.now(UTC)
+    settings = SentinelSettings.model_validate(
+        {
+            "workflow": {
+                "feed_ioc_store_limit_per_run": 0,
+                "feed_article_store_limit_per_run": 1,
+                "discovery_article_store_limit_per_run": 1,
+                "article_store_limit_per_run": 0,
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
+    feed_writeup = RawWriteup(
+        source="rapid7_blog",
+        source_trust=0.66,
+        url="https://rapid7.example/feed-article",
+        title="Configured feed article",
+        published_at=now,
+    )
+    skipped_feed_writeup = RawWriteup(
+        source="securelist_blog",
+        source_trust=0.67,
+        url="https://securelist.example/feed-article",
+        title="Second configured feed article",
+        published_at=now,
+    )
+    discovery_writeup = RawWriteup(
+        source="discovery:publisher.example",
+        source_trust=0.55,
+        url="https://publisher.example/open-web-article",
+        title="Open discovery article",
+        published_at=now,
+    )
+    skipped_discovery_writeup = RawWriteup(
+        source="discovery:other.example",
+        source_trust=0.55,
+        url="https://other.example/open-web-article",
+        title="Second open discovery article",
+        published_at=now,
+    )
+    raw_items = [
+        RawIOC("feed.example", "domain", "rapid7_blog", 0.66, now, now, reference_url=feed_writeup.url, provenance="writeup"),
+        RawIOC("skip-feed.example", "domain", "securelist_blog", 0.67, now, now, reference_url=skipped_feed_writeup.url, provenance="writeup"),
+        RawIOC("discovery.example", "domain", "discovery:publisher.example", 0.55, now, now, reference_url=discovery_writeup.url, provenance="discovery"),
+        RawIOC("skip-discovery.example", "domain", "discovery:other.example", 0.55, now, now, reference_url=skipped_discovery_writeup.url, provenance="discovery"),
+    ]
+
+    limited_items, limited_writeups = _apply_workflow_limits(
+        settings,
+        raw_items=raw_items,
+        writeups=[feed_writeup, skipped_feed_writeup, discovery_writeup, skipped_discovery_writeup],
+    )
+
+    assert [(item.type, item.value) for item in limited_items] == [
+        ("domain", "feed.example"),
+        ("domain", "discovery.example"),
+    ]
+    assert [writeup.url for writeup in limited_writeups] == [
+        feed_writeup.url,
+        discovery_writeup.url,
+    ]
+
+
 def test_build_agents_requires_mitre_stix_path() -> None:
     settings = SentinelSettings.model_validate(
         {

@@ -25,8 +25,12 @@ class ScheduleSettings(BaseModel):
 
 class WorkflowSettings(BaseModel):
     feed_ioc_store_limit_per_run: int = 250
+    feed_article_store_limit_per_run: int | None = None
+    discovery_article_store_limit_per_run: int | None = None
     article_store_limit_per_run: int = 5
     telegram_feed_alert_limit_per_run: int = 5
+    telegram_feed_article_alert_limit_per_run: int | None = None
+    telegram_discovery_article_alert_limit_per_run: int | None = None
     telegram_article_alert_limit_per_run: int = 2
     telegram_type_limits_per_run: dict[str, int] = Field(default_factory=dict)
     store_type_limits_per_run: dict[str, int] = Field(default_factory=dict)

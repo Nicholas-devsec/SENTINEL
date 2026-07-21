@@ -866,6 +866,38 @@ async def test_delivery_agent_applies_separate_article_and_feed_limits() -> None
     assert "Article B" not in rendered
 
 
+def test_delivery_agent_applies_split_feed_and_discovery_article_limits() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.delivery.telegram_daily_digest_limit = 10
+    settings.workflow.telegram_feed_alert_limit_per_run = 1
+    settings.workflow.telegram_feed_article_alert_limit_per_run = 1
+    settings.workflow.telegram_discovery_article_alert_limit_per_run = 1
+    settings.workflow.telegram_article_alert_limit_per_run = 0
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    cards = [
+        {"id": str(uuid4()), "value": "feed-ioc.example", "type": "domain", "source": "threatfox", "risk_score": 90.0, "severity": "high", "last_seen": now, "attributes": {"provenance": "feed"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "feed-article.example", "type": "domain", "source": "rapid7_blog", "risk_score": 89.0, "severity": "high", "last_seen": now, "reference_url": "https://rapid7.example/report", "source_title": "Configured Feed Article", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "feed-article-skip.example", "type": "domain", "source": "securelist_blog", "risk_score": 88.0, "severity": "high", "last_seen": now, "reference_url": "https://securelist.example/report", "source_title": "Second Feed Article", "attributes": {"provenance": "writeup"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "discovery-article.example", "type": "domain", "source": "discovery:publisher.example", "risk_score": 87.0, "severity": "high", "last_seen": now, "reference_url": "https://publisher.example/report", "source_title": "Open Discovery Article", "attributes": {"provenance": "discovery"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+        {"id": str(uuid4()), "value": "discovery-article-skip.example", "type": "domain", "source": "discovery:other.example", "risk_score": 86.0, "severity": "high", "last_seen": now, "reference_url": "https://other.example/report", "source_title": "Second Discovery Article", "attributes": {"provenance": "discovery"}, "related_cves": [], "external_links": {}, "mitre_techniques": [], "mitre_tactics": []},
+    ]
+
+    selected = agent._apply_delivery_limits(cards, apply_burst_cap=False)
+
+    assert [card["source_title"] for card in selected if card.get("source_title")] == [
+        "Configured Feed Article",
+        "Open Discovery Article",
+    ]
+    assert [card["value"] for card in selected if not card.get("source_title")] == ["feed-ioc.example"]
+
+
 @pytest.mark.asyncio
 async def test_delivery_agent_applies_feed_type_alert_limits() -> None:
     telegram_bot = FakeTelegramBot()
