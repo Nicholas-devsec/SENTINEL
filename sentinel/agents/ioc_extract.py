@@ -149,11 +149,28 @@ def html_to_text(html: str) -> str:
 
 
 def _dedupe(items: list[ExtractedIOC]) -> list[ExtractedIOC]:
+    domains = {
+        item.value.lower()
+        for item in items
+        if item.type == "domain"
+    }
+    url_hosts = {
+        (urlparse(item.value).hostname or "").lower()
+        for item in items
+        if item.type == "url"
+    }
     seen: set[tuple[str, str]] = set()
     result: list[ExtractedIOC] = []
     for item in items:
         key = (item.type, item.value.lower())
         if key in seen:
+            continue
+        if item.type == "domain" and item.value.lower() in url_hosts:
+            continue
+        if item.type == "domain" and any(
+            other != item.value.lower() and other.endswith(f".{item.value.lower()}")
+            for other in domains
+        ):
             continue
         seen.add(key)
         result.append(item)
@@ -230,9 +247,9 @@ def _is_domain_embedded_in_defanged_url(text: str, span: tuple[int, int]) -> boo
     start, end = span
     prefix = text[max(0, start - 24) : start]
     suffix = text[end : min(len(text), end + 3)]
-    if not suffix.startswith(("/", "[")):
+    if DEFANGED_URL_SCHEME_PREFIX_RE.search(prefix) is None:
         return False
-    return DEFANGED_URL_SCHEME_PREFIX_RE.search(prefix) is not None
+    return not suffix or suffix.startswith(("/", "[", "?", "#", ":", ".", ",", ";"))
 
 
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:
@@ -355,6 +372,38 @@ def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
     return None
 
 
+def _is_table_of_contents_heading(lines: list[str], index: int) -> bool:
+    """Ignore headings repeated in a table of contents before article body."""
+    near_toc = False
+    seen_nonempty = 0
+    for candidate in reversed(lines[max(0, index - 20) : index]):
+        stripped = candidate.strip().lower()
+        if not stripped:
+            continue
+        seen_nonempty += 1
+        if stripped == "table of contents":
+            near_toc = True
+            break
+        if seen_nonempty >= 12:
+            return False
+    if not near_toc:
+        return False
+    following_topics = 0
+    for candidate in lines[index + 1 : index + 8]:
+        stripped = candidate.strip()
+        if not stripped:
+            continue
+        if _looks_like_indicator_line(stripped):
+            return False
+        if len(stripped) <= 80 and len(stripped.split()) <= 8:
+            following_topics += 1
+            if following_topics >= 2:
+                return True
+            continue
+        return False
+    return False
+
+
 # Labels that commonly appear beside indicator values in IOC tables and lists.
 # A line/cell that is only one of these must never terminate an IOC section.
 INDICATOR_TYPE_LABELS = {
@@ -372,19 +421,23 @@ def _is_indicator_type_label(text: str) -> bool:
 
 
 def _cell_indicator_token(cell: str) -> str | None:
-    """First token of a short list/table cell, if it is indicator-shaped."""
+    """Indicator-shaped token from a short list/table cell, if one exists."""
     stripped = refang(cell.strip().lstrip("-*•").strip())
     if not stripped:
         return None
     parts = stripped.split()
+    for part in parts:
+        token = part.strip().rstrip(",;")
+        if MD5_RE.fullmatch(token) or SHA1_RE.fullmatch(token) or SHA256_RE.fullmatch(token):
+            return token
+        if URL_RE.fullmatch(token) or CVE_RE.fullmatch(token):
+            return token
+        if IPV4_RE.fullmatch(token):
+            return token
+        if len(parts) <= 5 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
+            return token
     token = parts[0].rstrip(",;")
-    if MD5_RE.fullmatch(token) or SHA1_RE.fullmatch(token) or SHA256_RE.fullmatch(token):
-        return token
-    if URL_RE.fullmatch(token) or CVE_RE.fullmatch(token):
-        return token
-    if IPV4_RE.fullmatch(token):
-        return token
-    if len(parts) <= 3 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
+    if len(parts) <= 5 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
         return token
     return None
 
@@ -411,11 +464,27 @@ def _looks_like_section_subheading(line: str, next_nonempty: str | None) -> bool
     stripped = line.strip()
     if not stripped or _looks_like_indicator_line(line) or _is_indicator_type_label(stripped):
         return False
+    normalized_tokens = {
+        token.strip().rstrip(":").lower()
+        for token in re.split(r"\s+", stripped)
+        if token.strip()
+    }
+    if normalized_tokens & {"md5", "sha1", "sha-1", "sha256", "sha-256", "hash", "hashes"}:
+        return False
     if len(stripped) > MAX_HEADING_CHARS:
         return False
     if next_nonempty is None or not _looks_like_indicator_line(next_nonempty):
         return False
     return len(stripped.split()) <= 8
+
+
+def _contains_hash_descriptor(line: str) -> bool:
+    normalized_tokens = {
+        token.strip().rstrip(":").lower()
+        for token in re.split(r"\s+", line.strip())
+        if token.strip()
+    }
+    return bool(normalized_tokens & {"md5", "sha1", "sha-1", "sha256", "sha-256", "hash", "hashes"})
 
 
 def _strong_indicator_line_count(lines: list[str]) -> int:
@@ -445,6 +514,10 @@ def find_ioc_section(
         # "Type | Value") with indicator values; labels continue the section.
         if all(_is_indicator_type_label(cell) for cell in stripped.split("|") if cell.strip()):
             return False
+        if ":" in stripped:
+            return False
+        if _contains_hash_descriptor(stripped):
+            return False
         if _looks_like_section_subheading(line, next_nonempty):
             return False
         return (
@@ -459,6 +532,8 @@ def find_ioc_section(
     best_heading_score: tuple[int, int, int] | None = None
     for index, line in enumerate(lines):
         if not _is_heading_line(line, signals):
+            continue
+        if _is_table_of_contents_heading(lines, index):
             continue
         body: list[str] = []
         indicator_count = 0
@@ -529,22 +604,24 @@ def extract_iocs_from_section(
         # potential bare-domain list entry.
         for cell in line.split("|"):
             stripped = refang(cell.strip().lstrip("-*•").strip())
-            if not stripped or len(stripped.split()) > 3:
+            if not stripped or len(stripped.split()) > 5:
                 continue
-            token = stripped.split()[0].rstrip(",;").rstrip(".").lower()
-            if not BARE_DOMAIN_RE.fullmatch(token):
-                continue
-            if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
-                continue
-            if token in excluded or token in url_hosts:
-                continue
-            key = ("domain", token)
-            if key not in found_keys:
-                found.append(ExtractedIOC(type="domain", value=token))
-                found_keys.add(key)
-            label_by_key.setdefault(("domain", token), current_label)
+            for part in stripped.split():
+                token = part.rstrip(",;").rstrip(".").lower()
+                if not BARE_DOMAIN_RE.fullmatch(token):
+                    continue
+                if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
+                    continue
+                if token in excluded or token in url_hosts:
+                    continue
+                key = ("domain", token)
+                if key not in found_keys:
+                    found.append(ExtractedIOC(type="domain", value=token))
+                    found_keys.add(key)
+                label_by_key.setdefault(("domain", token), current_label)
 
     found = _augment_root_urls_with_path_cells(section_text, found)
+    found = _dedupe(found)
 
     enriched: list[ExtractedIOC] = []
     seen: set[tuple[str, str]] = set()

@@ -18,8 +18,8 @@ MAX_DIGEST_LINKS_PER_ITEM = 2
 MAX_SOURCE_TITLE_CHARS = 90
 MAX_IOC_VALUE_CHARS = 120
 MAX_LINK_CHARS = 140
-MAX_GROUPED_IOCS = 12
-ARTICLE_IOC_NOTE_THRESHOLD = 10
+MAX_GROUPED_IOCS = 5
+ARTICLE_IOC_NOTE_THRESHOLD = 5
 TELEGRAM_PARSE_MODE = "HTML"
 
 SEVERITY_EMOJI = {
@@ -153,9 +153,9 @@ def _normalize_link_display(value: str | None) -> str | None:
 
 
 def _article_ioc_note(article_ioc_count: int | None) -> str | None:
-    if article_ioc_count is None or article_ioc_count <= ARTICLE_IOC_NOTE_THRESHOLD:
+    if article_ioc_count is None or article_ioc_count < ARTICLE_IOC_NOTE_THRESHOLD:
         return None
-    return f"More IOCs are present in the article ({article_ioc_count} extracted total)."
+    return f"More IOCs can be found in the article/writeup ({article_ioc_count} extracted total)."
 
 
 def _format_source_context(source: str, attributes: dict[str, Any] | None = None) -> str:

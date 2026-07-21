@@ -1244,9 +1244,35 @@ def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
     assert "<u>HelloBackdoor</u>" in rendered
     assert "<u>HelloBackdoor Droppers</u>" in rendered
     assert "<u>wtsapi32.dll</u>" in rendered
-    assert "More IOCs are present in the article (14 extracted total)." in rendered
+    assert "More IOCs can be found in the article/writeup (14 extracted total)." in rendered
     assert "<code>16c211c96735f2fae9361b89bd7a31bf</code> [md5]" in rendered
     assert "<code>5[.]39[.]253[.]206</code> [ipv4]" in rendered
+
+
+def test_grouped_alert_message_notes_more_iocs_at_article_display_cap() -> None:
+    from sentinel.delivery.telegram_bot import format_grouped_alert_message
+
+    rendered = format_grouped_alert_message(
+        source="rapid7_blog",
+        risk_score=36.0,
+        severity="informational",
+        source_title="Rapid7 article with IOC section",
+        reference_url="https://www.rapid7.com/blog/post/example",
+        last_seen=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        attributes={"article_ioc_count": 5},
+        iocs=[
+            {"type": "domain", "value": "one.example"},
+            {"type": "domain", "value": "two.example"},
+            {"type": "ipv4", "value": "77.110.127.205"},
+            {"type": "sha256", "value": "a" * 64},
+            {"type": "url", "value": "https://gobf.mx"},
+        ],
+        mitre_techniques=[],
+        mitre_tactics=[],
+    )
+
+    assert "<b>IOCs (5)</b>" in rendered
+    assert "More IOCs can be found in the article/writeup (5 extracted total)." in rendered
 
 
 def test_format_alert_message_shows_hash_intel_links() -> None:
@@ -1378,4 +1404,4 @@ def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_cou
     # defanged so the alert never contains a live malicious link.
     assert '<a href="https://example.com/report">Article</a>' in rendered
     assert "<code>evil[.]example</code> [domain]" in rendered
-    assert "More IOCs are present in the article (12 extracted total)." in rendered
+    assert "More IOCs can be found in the article/writeup (12 extracted total)." in rendered

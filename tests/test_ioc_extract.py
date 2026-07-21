@@ -342,3 +342,46 @@ T1036.004
     assert "HelloBackdoor" in section.text
     assert "16C211C96735F2FAE9361B89BD7A31BF" in section.text
     assert "5.39.253[.]206" in section.text
+
+
+def test_rapid7_style_ioc_section_ignores_toc_and_extracts_labeled_values() -> None:
+    text = """Table of contents
+Executive summary
+MITRE ATT&CK techniques
+Indicators of compromise (IOCs)
+Rapid7 customers
+Conclusion
+Executive summary
+This article references CVE-2025-33053 in prose.
+MITRE ATT&CK techniques
+Technique | Tactic | ID
+Obtain capabilities via LLM tooling | Obtain Capabilities | AML.T0016
+Indicators of compromise (IOCs)
+CURP campaign
+Phishing page: hxxps://gobf[.]mx
+WebDav server: onedrive[.]cv
+ReportFinal.<RLO>.scr SHA256
+04A8018191F2E9E76072D072A933371D9D669A42DE2B2A087541CD3A653B0BA7
+C2: 77.110.127.205 ports 56001-56003 / 57666 / 57777 / 57888
+Domain: google.services[.]lug
+Campaign tag:06x12x2026SantaEbash2 (v4.4.3)
+Staging paths:
+%TEMP%\\is-XXXXX.tmp\\Fo-Binary.exe
+DlrtyGames campaign
+Launcher: hxxps://dirty[.]example/payload
+Rapid7 customers
+Customers using Rapid7 gain access to all IOCs.
+"""
+
+    section = find_ioc_section(text)
+    assert section is not None
+    assert section.text.startswith("CURP campaign")
+    extracted = {(item.type, item.value): item.section_label for item in extract_iocs_from_section(section.text)}
+
+    assert extracted[("url", "https://gobf.mx")] == "CURP campaign"
+    assert extracted[("domain", "onedrive.cv")] == "CURP campaign"
+    assert extracted[("sha256", "04a8018191f2e9e76072d072a933371d9d669a42de2b2a087541cd3a653b0ba7")] == "CURP campaign"
+    assert extracted[("ipv4", "77.110.127.205")] == "CURP campaign"
+    assert extracted[("domain", "google.services.lug")] == "CURP campaign"
+    assert extracted[("url", "https://dirty.example/payload")] == "DlrtyGames campaign"
+    assert ("cve", "CVE-2025-33053") not in extracted
