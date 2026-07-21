@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator p03sil.cyou
+id: p03sil-cyou
+status: experimental
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "p03sil.cyou"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

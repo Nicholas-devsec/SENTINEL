@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator macisofile.sbs
+id: macisofile-sbs
+status: experimental
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "macisofile.sbs"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1593.002

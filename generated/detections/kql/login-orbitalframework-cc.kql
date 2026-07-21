@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "login.orbitalframework.cc" or tostring(AdditionalFields) has "login.orbitalframework.cc"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

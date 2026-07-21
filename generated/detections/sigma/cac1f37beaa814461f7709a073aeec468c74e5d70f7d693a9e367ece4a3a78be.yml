@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator cac1f37beaa814461f7709a073aeec468c74e5d70f7d693a9e367ece4a3a78be
+id: cac1f37beaa814461f7709a073aeec468c74e5d70f7d693a9e367ece4a3a78be
+status: experimental
+description: Execution of file with known-bad SHA256 (source: otx)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=cac1f37beaa814461f7709a073aeec468c74e5d70f7d693a9e367ece4a3a78be"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1593.002
+  - attack.t1036.004
+  - attack.t1195.002

@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator onedrive.cv
+id: onedrive-cv
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.rapid7.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "onedrive.cv"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

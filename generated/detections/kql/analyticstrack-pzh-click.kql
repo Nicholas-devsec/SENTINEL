@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "analyticstrack-pzh.click" or tostring(AdditionalFields) has "analyticstrack-pzh.click"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

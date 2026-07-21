@@ -1,0 +1,19 @@
+title: SENTINEL file hash indicator db11ff3f37a8b2aa25c480871504b886a6364167ecb501eacf7345f6bbf9582b
+id: db11ff3f37a8b2aa25c480871504b886a6364167ecb501eacf7345f6bbf9582b
+status: experimental
+description: Execution of file with known-bad SHA256 (source: otx)
+logsource:
+  category: process_creation
+detection:
+  selection:
+    Hashes|contains: "SHA256=db11ff3f37a8b2aa25c480871504b886a6364167ecb501eacf7345f6bbf9582b"
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - Hashes
+level: informational
+tags:
+  - attack.t1593.002
+  - attack.t1036.004
+  - attack.t1546.014

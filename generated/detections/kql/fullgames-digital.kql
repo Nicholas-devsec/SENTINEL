@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "fullgames.digital" or tostring(AdditionalFields) has "fullgames.digital"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

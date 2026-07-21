@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator google.services.ug
+id: google-services-ug
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:www.rapid7.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "google.services.ug"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

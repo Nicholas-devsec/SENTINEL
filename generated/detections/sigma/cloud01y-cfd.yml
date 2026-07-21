@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator cloud01y.cfd
+id: cloud01y-cfd
+status: experimental
+description: DNS resolution of known-bad domain (source: gbhackers_blog)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "cloud01y.cfd"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005

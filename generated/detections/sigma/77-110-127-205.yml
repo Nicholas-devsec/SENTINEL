@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 77.110.127.205
+id: 77-110-127-205
+status: experimental
+description: Outbound connection to known-bad IP (source: discovery:www.rapid7.com)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "77.110.127.205"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1557.001
+  - attack.t1036.005
