@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from sentinel.agents.enricher import EnrichedIOC
-from sentinel.agents.scraper import RawIOC, ScrapeReport
+from sentinel.agents.scraper import RawIOC, RawWriteup, ScrapeReport
 from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
 from sentinel.pipeline import (
@@ -170,6 +170,52 @@ def test_workflow_store_type_limits_shape_feed_ioc_mix() -> None:
         ("domain", "first.example"),
         ("md5", "a" * 32),
     ]
+
+
+def test_workflow_article_limit_prefers_articles_with_extracted_iocs() -> None:
+    now = datetime.now(UTC)
+    settings = SentinelSettings.model_validate(
+        {
+            "workflow": {
+                "feed_ioc_store_limit_per_run": 0,
+                "article_store_limit_per_run": 1,
+            },
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+        }
+    )
+    empty_writeup = RawWriteup(
+        source="sentinelone_blog",
+        source_trust=0.68,
+        url="https://example.test/empty",
+        title="Empty weekly recap",
+        published_at=now,
+    )
+    ioc_writeup = RawWriteup(
+        source="gbhackers_blog",
+        source_trust=0.68,
+        url="https://example.test/iocs",
+        title="IOC-bearing article",
+        published_at=now,
+    )
+    article_ioc = RawIOC(
+        value="article-ioc.example",
+        type="domain",
+        source="gbhackers_blog",
+        source_trust=0.68,
+        first_seen=now,
+        last_seen=now,
+        reference_url=ioc_writeup.url,
+        provenance="writeup",
+    )
+
+    limited_items, limited_writeups = _apply_workflow_limits(
+        settings,
+        raw_items=[article_ioc],
+        writeups=[empty_writeup, ioc_writeup],
+    )
+
+    assert limited_items == [article_ioc]
+    assert limited_writeups == [ioc_writeup]
 
 
 def test_build_agents_requires_mitre_stix_path() -> None:

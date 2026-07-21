@@ -67,6 +67,14 @@ def test_defanged_url_does_not_emit_duplicate_root_domain() -> None:
     assert ("domain", "github.com") not in extracted
 
 
+def test_malformed_ipv6_url_token_does_not_abort_extraction() -> None:
+    text = "Ignore hxxps://[not-an-ipv6]/stage but keep C2 45.155.204.10"
+    extracted = {(item.type, item.value) for item in extract_iocs_from_text(text)}
+
+    assert ("ipv4", "45.155.204.10") in extracted
+    assert not any(value == "https://[not-an-ipv6]/stage" for _, value in extracted)
+
+
 def test_bare_domains_in_prose_are_not_extracted() -> None:
     text = "Researchers at example.com published findings about microsoft.com abuse."
     extracted = extract_iocs_from_text(text)

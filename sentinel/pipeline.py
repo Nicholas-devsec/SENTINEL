@@ -137,17 +137,16 @@ def _apply_workflow_limits(
 
     article_url_order: list[str] = []
     seen_urls: set[str] = set()
+    for item in article_items:
+        url = str(getattr(item, "reference_url", None) or "").strip()
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            article_url_order.append(url)
     for writeup in writeups:
         url = str(writeup.url or "").strip()
         if url and url not in seen_urls:
             seen_urls.add(url)
             article_url_order.append(url)
-    if not article_url_order:
-        for item in article_items:
-            url = str(getattr(item, "reference_url", None) or "").strip()
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                article_url_order.append(url)
 
     kept_article_urls = set(article_url_order[:article_limit]) if article_limit > 0 else set()
     article_items = [

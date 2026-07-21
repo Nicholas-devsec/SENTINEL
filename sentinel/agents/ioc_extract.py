@@ -277,7 +277,10 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
 
     for match in URL_RE.finditer(clean):
         url = match.group(0).rstrip(".,;")
-        host = (urlparse(url).hostname or "").lower()
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            continue
         if host and host not in excluded:
             found.append(ExtractedIOC(type="url", value=url))
 
