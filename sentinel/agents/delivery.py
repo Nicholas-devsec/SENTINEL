@@ -34,6 +34,7 @@ from sentinel.delivery.telegram_bot import (
 logger = logging.getLogger(__name__)
 FALLBACK_DIGEST_MIN_SCORE = 25.0
 HASH_TYPES = {"md5", "sha1", "sha256"}
+DIRECT_IOC_FEED_SOURCES = {"threatfox", "urlhaus", "feodotracker", "otx", "malwarebazaar", "phishtank"}
 CAMPAIGN_STOPWORDS = {
     "about",
     "access",
@@ -175,9 +176,16 @@ class DeliveryAgent(BaseAgent):
 
     def _is_article_card(self, item: dict[str, Any]) -> bool:
         provenance = str(item.get("provenance") or item.get("attributes", {}).get("provenance") or "").strip().lower()
+        source = str(item.get("source") or "").strip().lower()
         reference_url = str(item.get("reference_url") or "").strip()
         grouped = item.get("grouped_iocs") or []
-        return bool(reference_url) and (provenance in {"writeup", "discovery"} or bool(grouped))
+        if not reference_url:
+            return False
+        if provenance in {"writeup", "discovery"} or source.startswith("discovery:"):
+            return True
+        if provenance == "feed" and source in DIRECT_IOC_FEED_SOURCES:
+            return False
+        return bool(grouped) or bool(item.get("source_title"))
 
     def _is_discovery_article_card(self, item: dict[str, Any]) -> bool:
         attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
@@ -190,7 +198,7 @@ class DeliveryAgent(BaseAgent):
         singles: list[dict[str, Any]] = []
         for item in items:
             reference_url = str(item.get("reference_url") or "").strip()
-            if not reference_url:
+            if not reference_url or not self._is_article_card(item):
                 singles.append(item)
                 continue
             grouped.setdefault(reference_url, []).append(item)
@@ -592,6 +600,39 @@ class DeliveryAgent(BaseAgent):
             reverse=True,
         )
         return candidates
+
+    def _top_up_feed_type_candidates(
+        self,
+        selected: list[dict[str, Any]],
+        pool: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        limits = self._normalized_type_limits(self.settings.workflow.telegram_type_limits_per_run)
+        if not limits:
+            return selected
+        counts = {key: 0 for key in limits}
+        seen = {str(item.get("id") or f"{item.get('type')}|{item.get('value')}") for item in selected}
+        for item in selected:
+            if self._is_article_card(item):
+                continue
+            bucket = self._type_bucket_for(str(item.get("type") or ""))
+            if bucket in counts:
+                counts[bucket] += 1
+        topped_up = list(selected)
+        for item in pool:
+            if self._is_article_card(item):
+                continue
+            key = str(item.get("id") or f"{item.get('type')}|{item.get('value')}")
+            if key in seen:
+                continue
+            bucket = self._type_bucket_for(str(item.get("type") or ""))
+            if bucket not in limits or counts[bucket] >= limits[bucket]:
+                continue
+            topped_up.append(item)
+            seen.add(key)
+            counts[bucket] += 1
+            if all(counts[key] >= limit for key, limit in limits.items()):
+                break
+        return topped_up
 
     def _normalized_type_limits(self, type_limits: dict[str, int] | None) -> dict[str, int]:
         limits: dict[str, int] = {}
@@ -1169,8 +1210,14 @@ class DeliveryAgent(BaseAgent):
         immediate: list[dict[str, Any]] = []
         if self.settings.delivery.enable_telegram_immediate_alerts:
             immediate_candidates = self._select_immediate_candidates(items)
-            if not immediate_candidates:
-                immediate_candidates = self._select_feedback_backfill_candidates(items)
+            feedback_backfill_candidates = self._select_feedback_backfill_candidates(items)
+            if immediate_candidates:
+                immediate_candidates = self._top_up_feed_type_candidates(
+                    immediate_candidates,
+                    feedback_backfill_candidates,
+                )
+            else:
+                immediate_candidates = feedback_backfill_candidates
             immediate_candidates = self._dedupe_hash_family_candidates(immediate_candidates)
             immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)

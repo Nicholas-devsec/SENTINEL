@@ -70,7 +70,7 @@ thresholds:
   alert_score: 38
   # Backstop for learning: if no normal immediate alert qualifies, promote
   # fresh trusted-feed candidates above this score so TP/FP feedback still flows.
-  feedback_candidate_score: 19
+  feedback_candidate_score: 18
   digest_score: 25
   digest_backfill_score: 20
   curated_immediate_score: 28
@@ -277,7 +277,7 @@ delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}
   telegram_chat_id: ${TELEGRAM_CHAT_ID}
   enable_telegram_immediate_alerts: true
-  telegram_max_alerts_per_run: 5
+  telegram_max_alerts_per_run: 6
   # An IOC already alerted (immediate or digest) is not re-sent until this
   # many hours pass; the alert_events ledger enforces it across cron runs.
   alert_resend_after_hours: 72

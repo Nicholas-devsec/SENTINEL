@@ -898,6 +898,53 @@ def test_delivery_agent_applies_split_feed_and_discovery_article_limits() -> Non
     assert [card["value"] for card in selected if not card.get("source_title")] == ["feed-ioc.example"]
 
 
+def test_delivery_agent_tops_up_missing_feed_type_buckets_for_feedback() -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.workflow.telegram_type_limits_per_run = {"ipv4": 2, "domain": 1, "hash": 1}
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    selected = [
+        {"id": "ip-1", "value": "1.1.1.1", "type": "ipv4", "source": "threatfox", "risk_score": 50.0, "severity": "high", "attributes": {"provenance": "feed"}},
+    ]
+    backfill_pool = [
+        {"id": "ip-2", "value": "2.2.2.2", "type": "ipv4", "source": "threatfox", "risk_score": 25.0, "severity": "informational", "attributes": {"provenance": "feed", "delivery_reason": "feedback_backfill"}},
+        {"id": "domain-1", "value": "malicious.example", "type": "domain", "source": "threatfox", "risk_score": 22.0, "severity": "informational", "attributes": {"provenance": "feed", "delivery_reason": "feedback_backfill"}},
+        {"id": "hash-1", "value": "a" * 64, "type": "sha256", "source": "otx", "risk_score": 35.0, "severity": "informational", "attributes": {"provenance": "feed", "delivery_reason": "feedback_backfill"}},
+        {"id": "domain-2", "value": "extra.example", "type": "domain", "source": "threatfox", "risk_score": 21.0, "severity": "informational", "attributes": {"provenance": "feed", "delivery_reason": "feedback_backfill"}},
+    ]
+
+    topped_up = agent._top_up_feed_type_candidates(selected, backfill_pool)
+
+    assert [(item["type"], item["value"]) for item in topped_up] == [
+        ("ipv4", "1.1.1.1"),
+        ("ipv4", "2.2.2.2"),
+        ("domain", "malicious.example"),
+        ("sha256", "a" * 64),
+    ]
+
+
+def test_delivery_agent_does_not_group_feed_iocs_with_reference_urls_as_articles() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    items = [
+        {"id": "hash-1", "value": "a" * 64, "type": "sha256", "source": "otx", "risk_score": 35.0, "severity": "informational", "reference_url": "https://otx.example/pulse/1", "attributes": {"provenance": "feed"}},
+        {"id": "hash-2", "value": "b" * 64, "type": "sha256", "source": "otx", "risk_score": 34.0, "severity": "informational", "reference_url": "https://otx.example/pulse/1", "attributes": {"provenance": "feed"}},
+    ]
+
+    grouped = agent._group_immediate_alerts(items)
+
+    assert grouped == items
+    assert all("grouped_iocs" not in item for item in grouped)
+
+
 @pytest.mark.asyncio
 async def test_delivery_agent_applies_feed_type_alert_limits() -> None:
     telegram_bot = FakeTelegramBot()
