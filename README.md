@@ -112,17 +112,27 @@ Telegram/Karpathy testing.
 ```bash
 git clone https://github.com/Nicholas-devsec/SENTINEL.git
 cd SENTINEL
-python3.12 -m venv .venv
+python3 --version
+python3 -m venv .venv
 .venv/bin/pip install -U pip
 .venv/bin/pip install -e .
 cp .env.example .env
 mkdir -p data
 ```
 
-If `python3.12` is unavailable, install Python 3.12+ first. The package also
-installs a `sentinel` console command, but the examples below use
+SENTINEL requires Python 3.12+. Ubuntu 24.04/26.04 AMIs are fine as long as
+`python3 --version` reports 3.12 or newer. If you need to check the Ubuntu
+release, use `cat /etc/os-release`; there is no `ubuntu --version` command.
+
+The package also installs a `sentinel` console command, but the examples below use
 `.venv/bin/python -m sentinel.cli ...` so cron/systemd do not depend on shell
 activation.
+
+Pull the local MITRE ATT&CK bundle before the first run:
+
+```bash
+git clone https://github.com/mitre-attack/attack-stix-data.git data/attack-stix-data
+```
 
 ### 2. Configure `.env`
 
@@ -138,6 +148,15 @@ VT_API_KEY=...
 SHODAN_API_KEY=...
 ABUSEIPDB_API_KEY=...
 ```
+
+On the standard EC2 checkout used in this runbook, set:
+
+```bash
+MITRE_STIX_PATH=/home/ubuntu/SENTINEL/data/attack-stix-data/enterprise-attack/enterprise-attack.json
+```
+
+If you copied `.env` or `config.yaml` from a laptop, remove any workstation
+paths such as `/mnt/storage/...`; those paths will not exist on EC2.
 
 Feed pull keys:
 
@@ -243,6 +262,7 @@ the primary production model is `cron-run` plus `feedback-service`.
 Example crontab for the configured `12:05 AM America/Vancouver` run:
 
 ```cron
+CRON_TZ=America/Vancouver
 5 0 * * * cd /home/ubuntu/SENTINEL && env PYTHONPATH=. .venv/bin/python -m sentinel.cli cron-run >> logs/cron-run.log 2>&1
 ```
 
@@ -251,6 +271,10 @@ Create the log directory first:
 ```bash
 mkdir -p logs
 ```
+
+The `logs/cron-run.log` file is created by the first scheduled cron run. If
+`tail logs/cron-run.log` says the file does not exist immediately after setup,
+that only means cron has not fired yet.
 
 ### 7. systemd Feedback Service
 
@@ -279,9 +303,15 @@ Then start it:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now sentinel-feedback
-sudo systemctl status sentinel-feedback
+sudo systemctl status sentinel-feedback --no-pager
+systemctl is-active sentinel-feedback
 journalctl -u sentinel-feedback -f
 ```
+
+If `systemctl is-active sentinel-feedback` prints `active`, the Telegram
+feedback listener and scheduled Karpathy learner can keep running after you
+exit SSH. Do not also run the legacy `telegram-listen` or `karpathy-service`
+processes in production; `feedback-service` covers both jobs.
 
 ### 8. Multi-Day Karpathy Testing Loop
 
