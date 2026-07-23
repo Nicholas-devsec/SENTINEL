@@ -1,7 +1,13 @@
 ## Primary production model:
-## 1. Run `sentinel.cli cron-run` from cron at the time configured below.
+## 1. Run `sentinel.cli cron-run` from an external cron/systemd timer.
 ## 2. Run `sentinel.cli feedback-service` as a separate always-on service for
 ##    Telegram TP/FP capture plus Karpathy learning.
+##
+## Important: `schedule.pipeline_cron` and `schedule.timezone` are consumed by
+## the legacy in-app `sentinel.cli scheduler` process. They do not change the
+## host timezone for an external EC2 crontab. If using system cron, set the EC2
+## timezone with `sudo timedatectl set-timezone America/Vancouver` or convert
+## the crontab expression to the server timezone.
 ##
 ## Primary operator knobs live in two sections:
 ## - `schedule`: when the pipeline and learner run
@@ -21,12 +27,13 @@
 schedule:
   # Fallback cadence used only when `pipeline_cron` is blank.
   scrape_interval_hours: 4
-  # Main production scrape/store/alert schedule.
+  # Legacy in-app scheduler scrape/store/alert schedule.
   pipeline_cron: "5 0 * * *"
   # Legacy fallback used only when `daily_digest_cron` is blank.
   daily_digest_time: "07:00"
   # Optional separate digest message schedule.
   daily_digest_cron: "5 7 * * *"
+  # Legacy in-app scheduler timezone. External cron uses the host cron timezone.
   timezone: "America/Vancouver"
   karpathy_loop_day: "sunday"
   # Used by `feedback-service` when Karpathy scheduling is enabled.

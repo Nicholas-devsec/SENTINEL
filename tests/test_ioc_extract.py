@@ -88,6 +88,23 @@ def test_excludes_article_own_hostname() -> None:
     assert not any("blog.vendor.com" in value for _, value in extracted)
 
 
+def test_excludes_article_own_registrable_domain() -> None:
+    text = (
+        "Elastic published details at elastic[.]co and "
+        "https://www.elastic.co/security-labs/wp2shell-wordpress-rce-detection-elastic-defend. "
+        "The exploited bugs are CVE-2026-63030 and CVE-2026-60137."
+    )
+    extracted = {
+        (item.type, item.value)
+        for item in extract_iocs_from_text(text, exclude_hostnames={"www.elastic.co"})
+    }
+
+    assert ("cve", "CVE-2026-63030") in extracted
+    assert ("cve", "CVE-2026-60137") in extracted
+    assert ("domain", "elastic.co") not in extracted
+    assert not any(item_type == "url" and "elastic.co" in value for item_type, value in extracted)
+
+
 def test_extracts_cves() -> None:
     extracted = extract_iocs_from_text("Exploitation of cve-2026-12345 continues.")
     assert ("cve", "CVE-2026-12345") in {(item.type, item.value) for item in extracted}
@@ -276,6 +293,20 @@ def test_section_extraction_respects_exclusions() -> None:
     extracted = {item.value for item in extract_iocs_from_section(section.text, exclude_hostnames={"blog.vendor.com"})}
     assert "real-c2.badcorp.io" in extracted
     assert "blog.vendor.com" not in extracted
+
+
+def test_section_extraction_excludes_article_own_registrable_domain() -> None:
+    text = "Indicators of Compromise\nelastic.co\nCVE-2026-63030\nCVE-2026-60137"
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {
+        (item.type, item.value)
+        for item in extract_iocs_from_section(section.text, exclude_hostnames={"www.elastic.co"})
+    }
+
+    assert ("cve", "CVE-2026-63030") in extracted
+    assert ("cve", "CVE-2026-60137") in extracted
+    assert ("domain", "elastic.co") not in extracted
 
 
 def test_securelist_style_ioc_subheadings_are_kept_and_labeled() -> None:

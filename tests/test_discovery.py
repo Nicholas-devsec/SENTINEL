@@ -9,10 +9,13 @@ import pytest
 from sqlalchemy import select
 
 from sentinel.agents.discovery import (
+    Candidate,
     DiscoveryAgent,
     DiscoveryMemoryStore,
     format_discovery_report,
 )
+from sentinel.agents.ioc_extract import html_to_text
+from sentinel.agents.scraper import RawWriteup
 from sentinel.config import SentinelSettings
 from sentinel.db.models import DiscoveryMemory, FeedbackRecord, IOC, IOCSighting
 
@@ -46,6 +49,19 @@ ARTICLE_WITH_SECTION = """
 </ul>
 <h2>Conclusion</h2>
 <p>Stay safe out there.</p>
+</body></html>
+"""
+
+ARTICLE_WITH_PUBLISHER_DOMAIN_AND_CVES = """
+<html><body>
+<h1>wp2shell hits WordPress</h1>
+<p>Elastic published this research from elastic[.]co.</p>
+<h2>Indicators of Compromise</h2>
+<ul>
+<li>elastic.co</li>
+<li>CVE-2026-63030</li>
+<li>CVE-2026-60137</li>
+</ul>
 </body></html>
 """
 
@@ -130,9 +146,15 @@ async def test_discovery_extracts_from_ioc_section_with_attribution(db_session_f
         {"title": "New stealer campaign with IOCs", "link": "https://blog.vendor.test/stealer-campaign"},
     ]
     transport = httpx.MockTransport(routes(feed, {"/stealer-campaign": ARTICLE_WITH_SECTION}))
-    agent = build_agent(build_settings(), transport, db_session_factory)
-
-    report = await agent.run_with_report()
+    agent = build_agent(
+        build_settings({"time_budget_seconds": 3, "per_page_timeout_seconds": 1}),
+        transport,
+        db_session_factory,
+    )
+    try:
+        report = await agent.run_with_report()
+    finally:
+        await agent.http_client.aclose()
 
     assert len(report.writeups) == 1
     values = {(item.type, item.value) for item in report.items}
@@ -148,6 +170,40 @@ async def test_discovery_extracts_from_ioc_section_with_attribution(db_session_f
     diagnostic = report.diagnostics[0]
     assert diagnostic.pages_fetched == 1
     assert diagnostic.iocs_extracted == 3
+
+
+@pytest.mark.asyncio
+async def test_discovery_excludes_publisher_domain_from_article_iocs() -> None:
+    settings = build_settings()
+    agent = DiscoveryAgent(
+        settings=settings,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404))),
+        now_fn=lambda: NOW,
+    )
+    writeup = RawWriteup(
+        source="discovery:www.elastic.co",
+        source_trust=0.6,
+        url="https://www.elastic.co/security-labs/wp2shell-wordpress-rce-detection-elastic-defend",
+        title="wp2shell IOC CVE research",
+        published_at=NOW,
+    )
+    try:
+        items, section_signal, failure_reason = agent._extract_candidate_items(
+            settings.discovery.profiles[0],
+            Candidate(writeup=writeup, score=1.0, matched_keywords=["ioc", "cve"]),
+            html_to_text(ARTICLE_WITH_PUBLISHER_DOMAIN_AND_CVES),
+            origin="page",
+        )
+    finally:
+        await agent.http_client.aclose()
+
+    values = {(item.type, item.value) for item in items}
+    assert values == {
+        ("cve", "CVE-2026-63030"),
+        ("cve", "CVE-2026-60137"),
+    }
+    assert section_signal == "heading"
+    assert failure_reason is None
 
 
 @pytest.mark.asyncio

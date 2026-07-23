@@ -259,12 +259,23 @@ the primary production model is `cron-run` plus `feedback-service`.
 
 ### 6. Cron Setup
 
-Example crontab for the configured `12:05 AM America/Vancouver` run:
+External cron uses the EC2 host's cron timezone, not `config.yaml`. On Ubuntu,
+set the instance timezone before installing a Vancouver-time crontab:
+
+```bash
+sudo timedatectl set-timezone America/Vancouver
+timedatectl
+```
+
+Example crontab for a `12:05 AM America/Vancouver` run:
 
 ```cron
-CRON_TZ=America/Vancouver
 5 0 * * * cd /home/ubuntu/SENTINEL && env PYTHONPATH=. .venv/bin/python -m sentinel.cli cron-run >> logs/cron-run.log 2>&1
 ```
+
+If the EC2 host stays on UTC, `5 0 * * *` runs at `00:05 UTC`, which is
+`5:05 PM America/Vancouver` during daylight saving time. Either set the host
+timezone as shown above, or convert the schedule to UTC yourself.
 
 Create the log directory first:
 

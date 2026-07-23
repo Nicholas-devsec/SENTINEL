@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
+import tldextract
+
 
 DEFANG_REPLACEMENTS = (
     ("[:]", ":"),
@@ -47,6 +49,7 @@ DEFANGED_DOMAIN_RE = re.compile(
     r"[a-zA-Z]{2,63}\b"
 )
 DEFANGED_URL_SCHEME_PREFIX_RE = re.compile(r"(?:^|[^a-zA-Z0-9])h..ps?(?:\[:\]|:)\s*(?:\[//\]|//)\s*$", re.IGNORECASE)
+TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
 
 @dataclass(slots=True)
@@ -177,6 +180,47 @@ def _dedupe(items: list[ExtractedIOC]) -> list[ExtractedIOC]:
     return result
 
 
+def _normalize_hostname(hostname: str | None) -> str:
+    return (hostname or "").strip().lower().rstrip(".")
+
+
+def _registrable_domain(hostname: str | None) -> str:
+    host = _normalize_hostname(hostname)
+    if not host:
+        return ""
+    parsed = TLD_EXTRACT(host)
+    if parsed.domain and parsed.suffix:
+        return f"{parsed.domain}.{parsed.suffix}".lower()
+    return host
+
+
+def _expand_excluded_hostnames(hostnames: set[str] | None) -> set[str]:
+    excluded: set[str] = set()
+    for hostname in hostnames or set():
+        host = _normalize_hostname(hostname)
+        if not host:
+            continue
+        excluded.add(host)
+        excluded.add(_registrable_domain(host))
+    return excluded
+
+
+def _is_excluded_hostname(hostname: str | None, excluded: set[str]) -> bool:
+    host = _normalize_hostname(hostname)
+    if not host:
+        return False
+    registered = _registrable_domain(host)
+    return any(
+        candidate
+        and (
+            host == candidate
+            or host.endswith(f".{candidate}")
+            or registered == candidate
+        )
+        for candidate in excluded
+    )
+
+
 def _looks_like_path_fragment(text: str) -> bool:
     stripped = refang(text.strip())
     if not stripped or len(stripped) > 80 or " " in stripped:
@@ -254,7 +298,7 @@ def _is_domain_embedded_in_defanged_url(text: str, span: tuple[int, int]) -> boo
 
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:
     """Extract candidate IOCs from prose. exclude_hostnames drops the article's own infrastructure."""
-    excluded = {host.lower() for host in (exclude_hostnames or set())}
+    excluded = _expand_excluded_hostnames(exclude_hostnames)
     found: list[ExtractedIOC] = []
 
     # Defanged domains are matched on the raw text before refanging so the
@@ -263,7 +307,7 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
         if _is_domain_embedded_in_defanged_url(text, match.span()):
             continue
         domain = match.group(0).replace("[.]", ".").rstrip(".").lower()
-        if domain not in excluded:
+        if not _is_excluded_hostname(domain, excluded):
             found.append(ExtractedIOC(type="domain", value=domain))
 
     clean = refang(text)
@@ -298,7 +342,7 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
             host = (urlparse(url).hostname or "").lower()
         except ValueError:
             continue
-        if host and host not in excluded:
+        if host and not _is_excluded_hostname(host, excluded):
             found.append(ExtractedIOC(type="url", value=url))
 
     for match in IPV4_RE.finditer(clean):
@@ -578,7 +622,7 @@ def extract_iocs_from_section(
     precision rules this extracts bare domains — but only from lines that look
     like list entries, and never dotted filenames.
     """
-    excluded = {host.lower() for host in (exclude_hostnames or set())}
+    excluded = _expand_excluded_hostnames(exclude_hostnames)
     found = extract_iocs_from_text(section_text, exclude_hostnames=excluded)
     found = _augment_root_urls_with_path_cells(section_text, found)
 
@@ -612,7 +656,7 @@ def extract_iocs_from_section(
                     continue
                 if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
                     continue
-                if token in excluded or token in url_hosts:
+                if _is_excluded_hostname(token, excluded) or token in url_hosts:
                     continue
                 key = ("domain", token)
                 if key not in found_keys:
