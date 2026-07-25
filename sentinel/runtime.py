@@ -90,6 +90,85 @@ def _diversify_ioc_samples(items: list[dict[str, Any]], *, limit: int) -> list[d
     return selected
 
 
+def _payload_from_ioc_row(row: Any) -> dict[str, Any]:
+    score_breakdown = dict(getattr(row, "score_breakdown", None) or {})
+    payload = {
+        "id": str(row.id),
+        "value": row.value,
+        "type": row.type,
+        "source": row.source,
+        "risk_score": float(row.risk_score or 0.0),
+        "severity": row.severity or "informational",
+        "source_title": row.source_title,
+        "reference_url": row.reference_url,
+        "related_cves": list(row.related_cves or []),
+        "vt_detections": row.vt_detections,
+        "abuse_confidence": row.abuse_confidence,
+        "shodan_ports": list(row.shodan_ports or []),
+        "mitre_techniques": list(row.mitre_techniques or []),
+        "mitre_tactics": list(row.mitre_tactics or []),
+        "last_seen": row.last_seen,
+        "attributes": {
+            "delivery_reason": "needs_review_retriage",
+            "previous_verdict": "needs_review",
+            "score_breakdown": score_breakdown,
+        },
+    }
+    payload["external_links"] = build_external_links_for_ioc(payload)
+    return payload
+
+
+def _build_needs_review_cards(
+    *,
+    target_rows: list[Any],
+    article_context: dict[Any, tuple[Any, Any | None]],
+    sibling_rows_by_reference: dict[str, list[tuple[Any, Any, Any | None]]],
+    limit: int | None,
+) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    seen_references: set[str] = set()
+    for row in target_rows:
+        payload = _payload_from_ioc_row(row)
+        context = article_context.get(row.id)
+        if context is not None:
+            sighting, source_material = context
+            reference_url = str(sighting.reference_url or "").strip()
+            if reference_url in seen_references:
+                continue
+            seen_references.add(reference_url)
+            siblings = sibling_rows_by_reference.get(reference_url, [])
+            if siblings:
+                payload["source"] = sighting.source or payload["source"]
+                payload["reference_url"] = reference_url
+                payload["source_title"] = (source_material.title if source_material else None) or payload.get("source_title")
+                payload["grouped_ids"] = [str(sibling.id) for _sighting, sibling, _material in siblings]
+                payload["grouped_iocs"] = [
+                    {
+                        "type": sibling.type,
+                        "value": sibling.value,
+                        "section_label": (sibling_sighting.attributes or {}).get("ioc_section_label"),
+                    }
+                    for sibling_sighting, sibling, _material in siblings
+                ]
+                payload["related_cves"] = sorted({cve for _sighting, sibling, _material in siblings for cve in (sibling.related_cves or [])})
+                payload["mitre_techniques"] = sorted({technique for _sighting, sibling, _material in siblings for technique in (sibling.mitre_techniques or [])})
+                payload["mitre_tactics"] = sorted({tactic for _sighting, sibling, _material in siblings for tactic in (sibling.mitre_tactics or [])})
+                payload["corroboration_sources"] = len({sibling_sighting.source for sibling_sighting, _sibling, _material in siblings})
+                payload["last_seen"] = max(
+                    (sibling_sighting.last_seen for sibling_sighting, _sibling, _material in siblings),
+                    default=payload.get("last_seen"),
+                )
+                payload["attributes"]["provenance"] = sighting.provenance
+                payload["attributes"]["article_ioc_count"] = max(
+                    int(source_material.extracted_ioc_count if source_material else 0),
+                    len(siblings),
+                )
+        cards.append(payload)
+        if limit is not None and len(cards) >= max(0, int(limit)):
+            break
+    return cards
+
+
 @dataclass(slots=True)
 class KarpathyCheck:
     name: str
@@ -1252,7 +1331,10 @@ async def load_real_sample_iocs(
 
 
 async def load_needs_review_iocs(*, limit: int | None = 5) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+    row_limit = None if limit is None else max(max(0, int(limit)) * 10, max(0, int(limit)))
+    target_rows: list[IOC] = []
+    article_context: dict[Any, tuple[IOCSighting, SourceMaterial | None]] = {}
+    sibling_rows_by_reference: dict[str, list[tuple[IOCSighting, IOC, SourceMaterial | None]]] = {}
     async with AsyncSessionFactory() as session:
         needs_review_ids = select(FeedbackRecord.ioc_id).where(FeedbackRecord.verdict == "needs_review")
         non_review_ids = select(FeedbackRecord.ioc_id).where(FeedbackRecord.verdict != "needs_review")
@@ -1268,33 +1350,54 @@ async def load_needs_review_iocs(*, limit: int | None = 5) -> list[dict[str, Any
             )
             .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
         )
-        if limit is not None:
-            query = query.limit(max(0, int(limit)))
-        rows = list((await session.scalars(query)).all())
-    for row in rows:
-        score_breakdown = dict(row.score_breakdown or {})
-        payload = {
-            "id": str(row.id),
-            "value": row.value,
-            "type": row.type,
-            "source": row.source,
-            "risk_score": float(row.risk_score or 0.0),
-            "severity": row.severity or "informational",
-            "source_title": row.source_title,
-            "reference_url": row.reference_url,
-            "related_cves": list(row.related_cves or []),
-            "vt_detections": row.vt_detections,
-            "abuse_confidence": row.abuse_confidence,
-            "shodan_ports": list(row.shodan_ports or []),
-            "mitre_techniques": list(row.mitre_techniques or []),
-            "mitre_tactics": list(row.mitre_tactics or []),
-            "last_seen": row.last_seen,
-            "attributes": {
-                "delivery_reason": "needs_review_retriage",
-                "previous_verdict": "needs_review",
-                "score_breakdown": score_breakdown,
-            },
+        if row_limit is not None:
+            query = query.limit(row_limit)
+        target_rows = list((await session.scalars(query)).all())
+        if not target_rows:
+            return []
+
+        target_ids = [row.id for row in target_rows]
+        sighting_rows = list(
+            (
+                await session.execute(
+                    select(IOCSighting, SourceMaterial)
+                    .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
+                    .where(IOCSighting.ioc_id.in_(target_ids))
+                    .where(IOCSighting.provenance.in_(["writeup", "discovery"]))
+                    .where(IOCSighting.reference_url.is_not(None))
+                    .order_by(IOCSighting.last_seen.desc())
+                )
+            ).all()
+        )
+        for sighting, source_material in sighting_rows:
+            article_context.setdefault(sighting.ioc_id, (sighting, source_material))
+
+        reference_urls = {
+            str(sighting.reference_url or "").strip()
+            for sighting, _source_material in article_context.values()
+            if str(sighting.reference_url or "").strip()
         }
-        payload["external_links"] = build_external_links_for_ioc(payload)
-        items.append(payload)
-    return _diversify_ioc_samples(items, limit=len(items))
+        if reference_urls:
+            sibling_rows = list(
+                (
+                    await session.execute(
+                        select(IOCSighting, IOC, SourceMaterial)
+                        .join(IOC, IOCSighting.ioc_id == IOC.id)
+                        .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
+                        .where(IOCSighting.reference_url.in_(reference_urls))
+                        .where(IOCSighting.provenance.in_(["writeup", "discovery"]))
+                        .order_by(IOC.risk_score.desc().nullslast(), IOCSighting.last_seen.desc())
+                    )
+                ).all()
+            )
+            for sighting, sibling, source_material in sibling_rows:
+                reference_url = str(sighting.reference_url or "").strip()
+                if reference_url:
+                    sibling_rows_by_reference.setdefault(reference_url, []).append((sighting, sibling, source_material))
+
+    return _build_needs_review_cards(
+        target_rows=target_rows,
+        article_context=article_context,
+        sibling_rows_by_reference=sibling_rows_by_reference,
+        limit=limit,
+    )

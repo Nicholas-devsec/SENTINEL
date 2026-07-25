@@ -43,7 +43,7 @@ schedule:
 
 workflow:
   # How many feed-origin IOCs are allowed into the DB each cron run.
-  feed_ioc_store_limit_per_run: 250
+  feed_ioc_store_limit_per_run: 3
   # How many article/writeups from configured source feeds are allowed into
   # the DB each cron run. These are RSS/blog entries from `sources.feeds`.
   feed_article_store_limit_per_run: 1
@@ -54,7 +54,7 @@ workflow:
   # article store limits above are omitted from config.
   article_store_limit_per_run: 1
   # Telegram delivery budget for feed-origin alerts per cron run.
-  telegram_feed_alert_limit_per_run: 5
+  telegram_feed_alert_limit_per_run: 3
   # Telegram delivery budget for configured-feed article/writeup alerts.
   telegram_feed_article_alert_limit_per_run: 1
   # Telegram delivery budget for discovery/open-web article alerts.
@@ -64,14 +64,14 @@ workflow:
   telegram_article_alert_limit_per_run: 1
   # Optional per-type Telegram budgets inside the feed alert budget.
   telegram_type_limits_per_run:
-    ipv4: 2
+    ipv4: 1
     domain: 1
     hash: 1
   # Optional per-type DB store budgets inside the feed IOC store budget.
   store_type_limits_per_run:
-    ipv4: 100
-    domain: 50
-    hash: 50
+    ipv4: 1
+    domain: 1
+    hash: 1
 
 thresholds:
   alert_score: 38

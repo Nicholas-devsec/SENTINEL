@@ -12,7 +12,7 @@ from sentinel import cli
 from sentinel.agents.scraper import ScrapeReport, SourceScrapeDiagnostic
 from sentinel.config import SentinelSettings, validate_runtime_settings
 from sentinel.db.models import IOC, IOCSighting, SourceMaterial
-from sentinel.runtime import _diversify_ioc_samples, load_real_sample_iocs
+from sentinel.runtime import _build_needs_review_cards, _diversify_ioc_samples, load_real_sample_iocs
 
 
 def build_settings(tmp_path: Path) -> SentinelSettings:
@@ -517,3 +517,70 @@ def test_diversify_ioc_samples_prefers_different_pulses_before_siblings() -> Non
     selected = _diversify_ioc_samples(items, limit=3)
 
     assert [item["reference_url"] for item in selected] == [pulse_a, pulse_b, pulse_c]
+
+
+def test_build_needs_review_cards_groups_article_siblings() -> None:
+    now = datetime(2026, 7, 24, 13, 4, tzinfo=UTC)
+    article_url = "https://gbhackers.com/cl0p-targets-internet-exposed-windchill/"
+    values = ["216.152.148.54", "216.152.151.204", "104.243.35.63", "5.180.41.35"]
+    material = SimpleNamespace(
+        title="Cl0p Targets Internet-Exposed Windchill Servers in Global Engineering Data-Theft Campaign",
+        extracted_ioc_count=4,
+    )
+    iocs = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            value=value,
+            type="ipv4",
+            source="gbhackers_blog",
+            risk_score=33.0 + index,
+            severity="informational",
+            source_title=material.title,
+            reference_url=article_url,
+            related_cves=[],
+            vt_detections=7,
+            shodan_ports=[],
+            abuse_confidence=0,
+            mitre_techniques=["T1557.001"],
+            mitre_tactics=["credential access"],
+            last_seen=now,
+            score_breakdown={},
+        )
+        for index, value in enumerate(values)
+    ]
+    target = iocs[-1]
+    target_sighting = SimpleNamespace(
+        ioc_id=target.id,
+        source="gbhackers_blog",
+        provenance="writeup",
+        reference_url=article_url,
+        last_seen=now,
+        attributes={"extraction_mode": "ioc_section"},
+    )
+    siblings = [
+        (
+            SimpleNamespace(
+                source="gbhackers_blog",
+                provenance="writeup",
+                reference_url=article_url,
+                last_seen=now,
+                attributes={"extraction_mode": "ioc_section"},
+            ),
+            ioc,
+            material,
+        )
+        for ioc in iocs
+    ]
+
+    items = _build_needs_review_cards(
+        target_rows=[target],
+        article_context={target.id: (target_sighting, material)},
+        sibling_rows_by_reference={article_url: siblings},
+        limit=5,
+    )
+
+    assert len(items) == 1
+    assert items[0]["reference_url"] == article_url
+    assert items[0]["source_title"] == material.title
+    assert items[0]["attributes"]["article_ioc_count"] == 4
+    assert {entry["value"] for entry in items[0]["grouped_iocs"]} == set(values)
