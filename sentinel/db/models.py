@@ -144,7 +144,7 @@ class DiscoveryMemory(Base, TimestampMixin):
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def laplace_score(confirmed: int, false_positive: int) -> float:
+    def laplace_score(confirmed: float, false_positive: float) -> float:
         return (confirmed + 1) / (confirmed + false_positive + 2)
 
 

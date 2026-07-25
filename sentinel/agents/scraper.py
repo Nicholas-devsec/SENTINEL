@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -38,6 +39,7 @@ DEFAULT_BROWSER_HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+OTX_HOSTS = {"otx.alienvault.com"}
 
 
 @dataclass(slots=True)
@@ -147,6 +149,11 @@ def _infer_ioc_type(value: str) -> str:
     if re.fullmatch(r"[a-fA-F0-9]{64}", value):
         return "sha256"
     return "domain"
+
+
+def _is_otx_url(url: str) -> bool:
+    host = (urlparse(str(url or "")).hostname or "").lower()
+    return host in OTX_HOSTS
 
 
 class OTXPulseAdapter:
@@ -820,7 +827,7 @@ class ScraperAgent(BaseAgent):
                 ioc_adapters.append(URLHausAdapter(feed.url, trust_score=trust_score, client=self.http_client))
             elif source_name == "feodotracker":
                 ioc_adapters.append(FeodoTrackerAdapter(feed.url, trust_score=trust_score, client=self.http_client))
-            elif source_name == "otx":
+            elif source_name == "otx" or _is_otx_url(feed.url):
                 ioc_adapters.append(
                     OTXPulseAdapter(
                         feed.url,

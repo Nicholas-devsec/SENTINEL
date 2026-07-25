@@ -40,8 +40,17 @@ from sentinel.agents.ioc_extract import (
 from sentinel.agents.scraper import RawIOC, RawWriteup, RSSAdapter
 from sentinel.config import DiscoveryProfile, DiscoverySearchProvider, SentinelSettings, get_settings
 from sentinel.db.models import DiscoveryMemory, FeedbackRecord, IOC, IOCSighting
+from sentinel.feedback import (
+    DISCOVERY_MEMORY_VERDICTS,
+    FALSE_POSITIVE,
+    LOW_LEVEL_TRUE_POSITIVE,
+    NEEDS_REVIEW,
+    normalize_verdict,
+    positive_weight,
+)
 
 
+BLOCKED_DISCOVERY_HOSTS = {"otx.alienvault.com"}
 SKILL_LINE_RE = re.compile(r"^- ([a-zA-Z0-9_ -]+?):\s*([0-9]*\.?[0-9]+)\s*$")
 SKILL_SECTION_RE = re.compile(r"## (?P<name>[A-Za-z ]+)\n(?P<body>.*?)(?=\n## |\Z)", re.DOTALL)
 SKILL_LIST_LINE_RE = re.compile(r"^- (.+?)\s*$")
@@ -563,7 +572,7 @@ class DiscoveryMemoryStore:
             .join(IOC, IOC.id == FeedbackRecord.ioc_id)
             .join(IOCSighting, IOCSighting.ioc_id == IOC.id)
             .where(IOCSighting.provenance.in_(["discovery", "writeup"]))
-            .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive", "needs_review"]))
+            .where(FeedbackRecord.verdict.in_(sorted(DISCOVERY_MEMORY_VERDICTS)))
         )
         rows = (await session.execute(query)).all()
         return [
@@ -582,12 +591,29 @@ class DiscoveryMemoryStore:
         def bump(kind: str, key: str, profile: str | None, verdict: str) -> None:
             bucket = counts.setdefault(
                 (kind, key.lower(), profile),
-                {"confirmed": 0, "false_positive": 0, "needs_review": 0},
+                {
+                    "confirmed": 0,
+                    "low_level_true_positive": 0,
+                    "false_positive": 0,
+                    "needs_review": 0,
+                    "positive_weight": 0.0,
+                },
             )
-            bucket[verdict] += 1
+            weight = positive_weight(verdict)
+            if verdict == FALSE_POSITIVE:
+                bucket["false_positive"] += 1
+            elif verdict == NEEDS_REVIEW:
+                bucket["needs_review"] += 1
+            elif verdict == LOW_LEVEL_TRUE_POSITIVE:
+                bucket["low_level_true_positive"] += 1
+                bucket["confirmed"] += 1
+                bucket["positive_weight"] += weight
+            elif weight > 0.0:
+                bucket["confirmed"] += 1
+                bucket["positive_weight"] += weight
 
         for row in rows:
-            verdict = row["verdict"]
+            verdict = normalize_verdict(row["verdict"])
             attributes = row["attributes"]
             profile = attributes.get("search_profile")
             bump("source", row["source"], profile, verdict)
@@ -621,7 +647,7 @@ class DiscoveryMemoryStore:
                 row.confirmed = bucket["confirmed"]
                 row.false_positive = bucket["false_positive"]
                 row.needs_review = bucket["needs_review"]
-                row.score = DiscoveryMemory.laplace_score(bucket["confirmed"], bucket["false_positive"])
+                row.score = DiscoveryMemory.laplace_score(bucket["positive_weight"], bucket["false_positive"])
                 written += 1
             await session.commit()
             return written
@@ -746,6 +772,8 @@ class DiscoveryAgent(BaseAgent):
 
     def _host_allowed(self, profile: DiscoveryProfile, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
+        if host in BLOCKED_DISCOVERY_HOSTS:
+            return False
         if profile.deny_hosts and any(host == deny.lower() or host.endswith("." + deny.lower()) for deny in profile.deny_hosts):
             return False
         if profile.allow_hosts:
@@ -791,6 +819,7 @@ class DiscoveryAgent(BaseAgent):
                 client=self.http_client,
             )
             for feed_url in profile.feeds
+            if (urlparse(feed_url).hostname or "").lower() not in BLOCKED_DISCOVERY_HOSTS
         ]
         for search_provider in profile.search_providers:
             if not search_provider.enabled:

@@ -604,6 +604,32 @@ def test_extract_canonical_article_url_skips_single_slug_utility_page_for_publis
 
 
 @pytest.mark.asyncio
+async def test_discovery_blocks_otx_pulse_urls_as_article_candidates() -> None:
+    settings = build_settings(
+        {
+            "feeds": [
+                "https://otx.alienvault.com/pulse/6a6241aa476b940a0df81e20",
+                "https://feeds.local/blog.xml",
+            ]
+        }
+    )
+    agent = build_agent(
+        settings,
+        httpx.MockTransport(lambda request: httpx.Response(200, text="")),
+        session_factory=lambda: None,
+    )
+    profile = settings.discovery.profiles[0]
+
+    try:
+        providers = agent._candidate_providers(profile)
+    finally:
+        await agent.http_client.aclose()
+
+    assert agent._host_allowed(profile, "https://otx.alienvault.com/pulse/6a6241aa476b940a0df81e20") is False
+    assert [provider.source_name for provider in providers] == ["discovery:feeds.local"]
+
+
+@pytest.mark.asyncio
 async def test_lenient_profile_falls_back_to_body_extraction(db_session_factory) -> None:
     body = """
     <html><body>
@@ -1054,6 +1080,38 @@ async def test_fallback_extraction_is_labeled_fallback_not_ioc_section(db_sessio
     # Regression: fallback extractions must not be mislabeled as ioc_section,
     # or the extraction_mode memory surface learns from corrupted keys.
     assert all(item.attributes["extraction_mode"] == "fallback" for item in report.items)
+
+
+def test_memory_fold_weights_low_level_true_positive_below_confirmed() -> None:
+    store = DiscoveryMemoryStore(session_factory=None)
+    rows = [
+        {
+            "verdict": "confirmed",
+            "source": "discovery:weighted.vendor.test",
+            "attributes": {"search_profile": "test-profile", "extraction_mode": "ioc_section"},
+            "reference_url": "https://weighted.vendor.test/post-1",
+        },
+        {
+            "verdict": "low_level_true_positive",
+            "source": "discovery:weighted.vendor.test",
+            "attributes": {"search_profile": "test-profile", "extraction_mode": "ioc_section"},
+            "reference_url": "https://weighted.vendor.test/post-2",
+        },
+        {
+            "verdict": "false_positive",
+            "source": "discovery:weighted.vendor.test",
+            "attributes": {"search_profile": "test-profile", "extraction_mode": "ioc_section"},
+            "reference_url": "https://weighted.vendor.test/post-3",
+        },
+    ]
+
+    counts = store._fold(rows)
+    bucket = counts[("source", "discovery:weighted.vendor.test", "test-profile")]
+
+    assert bucket["confirmed"] == 2
+    assert bucket["low_level_true_positive"] == 1
+    assert bucket["false_positive"] == 1
+    assert DiscoveryMemory.laplace_score(bucket["positive_weight"], bucket["false_positive"]) == pytest.approx(2.5 / 4.5)
 
 
 @pytest.mark.asyncio

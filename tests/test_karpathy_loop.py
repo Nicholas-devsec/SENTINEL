@@ -332,6 +332,47 @@ async def test_source_loop_replay_metric_responds_to_trust_changes(source_repo: 
 
 
 @pytest.mark.asyncio
+async def test_source_loop_replay_counts_low_level_true_positive_as_weighted_positive(source_repo: Path) -> None:
+    skill_path = source_repo / "skills/sources.SKILL.md"
+    skill_path.write_text(
+        skill_path.read_text(encoding="utf-8").replace("- threatfox: 0.94", "- threatfox: 0.90"),
+        encoding="utf-8",
+    )
+    labeled_rows = [
+        {"source": "threatfox", "source_trust_stored": 0.90, "risk_score_stored": 85.0, "verdict": "confirmed"},
+        {
+            "source": "threatfox",
+            "source_trust_stored": 0.90,
+            "risk_score_stored": 69.5,
+            "verdict": "low_level_true_positive",
+        },
+    ]
+    loop = SourceQualityLoop(
+        provider=FakeProvider([]),
+        skill_path=skill_path,
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(feedback_rows=[], labeled_rows=labeled_rows),
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        target_source="threatfox",
+    )
+
+    metric_before = await loop.measure_metric()
+    assert metric_before == pytest.approx(0.9091, abs=1e-3)
+    assert loop._last_eval_details["confusion"]["fn"] == pytest.approx(0.5)
+
+    skill_path.write_text(
+        skill_path.read_text(encoding="utf-8").replace("- threatfox: 0.90", "- threatfox: 0.94"),
+        encoding="utf-8",
+    )
+
+    metric_after = await loop.measure_metric()
+    assert metric_after == pytest.approx(1.0)
+    assert loop._last_eval_details["confusion"]["tp"] == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
 async def test_source_loop_rejects_wrong_target_source(source_repo: Path) -> None:
     provider = FakeProvider(
         [

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sentinel.agents.base import BaseAgent
 from sentinel.config import SentinelSettings, get_settings
 from sentinel.db.models import ExperimentLog, FeedbackRecord, IOC
+from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict
 
 
 LEARNER_ANCHOR = "<!-- learner: append here -->"
@@ -125,9 +126,12 @@ class LearnerAgent(BaseAgent):
         totals: dict[str, int] = {}
         false_positives: dict[str, int] = {}
         for row in feedback_rows:
+            verdict = normalize_verdict(row["verdict"])
+            if verdict not in LEARNING_VERDICTS:
+                continue
             source = row["source"]
             totals[source] = totals.get(source, 0) + 1
-            if row["verdict"] == "false_positive":
+            if verdict == FALSE_POSITIVE:
                 false_positives[source] = false_positives.get(source, 0) + 1
         return {
             source: (false_positives.get(source, 0) / total)
@@ -169,7 +173,7 @@ class LearnerAgent(BaseAgent):
     def _learn_validation_patterns(self, feedback_rows: list[dict[str, Any]]) -> LearnerChange | None:
         fp_counts: dict[str, int] = {}
         for row in feedback_rows:
-            if row["verdict"] == "false_positive":
+            if normalize_verdict(row["verdict"]) == FALSE_POSITIVE:
                 fp_counts[row["value"].lower()] = fp_counts.get(row["value"].lower(), 0) + 1
         repeated = sorted(value for value, count in fp_counts.items() if count >= 3)
         if not repeated:

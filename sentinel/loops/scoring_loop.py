@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from sentinel.db.models import IOC
+from sentinel.feedback import scoring_target
 from sentinel.loops.karpathy_loop import ThreatIntelLoop, _spearman
 
 
@@ -21,10 +22,5 @@ class ScoreCalibrationLoop(ThreatIntelLoop):
                 return 0.0
             predicted = [float(row.risk_score or 0.0) for row in rows]
             # Assumption: absent analyst severity scores, verdicts are mapped to proxy numeric values.
-            actual = [
-                100.0 if row.analyst_verdict == "confirmed"
-                else 50.0 if row.analyst_verdict == "needs_review"
-                else 0.0
-                for row in rows
-            ]
+            actual = [scoring_target(row.analyst_verdict or "") for row in rows]
             return _spearman(predicted, actual)

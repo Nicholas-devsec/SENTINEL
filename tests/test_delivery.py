@@ -148,12 +148,17 @@ def build_settings() -> SentinelSettings:
 
 def test_feedback_markup_uses_true_positive_and_false_positive_labels() -> None:
     markup = build_feedback_markup("ioc-123")
-    buttons = markup.inline_keyboard[0]
+    first_row = markup.inline_keyboard[0]
+    second_row = markup.inline_keyboard[1]
 
-    assert buttons[0].text == "True Positive"
-    assert buttons[0].callback_data == "confirmed:ioc-123"
-    assert buttons[1].text == "False Positive"
-    assert buttons[1].callback_data == "false_positive:ioc-123"
+    assert first_row[0].text == "True Positive"
+    assert first_row[0].callback_data == "confirmed:ioc-123"
+    assert first_row[1].text == "Low-level True Positive"
+    assert first_row[1].callback_data == "low_level_true_positive:ioc-123"
+    assert second_row[0].text == "False Positive"
+    assert second_row[0].callback_data == "false_positive:ioc-123"
+    assert second_row[1].text == "Needs Review"
+    assert second_row[1].callback_data == "needs_review:ioc-123"
 
 
 @pytest.mark.asyncio
@@ -212,6 +217,9 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
     assert "<b>Evidence</b>:" in telegram_bot.messages[0]["text"]
     assert telegram_bot.messages[0]["parse_mode"] == "HTML"
     assert telegram_bot.messages[0]["reply_markup"] is not None
+    first_row = telegram_bot.messages[0]["reply_markup"].inline_keyboard[0]
+    assert first_row[1].text == "Low-level True Positive"
+    assert first_row[1].callback_data.startswith("low_level_true_positive:")
 
 
 @pytest.mark.asyncio
@@ -652,6 +660,27 @@ async def test_delivery_agent_confirms_needs_review_callback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_records_low_level_true_positive_callback() -> None:
+    session_factory = FakeSessionFactory()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=session_factory,
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"low_level_true_positive:{ioc_id}", user_id="42")
+
+    record = await agent.handle_callback_query(query)
+
+    assert query.answer_text == "Recorded: low-level true positive"
+    assert query.show_alert is True
+    assert "Feedback recorded: Low-level True Positive" in query.message.text
+    assert query.message.reply_markup is None
+    assert record.verdict == "low_level_true_positive"
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_sends_confirmation_reply_when_message_edit_fails() -> None:
     session_factory = FakeSessionFactory()
     agent = DeliveryAgent(
@@ -937,12 +966,44 @@ def test_delivery_agent_does_not_group_feed_iocs_with_reference_urls_as_articles
     items = [
         {"id": "hash-1", "value": "a" * 64, "type": "sha256", "source": "otx", "risk_score": 35.0, "severity": "informational", "reference_url": "https://otx.example/pulse/1", "attributes": {"provenance": "feed"}},
         {"id": "hash-2", "value": "b" * 64, "type": "sha256", "source": "otx", "risk_score": 34.0, "severity": "informational", "reference_url": "https://otx.example/pulse/1", "attributes": {"provenance": "feed"}},
+        {"id": "hash-3", "value": "c" * 64, "type": "sha256", "source": "otx", "risk_score": 33.0, "severity": "informational", "reference_url": "https://otx.alienvault.com/pulse/1", "source_title": "OTX pulse title", "attributes": {"provenance": "discovery", "article_ioc_count": 8}},
     ]
 
     grouped = agent._group_immediate_alerts(items)
 
     assert grouped == items
     assert all("grouped_iocs" not in item for item in grouped)
+    assert all(agent._is_article_card(item) is False for item in items)
+
+
+def test_delivery_agent_counts_otx_pulse_links_as_feed_cards_not_article_cards() -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.workflow.telegram_feed_alert_limit_per_run = 1
+    settings.workflow.telegram_feed_article_alert_limit_per_run = 0
+    settings.workflow.telegram_discovery_article_alert_limit_per_run = 0
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    cards = [
+        {
+            "id": "otx-1",
+            "value": "screenly.cam",
+            "type": "domain",
+            "source": "otx",
+            "risk_score": 45.64,
+            "severity": "informational",
+            "reference_url": "https://otx.alienvault.com/pulse/6a6241aa476b940a0df81e20",
+            "source_title": "Upgrades MaaS Ecosystem with Modular Tools",
+            "attributes": {"provenance": "discovery", "article_ioc_count": 8},
+        }
+    ]
+
+    selected = agent._apply_delivery_limits(cards, apply_burst_cap=False)
+
+    assert selected == cards
 
 
 @pytest.mark.asyncio
@@ -1374,6 +1435,7 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
             "VirusTotal": "https://www.virustotal.com/gui/file/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
             "OTX": "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         },
+        attributes={"article_ioc_count": 8},
         mitre_techniques=["T1059"],
         mitre_tactics=["execution"],
     )
@@ -1384,6 +1446,9 @@ def test_format_alert_message_shows_hash_intel_links() -> None:
     assert "https://otx.alienvault.com/browse/global/pulses?q=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" in rendered
     assert "Observed 2026-04-15 08:15 UTC · Corroboration 1 source(s)" in rendered
     assert "Stealer Campaign Impacting SLTT macOS Users" in rendered
+    assert "OTX Pulse" in rendered
+    assert "Article" not in rendered
+    assert "article/writeup" not in rendered
     assert "<code>deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef</code> [sha256]" in rendered
     assert "malware artifact hash" in rendered
 

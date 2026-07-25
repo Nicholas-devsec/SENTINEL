@@ -29,6 +29,7 @@ from sentinel.delivery.telegram_bot import (
     format_grouped_alert_message,
     format_daily_digest_intro,
 )
+from sentinel.feedback import CONFIRMED, FALSE_POSITIVE, LOW_LEVEL_TRUE_POSITIVE, NEEDS_REVIEW, normalize_verdict
 
 
 logger = logging.getLogger(__name__)
@@ -179,12 +180,12 @@ class DeliveryAgent(BaseAgent):
         source = str(item.get("source") or "").strip().lower()
         reference_url = str(item.get("reference_url") or "").strip()
         grouped = item.get("grouped_iocs") or []
+        if source in DIRECT_IOC_FEED_SOURCES:
+            return False
         if not reference_url:
             return False
         if provenance in {"writeup", "discovery"} or source.startswith("discovery:"):
             return True
-        if provenance == "feed" and source in DIRECT_IOC_FEED_SOURCES:
-            return False
         return bool(grouped) or bool(item.get("source_title"))
 
     def _is_discovery_article_card(self, item: dict[str, Any]) -> bool:
@@ -392,6 +393,9 @@ class DeliveryAgent(BaseAgent):
         )
         deduped: list[dict[str, Any]] = []
         for card in cards:
+            if not self._is_article_card(card):
+                deduped.append(card)
+                continue
             signature = self._campaign_signature(card)
             merged = False
             if signature:
@@ -903,12 +907,7 @@ class DeliveryAgent(BaseAgent):
         return sent
 
     async def record_feedback(self, *, ioc_id: str, analyst_id: str, verdict: str, channel: str = "telegram") -> FeedbackRecord:
-        normalized = {
-            "confirm_threat": "confirmed",
-            "confirmed": "confirmed",
-            "false_positive": "false_positive",
-            "needs_review": "needs_review",
-        }.get(verdict, verdict)
+        normalized = normalize_verdict(verdict)
         try:
             parsed_ioc_id: UUID | str = UUID(str(ioc_id))
         except ValueError:
@@ -925,7 +924,8 @@ class DeliveryAgent(BaseAgent):
             return record
 
     async def handle_callback_query(self, query: Any) -> FeedbackRecord | bool:
-        verdict, ioc_id = query.data.split(":", 1)
+        raw_verdict, ioc_id = query.data.split(":", 1)
+        verdict = normalize_verdict(raw_verdict)
         analyst_id = str(query.from_user.id)
         logger.info("Received Telegram feedback callback verdict=%s ioc_id=%s analyst_id=%s", verdict, ioc_id, analyst_id)
         try:
@@ -933,7 +933,7 @@ class DeliveryAgent(BaseAgent):
                 parsed_ioc_id: UUID | str = UUID(str(ioc_id))
             except ValueError:
                 parsed_ioc_id = ioc_id
-            if verdict == "false_positive":
+            if verdict == FALSE_POSITIVE:
                 affected, changed = await self._suppress_false_positive_scope(
                     parsed_ioc_id=parsed_ioc_id,
                     analyst_id=analyst_id,
@@ -941,7 +941,7 @@ class DeliveryAgent(BaseAgent):
                 )
                 ack_text = "Already suppressed" if not changed else f"Recorded FP and suppressed {affected} IOC(s)"
                 await query.answer(ack_text, show_alert=True)
-                await self._confirm_callback_message(query, verdict="false_positive", repeated=not changed)
+                await self._confirm_callback_message(query, verdict=FALSE_POSITIVE, repeated=not changed)
                 return affected
             existing = await self._feedback_exists(
                 ioc_id=ioc_id,
@@ -1030,12 +1030,7 @@ class DeliveryAgent(BaseAgent):
         channel: str,
         verdict: str,
     ) -> bool:
-        normalized = {
-            "confirm_threat": "confirmed",
-            "confirmed": "confirmed",
-            "false_positive": "false_positive",
-            "needs_review": "needs_review",
-        }.get(verdict, verdict)
+        normalized = normalize_verdict(verdict)
         try:
             parsed_ioc_id: UUID | str = UUID(str(ioc_id))
         except ValueError:
@@ -1051,8 +1046,10 @@ class DeliveryAgent(BaseAgent):
 
     def _feedback_ack_text(self, verdict: str, *, repeated: bool) -> str:
         label = {
-            "confirmed": "confirmed",
-            "false_positive": "false positive",
+            CONFIRMED: "confirmed",
+            LOW_LEVEL_TRUE_POSITIVE: "low-level true positive",
+            FALSE_POSITIVE: "false positive",
+            NEEDS_REVIEW: "needs review",
         }.get(verdict, verdict.replace("_", " "))
         prefix = "Already recorded" if repeated else "Recorded"
         return f"{prefix}: {label}"
@@ -1109,9 +1106,10 @@ class DeliveryAgent(BaseAgent):
 
     def _feedback_confirmation_note(self, verdict: str, *, repeated: bool) -> str:
         label = {
-            "confirmed": "True Positive",
-            "false_positive": "False Positive",
-            "needs_review": "Needs Review",
+            CONFIRMED: "True Positive",
+            LOW_LEVEL_TRUE_POSITIVE: "Low-level True Positive",
+            FALSE_POSITIVE: "False Positive",
+            NEEDS_REVIEW: "Needs Review",
         }.get(verdict, verdict.replace("_", " ").title())
         prefix = "Feedback already recorded" if repeated else "Feedback recorded"
         return f"{prefix}: {label}"

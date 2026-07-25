@@ -672,6 +672,23 @@ async def test_scraper_agent_reports_timeout_diagnostic(settings: SentinelSettin
 
 
 @pytest.mark.asyncio
+async def test_scraper_routes_misnamed_otx_url_to_ioc_adapter_not_writeup_adapter(settings: SentinelSettings) -> None:
+    settings.sources.feeds = [
+        FeedConfig(
+            name="alienvault_pulses",
+            url="https://otx.alienvault.com/api/v1/pulses/subscribed",
+            trust=0.9,
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={}))) as client:
+        agent = ScraperAgent(settings=settings, http_client=client)
+        ioc_adapters, writeup_adapters = agent._build_adapters()
+
+    assert [adapter.source_name for adapter in ioc_adapters] == ["otx"]
+    assert writeup_adapters == []
+
+
+@pytest.mark.asyncio
 async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: SentinelSettings) -> None:
     redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
     # Title must hit a writeup_search term or the keyword filter drops the item

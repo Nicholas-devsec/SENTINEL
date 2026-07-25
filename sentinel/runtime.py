@@ -31,6 +31,7 @@ from sentinel.loops.karpathy_loop import ExperimentOutcome
 from sentinel.loops.providers.openai_provider import OpenAIProvider
 from sentinel.loops.scoring_loop import ScoreCalibrationLoop
 from sentinel.loops.source_loop import SourceQualityLoop
+from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
 
 LOOP_SKILL_PATHS = {
     "source": Path("skills/sources/SKILL.md"),
@@ -590,14 +591,18 @@ async def inspect_live_karpathy_readiness(
     async with active_session_factory() as session:
         if loop_type == "source":
             if hasattr(session, "feedback_rows"):
-                feedback_rows = [row for row in session.feedback_rows if row["verdict"] in {"confirmed", "false_positive"}]
+                feedback_rows = [
+                    {**row, "verdict": normalize_verdict(row["verdict"])}
+                    for row in session.feedback_rows
+                    if normalize_verdict(row["verdict"]) in LEARNING_VERDICTS
+                ]
             else:
                 query = (
                     select(FeedbackRecord.verdict, FeedbackRecord.source, IOC.source)
                     .select_from(FeedbackRecord)
                     .join(IOC, IOC.id == FeedbackRecord.ioc_id)
                     .where(FeedbackRecord.timestamp >= cutoff)
-                    .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
+                    .where(FeedbackRecord.verdict.in_(sorted(LEARNING_VERDICTS)))
                 )
                 feedback_rows = [
                     {"verdict": verdict, "source": (feedback_source or ioc_source)}
@@ -605,20 +610,24 @@ async def inspect_live_karpathy_readiness(
                 ]
             counts["feedback_rows"] = len(feedback_rows)
             counts["distinct_sources"] = len({row.get("source", "unknown") for row in feedback_rows})
-            per_source: dict[str, dict[str, int]] = {}
+            per_source: dict[str, dict[str, float]] = {}
             for row in feedback_rows:
                 source = row.get("source") or "unknown"
-                bucket = per_source.setdefault(source, {"confirmed": 0, "false_positive": 0})
-                bucket[row["verdict"]] += 1
+                bucket = per_source.setdefault(source, {"positive": 0.0, "false_positive": 0.0, "rows": 0.0})
+                bucket["rows"] += 1.0
+                if row["verdict"] == FALSE_POSITIVE:
+                    bucket["false_positive"] += 1.0
+                else:
+                    bucket["positive"] += positive_weight(row["verdict"])
             minimums = LIVE_DATA_THRESHOLDS["source"]
             candidates: list[tuple[str, float, int]] = []
             for source, stats in per_source.items():
-                total = stats["confirmed"] + stats["false_positive"]
+                total = int(stats["rows"])
                 if total < minimums["feedback_rows"]:
                     continue
-                if not stats["confirmed"] or not stats["false_positive"]:
+                if not stats["positive"] or not stats["false_positive"]:
                     continue
-                fp_rate = stats["false_positive"] / total
+                fp_rate = stats["false_positive"] / (stats["positive"] + stats["false_positive"])
                 candidates.append((source, fp_rate, total))
             if candidates:
                 target_source, _, feedback_count = sorted(candidates, key=lambda item: (-item[1], -item[2], item[0]))[0]
@@ -628,7 +637,7 @@ async def inspect_live_karpathy_readiness(
                 KarpathyCheck(
                     name="feedback_window",
                     passed=counts["feedback_rows"] >= minimums["feedback_rows"],
-                    detail=f"Need >= {minimums['feedback_rows']} recent confirmed/false_positive rows.",
+                    detail=f"Need >= {minimums['feedback_rows']} recent TP/low-level TP/false_positive rows.",
                 )
             )
             checks.append(
@@ -658,7 +667,7 @@ async def inspect_live_karpathy_readiness(
                 KarpathyCheck(
                     name="verdict_mix",
                     passed=target_source is not None,
-                    detail="Target source has both confirmed and false_positive verdicts." if target_source else "Need both confirmed and false_positive verdicts for at least one source.",
+                    detail="Target source has both positive and false_positive verdicts." if target_source else "Need both positive and false_positive verdicts for at least one source.",
                 )
             )
 

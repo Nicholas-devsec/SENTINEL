@@ -21,6 +21,7 @@ MAX_LINK_CHARS = 140
 MAX_GROUPED_IOCS = 5
 ARTICLE_IOC_NOTE_THRESHOLD = 5
 TELEGRAM_PARSE_MODE = "HTML"
+OTX_HOST = "otx.alienvault.com"
 
 SEVERITY_EMOJI = {
     "critical": "🔴",
@@ -55,9 +56,10 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("True Positive", callback_data=f"confirmed:{ioc_id}"),
-                InlineKeyboardButton("False Positive", callback_data=f"false_positive:{ioc_id}"),
+                InlineKeyboardButton("Low-level True Positive", callback_data=f"low_level_true_positive:{ioc_id}"),
             ],
             [
+                InlineKeyboardButton("False Positive", callback_data=f"false_positive:{ioc_id}"),
                 InlineKeyboardButton("Needs Review", callback_data=f"needs_review:{ioc_id}"),
             ],
         ]
@@ -156,6 +158,19 @@ def _article_ioc_note(article_ioc_count: int | None) -> str | None:
     if article_ioc_count is None or article_ioc_count < ARTICLE_IOC_NOTE_THRESHOLD:
         return None
     return f"More IOCs can be found in the article/writeup ({article_ioc_count} extracted total)."
+
+
+def _is_otx_reference(source: str, reference_url: str | None) -> bool:
+    if str(source or "").strip().lower() == "otx":
+        return True
+    host = (urlparse(str(reference_url or "")).hostname or "").lower()
+    return host == OTX_HOST
+
+
+def _reference_link_label(source: str, reference_url: str | None) -> str:
+    if _is_otx_reference(source, reference_url):
+        return "OTX Pulse"
+    return "Article"
 
 
 def _format_source_context(source: str, attributes: dict[str, Any] | None = None) -> str:
@@ -271,7 +286,7 @@ def format_alert_message(
     ]
     article_href = _normalize_link_display(reference_url)
     if article_href:
-        link_anchors.append(f'<a href="{_escape(article_href)}">Article</a>')
+        link_anchors.append(f'<a href="{_escape(article_href)}">{_escape(_reference_link_label(source, reference_url))}</a>')
     corroboration_text = f"{corroboration_sources if corroboration_sources is not None else 1} source(s)"
     summary = summarize_ioc(
         value=value,
@@ -281,7 +296,11 @@ def format_alert_message(
         attributes=attributes,
     )
     source_line = _format_source_context(source, attributes)
-    article_ioc_note = _article_ioc_note(int((attrs.get("article_ioc_count") or 0) or 0))
+    article_ioc_note = (
+        None
+        if _is_otx_reference(source, reference_url)
+        else _article_ioc_note(int((attrs.get("article_ioc_count") or 0) or 0))
+    )
     observed_text = _format_observed(last_seen)
     why = _why_line(attrs)
     lines = [
@@ -354,7 +373,7 @@ def format_grouped_alert_message(
     observed_text = _format_observed(last_seen)
 
     article_ioc_count = int((attrs.get("article_ioc_count") or len(iocs)) or len(iocs))
-    article_ioc_note = _article_ioc_note(article_ioc_count)
+    article_ioc_note = None if _is_otx_reference(source, reference_url) else _article_ioc_note(article_ioc_count)
     article_href = _normalize_link_display(reference_url)
     why = _why_line(attrs)
     lines = [
@@ -366,7 +385,7 @@ def format_grouped_alert_message(
     if related_cves:
         lines.append(f"CVEs: {_escape(', '.join(related_cves))}")
     if article_href:
-        lines.append(f'📄 <a href="{_escape(article_href)}">Article</a>')
+        lines.append(f'📄 <a href="{_escape(article_href)}">{_escape(_reference_link_label(source, reference_url))}</a>')
     lines.extend(["", f"<b>IOCs ({len(iocs)})</b>"])
     if article_ioc_note:
         lines.append(_escape(article_ioc_note))

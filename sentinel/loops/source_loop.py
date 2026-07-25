@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from sentinel.alert_policy import build_alert_policy
 from sentinel.db.models import FeedbackRecord, IOC
+from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
 from sentinel.loops.karpathy_loop import ExperimentProposal, KeepDecision, ThreatIntelLoop
 from sentinel.loops.replay_eval import ReplayEvaluator
 
@@ -19,20 +20,25 @@ TRUST_SCORE_LINE_RE = re.compile(r"^(-\s+)(?P<name>[a-zA-Z0-9_:-]+)(:\s*)(?P<val
 class SourceFeedbackStats:
     source_name: str
     confirmed: int
+    low_level_true_positive: int
     false_positive: int
 
     @property
     def feedback_count(self) -> int:
-        return self.confirmed + self.false_positive
+        return self.confirmed + self.low_level_true_positive + self.false_positive
+
+    @property
+    def positive_weight(self) -> float:
+        return self.confirmed + 0.5 * self.low_level_true_positive
 
     @property
     def precision(self) -> float:
-        total = self.feedback_count
-        return self.confirmed / total if total else 0.0
+        total = self.positive_weight + self.false_positive
+        return self.positive_weight / total if total else 0.0
 
     @property
     def false_positive_rate(self) -> float:
-        total = self.feedback_count
+        total = self.positive_weight + self.false_positive
         return self.false_positive / total if total else 0.0
 
 
@@ -54,8 +60,9 @@ class SourceQualityLoop(ThreatIntelLoop):
         async with self.session_factory() as session:
             if hasattr(session, "feedback_rows"):
                 rows = [
-                    row for row in session.feedback_rows
-                    if row.get("source") == self.target_source and row["verdict"] in {"confirmed", "false_positive"}
+                    {**row, "verdict": normalize_verdict(row["verdict"])}
+                    for row in session.feedback_rows
+                    if row.get("source") == self.target_source and normalize_verdict(row["verdict"]) in LEARNING_VERDICTS
                 ]
             else:
                 cutoff = self.now_fn() - __import__("datetime").timedelta(hours=48)
@@ -63,18 +70,20 @@ class SourceQualityLoop(ThreatIntelLoop):
                     select(FeedbackRecord.verdict, FeedbackRecord.source, IOC.source)
                     .join(IOC, FeedbackRecord.ioc_id == IOC.id)
                     .where(FeedbackRecord.timestamp >= cutoff)
-                    .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
+                    .where(FeedbackRecord.verdict.in_(sorted(LEARNING_VERDICTS)))
                 )
                 rows = [
                     {"verdict": verdict, "source": (feedback_source or ioc_source)}
                     for verdict, feedback_source, ioc_source in (await session.execute(query)).all()
                 ]
                 rows = [row for row in rows if row.get("source") == self.target_source]
-        confirmed = sum(1 for row in rows if row["verdict"] == "confirmed")
-        false_positive = sum(1 for row in rows if row["verdict"] == "false_positive")
+        confirmed = sum(1 for row in rows if positive_weight(row["verdict"]) == 1.0)
+        low_level_true_positive = sum(1 for row in rows if 0.0 < positive_weight(row["verdict"]) < 1.0)
+        false_positive = sum(1 for row in rows if row["verdict"] == FALSE_POSITIVE)
         stats = SourceFeedbackStats(
             source_name=self.target_source,
             confirmed=confirmed,
+            low_level_true_positive=low_level_true_positive,
             false_positive=false_positive,
         )
         self._last_feedback_count = stats.feedback_count

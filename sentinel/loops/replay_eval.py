@@ -33,6 +33,7 @@ from sqlalchemy import select
 
 from sentinel.alert_policy import AlertPolicy
 from sentinel.db.models import IOC, FeedbackRecord
+from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
 
 
 TRUST_SCORE_LINE_RE = re.compile(
@@ -45,16 +46,16 @@ class ReplayEvalResult:
     metric: float
     precision: float
     recall: float
-    true_positive: int
-    false_positive: int
-    false_negative: int
-    true_negative: int
+    true_positive: float
+    false_positive: float
+    false_negative: float
+    true_negative: float
     total_labeled: int
     window_hours: int
     alert_threshold: float
     trust_weight: float
     trust_scores: dict[str, float] = field(default_factory=dict)
-    per_source: dict[str, dict[str, int]] = field(default_factory=dict)
+    per_source: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def to_details(self) -> dict[str, Any]:
         return {
@@ -125,12 +126,16 @@ class ReplayEvaluator:
         cutoff = self.now_fn() - timedelta(hours=self.window_hours)
         async with self.session_factory() as session:
             if hasattr(session, "labeled_rows"):
-                return [LabeledIOC(**row) for row in session.labeled_rows]
+                return [
+                    LabeledIOC(**{**row, "verdict": normalize_verdict(row["verdict"])})
+                    for row in session.labeled_rows
+                    if normalize_verdict(row["verdict"]) in LEARNING_VERDICTS
+                ]
             query = (
                 select(IOC, FeedbackRecord)
                 .join(FeedbackRecord, FeedbackRecord.ioc_id == IOC.id)
                 .where(FeedbackRecord.timestamp >= cutoff)
-                .where(FeedbackRecord.verdict.in_(["confirmed", "false_positive"]))
+                .where(FeedbackRecord.verdict.in_(sorted(LEARNING_VERDICTS)))
                 .order_by(FeedbackRecord.timestamp)
             )
             rows = (await session.execute(query)).all()
@@ -151,16 +156,16 @@ class ReplayEvaluator:
         return max(0.0, min(100.0, adjusted))
 
     def _confusion_metric(self, labeled: list[LabeledIOC], trust_scores: dict[str, float]) -> float:
-        tp = fp = fn = 0
+        tp = fp = fn = 0.0
         for item in labeled:
             predicted_alert = self._replay_score(item, trust_scores) >= self.alert_threshold
-            actually_bad = item.verdict == "confirmed"
-            if predicted_alert and actually_bad:
-                tp += 1
-            elif predicted_alert and not actually_bad:
-                fp += 1
-            elif not predicted_alert and actually_bad:
-                fn += 1
+            pos_weight = positive_weight(item.verdict)
+            if predicted_alert and pos_weight > 0.0:
+                tp += pos_weight
+            elif predicted_alert and item.verdict == FALSE_POSITIVE:
+                fp += 1.0
+            elif not predicted_alert and pos_weight > 0.0:
+                fn += pos_weight
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         return _f_beta(precision, recall, self.beta)
@@ -185,26 +190,26 @@ class ReplayEvaluator:
     async def evaluate(self) -> ReplayEvalResult:
         trust_scores = parse_trust_scores(self.skill_path.read_text(encoding="utf-8"))
         labeled = await self._load_labeled()
-        tp = fp = fn = tn = 0
-        per_source: dict[str, dict[str, int]] = {}
+        tp = fp = fn = tn = 0.0
+        per_source: dict[str, dict[str, float]] = {}
         for item in labeled:
             predicted_alert = self._replay_score(item, trust_scores) >= self.alert_threshold
-            actually_bad = item.verdict == "confirmed"
+            pos_weight = positive_weight(item.verdict)
             bucket = per_source.setdefault(
-                item.source, {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+                item.source, {"tp": 0.0, "fp": 0.0, "fn": 0.0, "tn": 0.0}
             )
-            if predicted_alert and actually_bad:
-                tp += 1
-                bucket["tp"] += 1
-            elif predicted_alert and not actually_bad:
-                fp += 1
-                bucket["fp"] += 1
-            elif not predicted_alert and actually_bad:
-                fn += 1
-                bucket["fn"] += 1
+            if predicted_alert and pos_weight > 0.0:
+                tp += pos_weight
+                bucket["tp"] += pos_weight
+            elif predicted_alert and item.verdict == FALSE_POSITIVE:
+                fp += 1.0
+                bucket["fp"] += 1.0
+            elif not predicted_alert and pos_weight > 0.0:
+                fn += pos_weight
+                bucket["fn"] += pos_weight
             else:
-                tn += 1
-                bucket["tn"] += 1
+                tn += 1.0
+                bucket["tn"] += 1.0
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         metric = _f_beta(precision, recall, self.beta)
