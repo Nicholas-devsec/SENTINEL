@@ -52,6 +52,44 @@ LIVE_DATA_THRESHOLDS = {
 }
 
 
+def _sample_campaign_key(item: dict[str, Any]) -> str:
+    reference_url = str(item.get("reference_url") or "").strip().lower()
+    if reference_url:
+        return f"reference:{reference_url}"
+    source = str(item.get("source") or "").strip().lower()
+    source_title = str(item.get("source_title") or "").strip().lower()
+    if source_title:
+        return f"title:{source}:{source_title}"
+    return f"ioc:{source}:{item.get('type')}:{item.get('value')}"
+
+
+def _diversify_ioc_samples(items: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    seen_campaigns: set[str] = set()
+    for item in items:
+        item_id = str(item.get("id") or f"{item.get('type')}|{item.get('value')}")
+        campaign_key = _sample_campaign_key(item)
+        if campaign_key in seen_campaigns or item_id in selected_ids:
+            continue
+        selected.append(item)
+        selected_ids.add(item_id)
+        seen_campaigns.add(campaign_key)
+        if len(selected) >= limit:
+            return selected
+    for item in items:
+        item_id = str(item.get("id") or f"{item.get('type')}|{item.get('value')}")
+        if item_id in selected_ids:
+            continue
+        selected.append(item)
+        selected_ids.add(item_id)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 @dataclass(slots=True)
 class KarpathyCheck:
     name: str
@@ -1136,6 +1174,7 @@ async def load_real_sample_iocs(
     provenance: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized_types = [ioc_type.lower() for ioc_type in ioc_types]
+    candidate_limit = max(limit * 10, limit)
     items: list[dict[str, Any]] = []
     async with AsyncSessionFactory() as session:
         if provenance is None:
@@ -1143,7 +1182,7 @@ async def load_real_sample_iocs(
                 select(IOC)
                 .where(IOC.type.in_(normalized_types))
                 .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
-                .limit(limit)
+                .limit(candidate_limit)
             )
             rows = list((await session.scalars(query)).all())
             for row in rows:
@@ -1166,7 +1205,7 @@ async def load_real_sample_iocs(
                 }
                 payload["external_links"] = build_external_links_for_ioc(payload)
                 items.append(payload)
-            return items
+            return _diversify_ioc_samples(items, limit=limit)
 
         query = (
             select(IOCSighting, IOC, SourceMaterial)
@@ -1175,7 +1214,7 @@ async def load_real_sample_iocs(
             .where(IOC.type.in_(normalized_types))
             .where(IOCSighting.provenance == provenance)
             .order_by(IOC.risk_score.desc().nullslast(), IOCSighting.last_seen.desc())
-            .limit(limit)
+            .limit(candidate_limit)
         )
         rows = list((await session.execute(query)).all())
 
@@ -1199,4 +1238,4 @@ async def load_real_sample_iocs(
         }
         payload["external_links"] = build_external_links_for_ioc(payload)
         items.append(payload)
-    return items
+    return _diversify_ioc_samples(items, limit=limit)

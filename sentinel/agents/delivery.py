@@ -653,6 +653,29 @@ class DeliveryAgent(BaseAgent):
             return "hash"
         return normalized
 
+    def _campaign_key(self, item: dict[str, Any]) -> str:
+        reference_url = str(item.get("reference_url") or "").strip().lower()
+        if reference_url:
+            return f"reference:{reference_url}"
+        source = str(item.get("source") or "").strip().lower()
+        source_title = str(item.get("source_title") or "").strip().lower()
+        if source_title:
+            return f"title:{source}:{source_title}"
+        return f"ioc:{source}:{item.get('type')}:{item.get('value')}"
+
+    def _diversify_campaign_cards(self, cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        diversified: list[dict[str, Any]] = []
+        deferred: list[dict[str, Any]] = []
+        seen_campaigns: set[str] = set()
+        for card in cards:
+            campaign_key = self._campaign_key(card)
+            if campaign_key in seen_campaigns:
+                deferred.append(card)
+                continue
+            seen_campaigns.add(campaign_key)
+            diversified.append(card)
+        return [*diversified, *deferred]
+
     def _apply_type_limits(self, cards: list[dict[str, Any]], type_limits: dict[str, int] | None) -> list[dict[str, Any]]:
         limits = self._normalized_type_limits(type_limits)
         if not limits:
@@ -682,7 +705,9 @@ class DeliveryAgent(BaseAgent):
                     feed_article_cards.append(card)
             else:
                 feed_cards.append(card)
+        feed_cards = self._diversify_campaign_cards(feed_cards)
         feed_cards = self._apply_type_limits(feed_cards, self.settings.workflow.telegram_type_limits_per_run)
+        feed_cards = self._diversify_campaign_cards(feed_cards)
         if (
             self.settings.workflow.telegram_feed_article_alert_limit_per_run is not None
             or self.settings.workflow.telegram_discovery_article_alert_limit_per_run is not None

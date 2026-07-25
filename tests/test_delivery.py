@@ -246,6 +246,50 @@ async def test_delivery_agent_limits_telegram_alert_burst() -> None:
     assert len(telegram_bot.messages) == 2
 
 
+def test_delivery_agent_diversifies_feed_alerts_by_campaign_before_siblings() -> None:
+    settings = build_settings().model_copy(deep=True)
+    settings.workflow.telegram_feed_alert_limit_per_run = 3
+    settings.workflow.telegram_type_limits_per_run = {"hash": 3}
+    settings.delivery.telegram_max_alerts_per_run = 3
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    cards = [
+        {
+            "id": str(uuid4()),
+            "value": prefix * 64,
+            "type": "sha256",
+            "source": "otx",
+            "risk_score": score,
+            "severity": "medium",
+            "reference_url": reference_url,
+            "source_title": "TrickBot Variant Using DNS Tunneling for C2",
+            "last_seen": datetime.now(UTC),
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "attributes": {},
+        }
+        for prefix, score, reference_url in [
+            ("a", 90.0, "https://otx.alienvault.com/pulse/6a6120390f602b6ee56739c3"),
+            ("b", 89.0, "https://otx.alienvault.com/pulse/6a6120390f602b6ee56739c3"),
+            ("c", 88.0, "https://otx.alienvault.com/pulse/6a6120390f602b6ee56739c3"),
+            ("d", 80.0, "https://otx.alienvault.com/pulse/b"),
+            ("e", 70.0, "https://otx.alienvault.com/pulse/c"),
+        ]
+    ]
+
+    selected = agent._apply_delivery_limits(cards)
+
+    assert [item["reference_url"] for item in selected] == [
+        "https://otx.alienvault.com/pulse/6a6120390f602b6ee56739c3",
+        "https://otx.alienvault.com/pulse/b",
+        "https://otx.alienvault.com/pulse/c",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> None:
     telegram_bot = FakeTelegramBot()

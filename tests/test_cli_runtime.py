@@ -12,7 +12,7 @@ from sentinel import cli
 from sentinel.agents.scraper import ScrapeReport, SourceScrapeDiagnostic
 from sentinel.config import SentinelSettings, validate_runtime_settings
 from sentinel.db.models import IOC, IOCSighting, SourceMaterial
-from sentinel.runtime import load_real_sample_iocs
+from sentinel.runtime import _diversify_ioc_samples, load_real_sample_iocs
 
 
 def build_settings(tmp_path: Path) -> SentinelSettings:
@@ -456,3 +456,20 @@ async def test_load_real_sample_iocs_uses_discovery_sighting_metadata(
     assert items[0]["source"] == "discovery:arcticwolf.com"
     assert items[0]["reference_url"] == article_url
     assert items[0]["source_title"] == material.title
+
+
+def test_diversify_ioc_samples_prefers_different_pulses_before_siblings() -> None:
+    pulse_a = "https://otx.alienvault.com/pulse/6a6120390f602b6ee56739c3"
+    pulse_b = "https://otx.alienvault.com/pulse/b"
+    pulse_c = "https://otx.alienvault.com/pulse/c"
+    items = [
+        {"id": "a", "value": "a" * 64, "type": "sha256", "source": "otx", "source_title": "TrickBot Variant Using DNS Tunneling for C2", "reference_url": pulse_a},
+        {"id": "b", "value": "b" * 64, "type": "sha256", "source": "otx", "source_title": "TrickBot Variant Using DNS Tunneling for C2", "reference_url": pulse_a},
+        {"id": "c", "value": "c" * 64, "type": "sha256", "source": "otx", "source_title": "TrickBot Variant Using DNS Tunneling for C2", "reference_url": pulse_a},
+        {"id": "d", "value": "d" * 64, "type": "sha256", "source": "otx", "source_title": "Other Pulse", "reference_url": pulse_b},
+        {"id": "e", "value": "e" * 64, "type": "sha256", "source": "otx", "source_title": "Third Pulse", "reference_url": pulse_c},
+    ]
+
+    selected = _diversify_ioc_samples(items, limit=3)
+
+    assert [item["reference_url"] for item in selected] == [pulse_a, pulse_b, pulse_c]
