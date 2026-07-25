@@ -300,7 +300,15 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
     if command == "karpathy-status":
         commands.add("karpathy-run")
 
-    if commands & {"run-once", "daily-digest", "scheduler", "telegram-listen", "send-real-samples", "send-discovery-samples"}:
+    if commands & {
+        "run-once",
+        "daily-digest",
+        "scheduler",
+        "telegram-listen",
+        "send-real-samples",
+        "send-discovery-samples",
+        "send-needs-review",
+    }:
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("TELEGRAM_BOT_TOKEN", settings.delivery.telegram_token)
         _validate_required_value("TELEGRAM_CHAT_ID", settings.delivery.telegram_chat_id)

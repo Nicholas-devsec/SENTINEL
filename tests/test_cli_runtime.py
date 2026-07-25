@@ -380,6 +380,50 @@ async def test_cli_dispatch_sends_discovery_samples_from_database(monkeypatch, t
 
 
 @pytest.mark.asyncio
+async def test_cli_dispatch_resends_needs_review_alerts(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = build_settings(tmp_path)
+    sent_items: list[dict] = []
+
+    class FakeDeliveryAgent:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def send_immediate_alert(self, item):
+            sent_items.append(item)
+            return True
+
+    review_items = [
+        {
+            "id": "ioc-review-1",
+            "value": "review.example",
+            "type": "domain",
+            "source": "otx",
+            "risk_score": 50.0,
+            "severity": "informational",
+            "attributes": {"delivery_reason": "needs_review_retriage"},
+        }
+    ]
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "load_needs_review_iocs", lambda **kwargs: __import__("asyncio").sleep(0, result=review_items))
+    monkeypatch.setattr(cli, "DeliveryAgent", FakeDeliveryAgent)
+    monkeypatch.setattr(cli, "_build_telegram_bot", lambda settings: object())
+
+    await cli._dispatch("send-needs-review", count="3", limit=None, all=False)
+
+    assert sent_items == review_items
+    assert "Sent 1 Needs Review alert(s)" in capsys.readouterr().out
+
+
+def test_resolve_needs_review_limit_supports_counts_and_all() -> None:
+    assert cli._resolve_needs_review_limit(count="3", limit=None, all_items=False) == 3
+    assert cli._resolve_needs_review_limit(count="all", limit=None, all_items=False) is None
+    assert cli._resolve_needs_review_limit(count=None, limit=5, all_items=False) == 5
+    assert cli._resolve_needs_review_limit(count=None, limit=5, all_items=True) is None
+    assert cli._resolve_needs_review_limit(count=None, limit=None, all_items=False) == 5
+
+
+@pytest.mark.asyncio
 async def test_load_real_sample_iocs_uses_discovery_sighting_metadata(
     monkeypatch,
     db_session_factory,

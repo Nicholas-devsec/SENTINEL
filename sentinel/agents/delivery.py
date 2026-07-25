@@ -899,11 +899,13 @@ class DeliveryAgent(BaseAgent):
         if self.telegram_bot is None:
             return False
         grouped_iocs = item.get("grouped_iocs") or []
-        heading = (
-            "SENTINEL Feedback Candidate"
-            if item.get("attributes", {}).get("delivery_reason") == "feedback_backfill"
-            else "SENTINEL Alert"
-        )
+        delivery_reason = item.get("attributes", {}).get("delivery_reason")
+        if delivery_reason == "feedback_backfill":
+            heading = "SENTINEL Feedback Candidate"
+        elif delivery_reason == "needs_review_retriage":
+            heading = "SENTINEL Needs Review"
+        else:
+            heading = "SENTINEL Alert"
         if grouped_iocs:
             message = format_grouped_alert_message(
                 heading=heading,

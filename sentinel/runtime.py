@@ -1249,3 +1249,52 @@ async def load_real_sample_iocs(
         payload["external_links"] = build_external_links_for_ioc(payload)
         items.append(payload)
     return _diversify_ioc_samples(items, limit=limit)
+
+
+async def load_needs_review_iocs(*, limit: int | None = 5) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    async with AsyncSessionFactory() as session:
+        needs_review_ids = select(FeedbackRecord.ioc_id).where(FeedbackRecord.verdict == "needs_review")
+        non_review_ids = select(FeedbackRecord.ioc_id).where(FeedbackRecord.verdict != "needs_review")
+        query = (
+            select(IOC)
+            .where(
+                (IOC.analyst_verdict == "needs_review")
+                | (
+                    IOC.analyst_verdict.is_(None)
+                    & IOC.id.in_(needs_review_ids)
+                    & ~IOC.id.in_(non_review_ids)
+                )
+            )
+            .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
+        )
+        if limit is not None:
+            query = query.limit(max(0, int(limit)))
+        rows = list((await session.scalars(query)).all())
+    for row in rows:
+        score_breakdown = dict(row.score_breakdown or {})
+        payload = {
+            "id": str(row.id),
+            "value": row.value,
+            "type": row.type,
+            "source": row.source,
+            "risk_score": float(row.risk_score or 0.0),
+            "severity": row.severity or "informational",
+            "source_title": row.source_title,
+            "reference_url": row.reference_url,
+            "related_cves": list(row.related_cves or []),
+            "vt_detections": row.vt_detections,
+            "abuse_confidence": row.abuse_confidence,
+            "shodan_ports": list(row.shodan_ports or []),
+            "mitre_techniques": list(row.mitre_techniques or []),
+            "mitre_tactics": list(row.mitre_tactics or []),
+            "last_seen": row.last_seen,
+            "attributes": {
+                "delivery_reason": "needs_review_retriage",
+                "previous_verdict": "needs_review",
+                "score_breakdown": score_breakdown,
+            },
+        }
+        payload["external_links"] = build_external_links_for_ioc(payload)
+        items.append(payload)
+    return _diversify_ioc_samples(items, limit=len(items))

@@ -17,6 +17,7 @@ from sentinel.runtime import (
     format_karpathy_report,
     format_ops_status,
     inspect_karpathy_status,
+    load_needs_review_iocs,
     load_real_sample_iocs,
     run_live_karpathy_loop,
     run_shadow_karpathy_validation,
@@ -80,6 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     samples_parser.add_argument("--types", nargs="+", default=["ipv4"], help="IOC types to sample, e.g. ipv4 sha256")
     samples_parser.add_argument("--limit", type=int, default=2, help="Maximum number of real alerts to send")
+    needs_review_parser = subcommands.add_parser(
+        "send-needs-review",
+        help="Resend Needs Review IOC rows to Telegram for final analyst verdict",
+    )
+    needs_review_parser.add_argument("count", nargs="?", default=None, help="Maximum alerts to send, or 'all'")
+    needs_review_parser.add_argument("--limit", type=int, default=None, help="Maximum Needs Review alerts to send")
+    needs_review_parser.add_argument("--all", action="store_true", help="Send every current Needs Review IOC")
     discovery_samples_parser = subcommands.add_parser(
         "send-discovery-samples",
         help="Send Telegram alerts using stored discovery-origin IOC rows from the database",
@@ -102,6 +110,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_parser.add_argument("--sync", action="store_true", help="Recompute memory from feedback before printing")
     return parser
+
+
+def _resolve_needs_review_limit(*, count: str | None, limit: int | None, all_items: bool) -> int | None:
+    if all_items:
+        return None
+    if count is not None:
+        normalized = str(count).strip().lower()
+        if normalized == "all":
+            return None
+        return max(0, int(normalized))
+    if limit is not None:
+        return max(0, int(limit))
+    return 5
 
 
 async def _dispatch(command: str, **kwargs) -> None:
@@ -241,6 +262,24 @@ async def _dispatch(command: str, **kwargs) -> None:
                 if await delivery.send_immediate_alert(item):
                     sent += 1
         print(f"Sent {sent} real sample alerts from stored IOC rows.")
+        return
+    if command == "send-needs-review":
+        review_limit = _resolve_needs_review_limit(
+            count=kwargs.get("count"),
+            limit=kwargs.get("limit"),
+            all_items=bool(kwargs.get("all", False)),
+        )
+        review_items = await load_needs_review_iocs(limit=review_limit)
+        if not review_items:
+            print("No Needs Review IOC rows found.")
+            return
+        delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
+        sent = 0
+        for item in review_items:
+            if await delivery.send_immediate_alert(item):
+                sent += 1
+        scope = "all" if review_limit is None else str(review_limit)
+        print(f"Sent {sent} Needs Review alert(s) to Telegram (requested={scope}).")
         return
     if command == "send-discovery-samples":
         sample_items = await load_real_sample_iocs(
