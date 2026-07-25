@@ -207,27 +207,22 @@ discovery:
         - payload
         - hash
         - cve
-      feeds:
-        - https://blog.talosintelligence.com/feed/
-        - https://unit42.paloaltonetworks.com/feed/
-        - https://securelist.com/feed/
-        - https://www.rapid7.com/blog/rss/
-        - https://www.crowdstrike.com/blog/feed/
-        - https://www.sentinelone.com/blog/feed/
-        - https://www.proofpoint.com/us/threat-insight-blog.xml
-        - https://thedfirreport.com/feed/
-        - https://www.elastic.co/security-labs/rss/feed.xml
-        - https://gbhackers.com/feed/
+      # Open-web discovery only. Curated vendor RSS/blog sources belong in
+      # `sources.feeds` and are blocked from this channel by DiscoveryAgent.
+      feeds: []
       search_providers:
         - name: open_web_recent
-          enabled: false
+          enabled: true
           provider: gdelt_doc
           base_url: https://api.gdeltproject.org/api/v2/doc/doc
           query_terms:
             - indicators of compromise
+            - ioc
+            - c2 infrastructure
             - phishing
             - stealer
             - malware
+            - ransomware
           max_queries: 4
           max_records: 15
           sort: datedesc
@@ -237,8 +232,12 @@ discovery:
           base_url: https://news.google.com/rss/search
           query_terms:
             - indicators of compromise
+            - ioc
+            - c2 infrastructure
             - phishing
             - stealer
+            - malware
+            - ransomware
           max_queries: 3
           max_records: 10
       freshness_hours: 96
@@ -247,14 +246,10 @@ discovery:
       time_budget_seconds: 90
       per_page_timeout_seconds: 20
       require_ioc_section: true
-      allow_hosts:
-        - blog.talosintelligence.com
-        - unit42.paloaltonetworks.com
-        - securelist.com
-        - www.rapid7.com
-        - www.crowdstrike.com
-        - www.sentinelone.com
-        - gbhackers.com
+      # Empty allowlist means Google/GDELT can discover any non-denied host.
+      # Curated `sources.feeds` hosts are automatically denied in code so this
+      # channel stays independent from hardcoded feed sources.
+      allow_hosts: []
       deny_hosts: []
       source_trust: 0.60
 

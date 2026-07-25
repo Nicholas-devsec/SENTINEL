@@ -16,7 +16,7 @@ from sentinel.agents.discovery import (
 )
 from sentinel.agents.ioc_extract import html_to_text
 from sentinel.agents.scraper import RawWriteup
-from sentinel.config import SentinelSettings
+from sentinel.config import FeedConfig, SentinelSettings
 from sentinel.db.models import DiscoveryMemory, FeedbackRecord, IOC, IOCSighting
 
 
@@ -627,6 +627,47 @@ async def test_discovery_blocks_otx_pulse_urls_as_article_candidates() -> None:
 
     assert agent._host_allowed(profile, "https://otx.alienvault.com/pulse/6a6241aa476b940a0df81e20") is False
     assert [provider.source_name for provider in providers] == ["discovery:feeds.local"]
+
+
+@pytest.mark.asyncio
+async def test_discovery_excludes_configured_feed_hosts_from_open_web_channel() -> None:
+    settings = build_settings(
+        {
+            "feeds": ["https://blog.talosintelligence.com/feed/"],
+            "search_providers": [
+                {
+                    "name": "google-news",
+                    "provider": "google_news_rss",
+                    "base_url": "https://news.google.com/rss/search",
+                    "query_terms": ["stealer"],
+                    "max_queries": 1,
+                }
+            ],
+        }
+    )
+    settings.sources.feeds = [
+        FeedConfig(
+            name="talos_blog",
+            url="https://blog.talosintelligence.com/feed/",
+            trust=0.68,
+            enabled=True,
+        )
+    ]
+    agent = build_agent(
+        settings,
+        httpx.MockTransport(lambda request: httpx.Response(200, text="")),
+        session_factory=lambda: None,
+    )
+    profile = settings.discovery.profiles[0]
+
+    try:
+        providers = agent._candidate_providers(profile)
+    finally:
+        await agent.http_client.aclose()
+
+    assert [provider.source_name for provider in providers] == ["discovery:search:google-news-rss"]
+    assert agent._host_allowed(profile, "https://blog.talosintelligence.com/example-report") is False
+    assert agent._host_allowed(profile, "https://independent-research.example/report") is True
 
 
 @pytest.mark.asyncio

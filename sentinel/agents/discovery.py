@@ -770,9 +770,24 @@ class DiscoveryAgent(BaseAgent):
         host = (urlparse(feed_url).hostname or "unknown").lower()
         return f"discovery:{host}"
 
+    @staticmethod
+    def _host_matches(host: str, candidates: set[str]) -> bool:
+        return any(host == candidate or host.endswith("." + candidate) for candidate in candidates)
+
+    def _configured_feed_hosts(self) -> set[str]:
+        return {
+            host
+            for feed in self.settings.sources.feeds
+            if feed.enabled
+            for host in [(urlparse(feed.url).hostname or "").lower()]
+            if host
+        }
+
     def _host_allowed(self, profile: DiscoveryProfile, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
         if host in BLOCKED_DISCOVERY_HOSTS:
+            return False
+        if self._host_matches(host, self._configured_feed_hosts()):
             return False
         if profile.deny_hosts and any(host == deny.lower() or host.endswith("." + deny.lower()) for deny in profile.deny_hosts):
             return False
@@ -820,6 +835,7 @@ class DiscoveryAgent(BaseAgent):
             )
             for feed_url in profile.feeds
             if (urlparse(feed_url).hostname or "").lower() not in BLOCKED_DISCOVERY_HOSTS
+            and not self._host_matches((urlparse(feed_url).hostname or "").lower(), self._configured_feed_hosts())
         ]
         for search_provider in profile.search_providers:
             if not search_provider.enabled:
