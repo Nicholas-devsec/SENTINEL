@@ -495,6 +495,26 @@ class DeliveryAgent(BaseAgent):
             )
             return {str(ioc_id) for (ioc_id,) in rows.all()}
 
+    async def _feedback_labeled_ids(self, ioc_ids: list[str]) -> set[str]:
+        parsed: list[UUID] = []
+        for raw in ioc_ids:
+            try:
+                parsed.append(UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+        if not parsed:
+            return set()
+        feedback_verdicts = {CONFIRMED, LOW_LEVEL_TRUE_POSITIVE, FALSE_POSITIVE, NEEDS_REVIEW}
+        async with self.session_factory() as session:
+            if not hasattr(session, "execute"):
+                return set()
+            rows = await session.execute(
+                select(FeedbackRecord.ioc_id)
+                .where(FeedbackRecord.ioc_id.in_(parsed))
+                .where(FeedbackRecord.verdict.in_(sorted(feedback_verdicts)))
+            )
+            return {str(ioc_id) for (ioc_id,) in rows.all()}
+
     async def _filter_recently_alerted(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         recently = await self._recently_alerted_ids(
             [str(item.get("id")) for item in items if item.get("id")]
@@ -509,6 +529,18 @@ class DeliveryAgent(BaseAgent):
                 suppressed,
                 self.settings.delivery.alert_resend_after_hours,
             )
+        return kept
+
+    async def _filter_feedback_labeled(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        labeled = await self._feedback_labeled_ids(
+            [str(item.get("id")) for item in items if item.get("id")]
+        )
+        if not labeled:
+            return items
+        kept = [item for item in items if str(item.get("id") or "") not in labeled]
+        suppressed = len(items) - len(kept)
+        if suppressed:
+            self.logger.info("Feedback ledger suppressed %s already-labeled IOC alert candidate(s)", suppressed)
         return kept
 
     async def _record_alert_events(self, cards: list[dict[str, Any]], *, alert_kind: str) -> None:
@@ -924,6 +956,8 @@ class DeliveryAgent(BaseAgent):
 
     async def send_immediate_alerts(self, items: list[dict[str, Any]]) -> int:
         prepared = [self._coerce_ioc(item) for item in items]
+        prepared = await self._filter_recently_alerted(prepared)
+        prepared = await self._filter_feedback_labeled(prepared)
         grouped = self._group_immediate_alerts(prepared)
         sent = 0
         for item in grouped:
@@ -1141,6 +1175,7 @@ class DeliveryAgent(BaseAgent):
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
         items = await self._filter_recently_alerted(items)
+        items = await self._filter_feedback_labeled(items)
         digest_cards = self._dedupe_digest_cards(items)
         top_items = self._apply_delivery_limits(digest_cards, apply_burst_cap=False)[
             : self.settings.delivery.telegram_daily_digest_limit
@@ -1243,6 +1278,7 @@ class DeliveryAgent(BaseAgent):
                 immediate_candidates = feedback_backfill_candidates
             immediate_candidates = self._dedupe_hash_family_candidates(immediate_candidates)
             immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
+            immediate_candidates = await self._filter_feedback_labeled(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)
             immediate = self._apply_delivery_limits(immediate)
         digest_candidates = self._select_digest_candidates(items)

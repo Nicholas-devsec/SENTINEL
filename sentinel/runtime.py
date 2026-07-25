@@ -31,7 +31,7 @@ from sentinel.loops.karpathy_loop import ExperimentOutcome
 from sentinel.loops.providers.openai_provider import OpenAIProvider
 from sentinel.loops.scoring_loop import ScoreCalibrationLoop
 from sentinel.loops.source_loop import SourceQualityLoop
-from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
+from sentinel.feedback import DISCOVERY_MEMORY_VERDICTS, FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
 
 LOOP_SKILL_PATHS = {
     "source": Path("skills/sources/SKILL.md"),
@@ -1177,10 +1177,17 @@ async def load_real_sample_iocs(
     candidate_limit = max(limit * 10, limit)
     items: list[dict[str, Any]] = []
     async with AsyncSessionFactory() as session:
+        feedback_labeled_ids = select(FeedbackRecord.ioc_id).where(
+            FeedbackRecord.verdict.in_(sorted(DISCOVERY_MEMORY_VERDICTS))
+        )
+        telegram_alerted_ids = select(AlertEvent.ioc_id).where(AlertEvent.channel == "telegram")
         if provenance is None:
             query = (
                 select(IOC)
                 .where(IOC.type.in_(normalized_types))
+                .where(IOC.analyst_verdict.is_(None))
+                .where(~IOC.id.in_(feedback_labeled_ids))
+                .where(~IOC.id.in_(telegram_alerted_ids))
                 .order_by(IOC.risk_score.desc().nullslast(), IOC.last_seen.desc())
                 .limit(candidate_limit)
             )
@@ -1213,6 +1220,9 @@ async def load_real_sample_iocs(
             .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
             .where(IOC.type.in_(normalized_types))
             .where(IOCSighting.provenance == provenance)
+            .where(IOC.analyst_verdict.is_(None))
+            .where(~IOC.id.in_(feedback_labeled_ids))
+            .where(~IOC.id.in_(telegram_alerted_ids))
             .order_by(IOC.risk_score.desc().nullslast(), IOCSighting.last_seen.desc())
             .limit(candidate_limit)
         )

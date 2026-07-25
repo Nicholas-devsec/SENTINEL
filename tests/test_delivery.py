@@ -291,6 +291,44 @@ def test_delivery_agent_diversifies_feed_alerts_by_campaign_before_siblings() ->
 
 
 @pytest.mark.asyncio
+async def test_send_immediate_alerts_filters_feedback_labeled_iocs() -> None:
+    telegram_bot = FakeTelegramBot()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    item = {
+        "id": str(uuid4()),
+        "value": "already-confirmed.example",
+        "type": "domain",
+        "source": "otx",
+        "risk_score": 80,
+        "severity": "high",
+        "reference_url": "https://otx.alienvault.com/pulse/already-confirmed",
+        "source_title": "Already confirmed pulse",
+        "mitre_techniques": [],
+        "mitre_tactics": [],
+        "last_seen": datetime.now(UTC),
+    }
+
+    async def fake_recently_alerted(items):
+        return items
+
+    async def fake_feedback_labeled(items):
+        return []
+
+    agent._filter_recently_alerted = fake_recently_alerted
+    agent._filter_feedback_labeled = fake_feedback_labeled
+
+    sent = await agent.send_immediate_alerts([item])
+
+    assert sent == 0
+    assert telegram_bot.messages == []
+
+
+@pytest.mark.asyncio
 async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
