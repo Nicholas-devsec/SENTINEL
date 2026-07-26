@@ -49,7 +49,7 @@ DEFANGED_DOMAIN_RE = re.compile(
     r"[a-zA-Z]{2,63}\b"
 )
 DEFANGED_URL_SCHEME_PREFIX_RE = re.compile(r"(?:^|[^a-zA-Z0-9])h..ps?(?:\[:\]|:)\s*(?:\[//\]|//)\s*$", re.IGNORECASE)
-TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+TLD_EXTRACT = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 
 
 @dataclass(slots=True)
@@ -206,6 +206,8 @@ def _expand_excluded_hostnames(hostnames: set[str] | None) -> set[str]:
 
 
 def _is_excluded_hostname(hostname: str | None, excluded: set[str]) -> bool:
+    if not excluded:
+        return False
     host = _normalize_hostname(hostname)
     if not host:
         return False
@@ -218,6 +220,25 @@ def _is_excluded_hostname(hostname: str | None, excluded: set[str]) -> bool:
             or registered == candidate
         )
         for candidate in excluded
+    )
+
+
+COMMON_BENIGN_INDICATOR_HOSTS = {
+    "global.turn.twilio.com",
+}
+COMMON_BENIGN_INDICATOR_SUFFIXES = (
+    ".turn.twilio.com",
+    ".l.google.com",
+)
+
+
+def _is_common_benign_indicator_hostname(hostname: str | None) -> bool:
+    host = _normalize_hostname(hostname)
+    if not host:
+        return False
+    return host in COMMON_BENIGN_INDICATOR_HOSTS or any(
+        host.endswith(suffix)
+        for suffix in COMMON_BENIGN_INDICATOR_SUFFIXES
     )
 
 
@@ -307,7 +328,7 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
         if _is_domain_embedded_in_defanged_url(text, match.span()):
             continue
         domain = match.group(0).replace("[.]", ".").rstrip(".").lower()
-        if not _is_excluded_hostname(domain, excluded):
+        if not _is_excluded_hostname(domain, excluded) and not _is_common_benign_indicator_hostname(domain):
             found.append(ExtractedIOC(type="domain", value=domain))
 
     clean = refang(text)
@@ -342,7 +363,7 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
             host = (urlparse(url).hostname or "").lower()
         except ValueError:
             continue
-        if host and not _is_excluded_hostname(host, excluded):
+        if host and not _is_excluded_hostname(host, excluded) and not _is_common_benign_indicator_hostname(host):
             found.append(ExtractedIOC(type="url", value=url))
 
     for match in IPV4_RE.finditer(clean):
@@ -458,10 +479,28 @@ INDICATOR_TYPE_LABELS = {
     "sha-1", "sha-256", "filename", "filenames", "file name", "file names",
     "email", "emails", "cve",
 }
+NON_IOC_SECTION_HEADINGS = {
+    "acknowledgements",
+    "additional reading",
+    "citations",
+    "conclusion",
+    "external links",
+    "further reading",
+    "references",
+    "related articles",
+    "related links",
+    "source",
+    "sources",
+}
 
 
 def _is_indicator_type_label(text: str) -> bool:
     return text.strip().rstrip(":").strip().lower() in INDICATOR_TYPE_LABELS
+
+
+def _is_non_ioc_section_heading(text: str) -> bool:
+    normalized = text.strip().rstrip(":").strip().lower()
+    return normalized in NON_IOC_SECTION_HEADINGS
 
 
 def _cell_indicator_token(cell: str) -> str | None:
@@ -583,6 +622,8 @@ def find_ioc_section(
         indicator_count = 0
         for offset, candidate in enumerate(lines[index + 1 :], start=index + 2):
             next_nonempty = _next_nonempty_line(lines, offset)
+            if _is_non_ioc_section_heading(candidate):
+                break
             if is_next_topic_heading(candidate, indicator_count, next_nonempty):
                 break
             body.append(candidate)
@@ -656,7 +697,11 @@ def extract_iocs_from_section(
                     continue
                 if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
                     continue
-                if _is_excluded_hostname(token, excluded) or token in url_hosts:
+                if (
+                    _is_excluded_hostname(token, excluded)
+                    or _is_common_benign_indicator_hostname(token)
+                    or token in url_hosts
+                ):
                     continue
                 key = ("domain", token)
                 if key not in found_keys:

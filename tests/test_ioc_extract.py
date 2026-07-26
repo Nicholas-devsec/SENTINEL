@@ -47,6 +47,24 @@ def test_extracts_defanged_domain_and_url_and_ip() -> None:
     assert ("ipv4", "45.155.204.10") in extracted
 
 
+def test_suppresses_common_benign_stun_turn_hosts() -> None:
+    text = (
+        "Indicators of Compromise\n"
+        "http://172.86.126.18:443/update_ms.msi\n"
+        "is-01-ast.ols-img-12.workers.dev\n"
+        "stun2.l.google.com\n"
+        "global.turn.twilio.com\n"
+    )
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("url", "http://172.86.126.18:443/update_ms.msi") in extracted
+    assert ("domain", "is-01-ast.ols-img-12.workers.dev") in extracted
+    assert not any(value == "stun2.l.google.com" for _, value in extracted)
+    assert not any(value == "global.turn.twilio.com" for _, value in extracted)
+
+
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
     text = (
         "URL hxxps[:]//inventory-card-thumbzilla-ip[.]trycloudflare[.]com/De/\n"
@@ -154,6 +172,17 @@ def test_find_ioc_section_by_indicator_density_without_heading() -> None:
 
 def test_find_ioc_section_absent_in_plain_prose() -> None:
     text = "We discuss strategy, leadership, and the evolving threat landscape at length."
+    assert find_ioc_section(text) is None
+
+
+def test_ioc_heading_does_not_absorb_sources_section() -> None:
+    text = """Incident Analysis
+Indicators of Compromise
+Sources
+https://investors.coca-colacompany.com/news-events/press-releases/detail/1166/the-coca-cola-company-announces-technology-disruption-involving-fairlife-operations
+https://www.cybersecuritydive.com/news/ransomware-attack-coca-cola-suspend-production-dairy/825540/
+https://www.cbsnews.com/news/coca-cola-fairlife-milk-cyberattack/
+"""
     assert find_ioc_section(text) is None
 
 
