@@ -65,6 +65,19 @@ def test_suppresses_common_benign_stun_turn_hosts() -> None:
     assert not any(value == "global.turn.twilio.com" for _, value in extracted)
 
 
+def test_suppresses_embedded_social_shortener_urls_from_articles() -> None:
+    text = (
+        "HollowGraph buries its C2 in M365 calendar events dated 2050. "
+        "https://t.co/yJo4fpw0X9 #ThreatIntel https://x.com/threadlinqs/status/2079775946752561530 "
+        "Full report: https://intel.threadlinqs.com/threat/TL-2026-1601"
+    )
+    extracted = {(item.type, item.value) for item in extract_iocs_from_text(text)}
+
+    assert ("url", "https://intel.threadlinqs.com/threat/TL-2026-1601") in extracted
+    assert not any(value.startswith("https://t.co/") for _, value in extracted)
+    assert not any(value.startswith("https://x.com/") for _, value in extracted)
+
+
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
     text = (
         "URL hxxps[:]//inventory-card-thumbzilla-ip[.]trycloudflare[.]com/De/\n"

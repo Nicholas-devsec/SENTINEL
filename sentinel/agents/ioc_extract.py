@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 import tldextract
 
+from sentinel.agents.ioc_noise import is_article_noise_hostname
+
 
 DEFANG_REPLACEMENTS = (
     ("[:]", ":"),
@@ -236,7 +238,7 @@ def _is_common_benign_indicator_hostname(hostname: str | None) -> bool:
     host = _normalize_hostname(hostname)
     if not host:
         return False
-    return host in COMMON_BENIGN_INDICATOR_HOSTS or any(
+    return is_article_noise_hostname(host) or host in COMMON_BENIGN_INDICATOR_HOSTS or any(
         host.endswith(suffix)
         for suffix in COMMON_BENIGN_INDICATOR_SUFFIXES
     )

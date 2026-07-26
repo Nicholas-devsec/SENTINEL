@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sentinel.agents.base import BaseAgent
+from sentinel.agents.ioc_noise import is_article_noise_hostname, is_article_noise_url
 from sentinel.agents.scraper import RawIOC
 from sentinel.db.models import IOC, IOCSighting, SourceMaterial
 
@@ -200,6 +201,18 @@ class ValidationAgent(BaseAgent):
         value = normalized_value.lower()
         return any(pattern in value for pattern in self._load_fp_patterns())
 
+    def _is_article_noise_ioc(self, item: RawIOC, normalized_value: str) -> bool:
+        provenance = str(item.provenance or item.attributes.get("provenance") or "").strip().lower()
+        source = str(item.source or "").strip().lower()
+        if provenance not in {"writeup", "discovery"} and not source.startswith("discovery:"):
+            return False
+        ioc_type = item.type.strip().lower()
+        if ioc_type == "url":
+            return is_article_noise_url(normalized_value)
+        if ioc_type == "domain":
+            return is_article_noise_hostname(normalized_value)
+        return False
+
     def _coerce_raw_ioc(self, item: RawIOC | dict[str, Any]) -> RawIOC:
         if isinstance(item, RawIOC):
             return item
@@ -220,6 +233,8 @@ class ValidationAgent(BaseAgent):
     def _validate_item(self, item: RawIOC) -> ValidatedIOC | None:
         normalized_value = self.normalize_ioc(item.type, item.value)
         if normalized_value is None or self._matches_fp_pattern(normalized_value):
+            return None
+        if self._is_article_noise_ioc(item, normalized_value):
             return None
         dedupe_hash = hashlib.sha256(normalized_value.encode("utf-8")).hexdigest()
         related_cves = sorted(

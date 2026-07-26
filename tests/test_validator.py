@@ -241,6 +241,34 @@ async def test_validator_rejects_false_positives_and_private_ranges(agent: Valid
         assert list((await session.scalars(select(IOC))).all()) == []
 
 
+def test_validator_rejects_article_shorteners_without_blocking_feed_url_iocs(
+    validation_skill: Path, tranco_file: Path
+) -> None:
+    agent = ValidationAgent(skill_path=str(validation_skill), tranco_path=str(tranco_file), session_factory=None)
+    article_item = RawIOC(
+        value="https://t.co/yJo4fpw0X9",
+        type="url",
+        source="sentinelone_blog",
+        source_trust=0.66,
+        first_seen=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+        last_seen=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+        reference_url="https://www.sentinelone.com/blog/the-good-the-bad-and-the-ugly-in-cybersecurity-week-30-8/",
+        provenance="writeup",
+    )
+    feed_item = RawIOC(
+        value="https://t.co/feed-says-malicious",
+        type="url",
+        source="urlhaus",
+        source_trust=0.91,
+        first_seen=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+        last_seen=datetime(2026, 7, 24, 13, 0, tzinfo=UTC),
+        provenance="feed",
+    )
+
+    assert agent._validate_item(article_item) is None
+    assert agent._validate_item(feed_item) is not None
+
+
 @pytest.mark.asyncio
 async def test_validator_deduplicates_against_existing_database_rows(agent: ValidationAgent, db_session_factory) -> None:
     first_batch = [
