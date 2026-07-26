@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -766,6 +767,14 @@ GOOGLE_WRAPPER_MIXED = """
 </body></html>
 """
 
+GOOGLE_WRAPPER_BATCH_METADATA = """
+<html><body>
+<c-wiz>
+  <div data-n-a-id="CBMi-wrapped" data-n-a-ts="1720000000" data-n-a-sg="signature-token"></div>
+</c-wiz>
+</body></html>
+"""
+
 
 def google_news_routes(pages: dict[str, str], *, wrapper_html: str, seen: list[str]):
     """Feed -> wrapper -> optional publisher pages, recording every request."""
@@ -783,6 +792,42 @@ def google_news_routes(pages: dict[str, str], *, wrapper_html: str, seen: list[s
                         }
                     ]
                 ),
+            )
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, text=wrapper_html)
+        for path, html in pages.items():
+            if request.url.path == path:
+                return httpx.Response(200, text=html)
+        return httpx.Response(404, text="not found")
+
+    return handler
+
+
+def google_news_batch_routes(pages: dict[str, str], *, wrapper_html: str, seen: list[str]):
+    """Feed -> wrapper -> batchexecute decode -> publisher pages."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.host == "news.google.com" and request.url.path == "/rss/search":
+            return httpx.Response(
+                200,
+                text=rss_feed(
+                    [
+                        {
+                            "title": "Stealer campaign IOC report",
+                            "link": "https://news.google.com/rss/articles/CBMi-wrapped",
+                        }
+                    ]
+                ),
+            )
+        if request.url.host == "news.google.com" and request.url.path.endswith("/batchexecute"):
+            assert b"Fbv4je" in request.content
+            assert b"garturlreq" in request.content
+            assert b"CBMi-wrapped" in request.content
+            inner = json.dumps(["garturlres", "https://publisher.test/threat-report"])
+            return httpx.Response(
+                200,
+                text=")]}'\n" + json.dumps([[None, None, inner]]),
             )
         if request.url.host == "news.google.com":
             return httpx.Response(200, text=wrapper_html)
@@ -898,6 +943,7 @@ async def test_wrapper_can_fall_back_to_headless_browser_resolution(db_session_f
         )
     )
     agent = build_agent(google_news_settings(), transport, db_session_factory)
+    agent.enable_browser_wrapper_resolution = True
 
     async def fake_browser_resolution(wrapper_url: str, *, timeout: float) -> str | None:
         assert wrapper_url.startswith("https://news.google.com/rss/articles/")
@@ -916,6 +962,58 @@ async def test_wrapper_can_fall_back_to_headless_browser_resolution(db_session_f
     assert len(report.items) == 3
     assert all(item.reference_url == "https://publisher.test/threat-report" for item in report.items)
     assert all(item.source == "discovery:publisher.test" for item in report.items)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_resolves_with_batch_endpoint_before_browser(db_session_factory) -> None:
+    seen: list[str] = []
+    transport = httpx.MockTransport(
+        google_news_batch_routes(
+            {"/threat-report": ARTICLE_WITH_SECTION},
+            wrapper_html=GOOGLE_WRAPPER_BATCH_METADATA,
+            seen=seen,
+        )
+    )
+    agent = build_agent(google_news_settings(), transport, db_session_factory)
+
+    async def fail_browser_resolution(wrapper_url: str, *, timeout: float) -> str | None:
+        raise AssertionError("browser fallback should not run when batch decoding succeeds")
+
+    agent._resolve_google_news_article_via_browser = fail_browser_resolution  # type: ignore[method-assign]
+    try:
+        report = await agent.run_with_report()
+    finally:
+        await agent.http_client.aclose()
+
+    diagnostic = report.diagnostics[0]
+    assert diagnostic.wrapper_resolved == 1
+    assert diagnostic.pages_fetched == 1
+    assert len(report.items) == 3
+    assert any("/batchexecute" in url for url in seen)
+    assert all(item.reference_url == "https://publisher.test/threat-report" for item in report.items)
+
+
+@pytest.mark.asyncio
+async def test_wrapper_skips_browser_fallback_by_default(db_session_factory) -> None:
+    seen: list[str] = []
+    transport = httpx.MockTransport(
+        google_news_routes({}, wrapper_html=GOOGLE_WRAPPER_ONLY_ASSETS, seen=seen)
+    )
+    agent = build_agent(google_news_settings(), transport, db_session_factory)
+
+    async def fail_browser_resolution(wrapper_url: str, *, timeout: float) -> str | None:
+        raise AssertionError("browser fallback should be opt-in")
+
+    agent._resolve_google_news_article_via_browser = fail_browser_resolution  # type: ignore[method-assign]
+    try:
+        report = await agent.run_with_report()
+    finally:
+        await agent.http_client.aclose()
+
+    diagnostic = report.diagnostics[0]
+    assert report.items == []
+    assert diagnostic.skipped_non_article == 1
+    assert diagnostic.pages_fetched == 0
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -111,6 +112,8 @@ HEADLESS_BROWSER_CANDIDATES = (
 )
 HEADLESS_BROWSER_VIRTUAL_TIME_MS = 8_000
 HEADLESS_BROWSER_TIMEOUT_FLOOR_SECONDS = 45.0
+GOOGLE_NEWS_BATCH_TIMEOUT_SECONDS = 8.0
+GOOGLE_NEWS_BATCH_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
 
 CANONICAL_LINK_RE = re.compile(
     r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\'](?P<url>[^"\']+)["\']',
@@ -125,6 +128,10 @@ DATA_ARTICLE_URL_RE = re.compile(
     r'data-n-au=["\'](?P<url>https?://[^"\']+)["\']',
     re.IGNORECASE,
 )
+DATA_P_RE = re.compile(r'<c-wiz[^>]+data-p=["\'](?P<data>[^"\']+)["\']', re.IGNORECASE)
+DATA_N_A_ID_RE = re.compile(r'data-n-a-id=["\'](?P<id>[^"\']+)["\']', re.IGNORECASE)
+DATA_N_A_TS_RE = re.compile(r'data-n-a-ts=["\'](?P<ts>\d+)["\']', re.IGNORECASE)
+DATA_N_A_SG_RE = re.compile(r'data-n-a-sg=["\'](?P<signature>[^"\']+)["\']', re.IGNORECASE)
 ANCHOR_HREF_RE = re.compile(
     r'<a[^>]+href=["\'](?P<url>https?://[^"\']+)["\']',
     re.IGNORECASE,
@@ -754,6 +761,10 @@ class DiscoveryAgent(BaseAgent):
         self.memory = DiscoveryMemoryStore(self.session_factory)
         self.now_fn = now_fn or (lambda: datetime.now(UTC))
         self._logged_missing_headless_browser = False
+        self.enable_browser_wrapper_resolution = (
+            os.getenv("SENTINEL_DISCOVERY_BROWSER_WRAPPER_FALLBACK", "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
     # -- skill knobs -----------------------------------------------------
 
@@ -941,6 +952,176 @@ class DiscoveryAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _google_news_article_id(url: str) -> str | None:
+        parsed = urlparse(url)
+        if (parsed.hostname or "").lower() != "news.google.com":
+            return None
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if len(segments) >= 2 and segments[-2] == "articles":
+            return segments[-1]
+        return None
+
+    @staticmethod
+    def _google_news_signature_request(html: str, *, wrapper_url: str) -> list[Any] | None:
+        decoded_html = unescape(html)
+        article_id = None
+        if match := DATA_N_A_ID_RE.search(decoded_html):
+            article_id = match.group("id").strip()
+        article_id = article_id or DiscoveryAgent._google_news_article_id(wrapper_url)
+        ts_match = DATA_N_A_TS_RE.search(decoded_html)
+        sig_match = DATA_N_A_SG_RE.search(decoded_html)
+        if not article_id or not ts_match or not sig_match:
+            return None
+        try:
+            timestamp = int(ts_match.group("ts"))
+        except ValueError:
+            return None
+        signature = sig_match.group("signature").strip()
+        if not signature:
+            return None
+        return [
+            "garturlreq",
+            [
+                [
+                    "en-US",
+                    "US",
+                    ["FINANCE_TOP_INDICES", "WEB_TEST_1_0_0"],
+                    None,
+                    None,
+                    1,
+                    1,
+                    "US:en",
+                    None,
+                    180,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                    [1608992183, 723341000],
+                ],
+                "en-US",
+                "US",
+                1,
+                [2, 3, 4, 8],
+                1,
+                0,
+                "655000234",
+                0,
+                0,
+                None,
+                0,
+            ],
+            article_id,
+            timestamp,
+            signature,
+        ]
+
+    @staticmethod
+    def _google_news_data_p_request(html: str) -> list[Any] | None:
+        match = DATA_P_RE.search(html)
+        if not match:
+            return None
+        raw = unescape(match.group("data")).replace("%.@.", '["garturlreq",')
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(parsed, list):
+            return None
+        # Google's page includes trailing UI-only fields; the RPC wants the
+        # garturl request body plus the final article id/signature parameters.
+        if len(parsed) > 6:
+            parsed = [*parsed[:-6], *parsed[-2:]]
+        return parsed
+
+    @staticmethod
+    def _extract_batchexecute_article_url(text: str, *, base_url: str) -> str | None:
+        cleaned = text.strip()
+        if cleaned.startswith(")]}'"):
+            cleaned = cleaned[4:].strip()
+        try:
+            payload = json.loads(cleaned)
+        except ValueError:
+            return None
+        base_host = urlparse(base_url).hostname
+
+        def walk(value: Any) -> str | None:
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.startswith(("[", "{")):
+                    try:
+                        nested = json.loads(stripped)
+                    except ValueError:
+                        nested = None
+                    if nested is not None and (found := walk(nested)):
+                        return found
+                if stripped.startswith("http") and is_article_like_url(stripped, base_host=base_host):
+                    return stripped
+                return None
+            if isinstance(value, dict):
+                for nested in value.values():
+                    if found := walk(nested):
+                        return found
+            if isinstance(value, list):
+                for nested in value:
+                    if found := walk(nested):
+                        return found
+            return None
+
+        return walk(payload)
+
+    async def _resolve_google_news_article_via_batch(self, wrapper_url: str, html: str, *, timeout: float) -> str | None:
+        requests = [
+            request
+            for request in (
+                self._google_news_data_p_request(html),
+                self._google_news_signature_request(html, wrapper_url=wrapper_url),
+            )
+            if request is not None
+        ]
+        if not requests:
+            return None
+        request_timeout = min(max(float(timeout), 1.0), GOOGLE_NEWS_BATCH_TIMEOUT_SECONDS)
+        headers = {
+            **DEFAULT_BROWSER_HEADERS,
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Referer": wrapper_url,
+        }
+        for request in requests:
+            rpc = [[["Fbv4je", json.dumps(request, separators=(",", ":")), None, "generic"]]]
+            try:
+                response = await asyncio.wait_for(
+                    self.http_client.post(
+                        GOOGLE_NEWS_BATCH_URL,
+                        headers=headers,
+                        data={"f.req": json.dumps(rpc, separators=(",", ":"))},
+                    ),
+                    timeout=request_timeout,
+                )
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                self.logger.info(
+                    "Discovery Google News batch resolver failed for wrapper url=%s: %s",
+                    wrapper_url,
+                    type(exc).__name__,
+                )
+                continue
+            except TimeoutError:
+                self.logger.info(
+                    "Discovery Google News batch resolver timed out after %.0fs for wrapper url=%s",
+                    request_timeout,
+                    wrapper_url,
+                )
+                continue
+            if article_url := self._extract_batchexecute_article_url(response.text, base_url=wrapper_url):
+                return article_url
+        return None
+
+    @staticmethod
     def _headless_browser_binary() -> str | None:
         for candidate in HEADLESS_BROWSER_CANDIDATES:
             path = shutil.which(candidate)
@@ -1014,9 +1195,21 @@ class DiscoveryAgent(BaseAgent):
         original_url = writeup.url
         canonical_url = self._extract_canonical_article_url(response.text, base_url=str(response.url))
         if not canonical_url:
-            canonical_url = await self._resolve_google_news_article_via_browser(
-                str(response.url), timeout=timeout
+            canonical_url = await self._resolve_google_news_article_via_batch(
+                str(response.url),
+                response.text,
+                timeout=timeout,
             )
+        if not canonical_url:
+            if self.enable_browser_wrapper_resolution:
+                canonical_url = await self._resolve_google_news_article_via_browser(
+                    str(response.url), timeout=timeout
+                )
+            else:
+                self.logger.info(
+                    "Discovery skipped headless browser fallback for Google News wrapper; "
+                    "set SENTINEL_DISCOVERY_BROWSER_WRAPPER_FALLBACK=1 to enable it."
+                )
         if not canonical_url:
             self.logger.warning(
                 "Discovery discarded wrapper candidate: no publisher article URL found "
