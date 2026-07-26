@@ -511,10 +511,13 @@ async def test_delivery_agent_allows_corroborated_curated_context_at_intermediat
 
 
 @pytest.mark.asyncio
-async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_discovery() -> None:
+async def test_delivery_agent_bypasses_thresholds_for_low_score_article_iocs() -> None:
     telegram_bot = FakeTelegramBot()
     settings = build_settings().model_copy(deep=True)
     settings.thresholds.alert_score = 70
+    settings.workflow.telegram_feed_article_alert_limit_per_run = 1
+    settings.workflow.telegram_discovery_article_alert_limit_per_run = 1
+    settings.delivery.telegram_max_alerts_per_run = 3
     agent = DeliveryAgent(
         settings=settings,
         telegram_bot=telegram_bot,
@@ -538,14 +541,48 @@ async def test_delivery_agent_does_not_bypass_thresholds_for_low_score_web_disco
             "extraction_mode": "fallback",
             "corroboration_sources": 1,
             "attributes": {"provenance": "discovery", "extraction_mode": "fallback"},
-        }
+        },
+        {
+            "id": str(uuid4()),
+            "value": "curated.example/bad",
+            "type": "url",
+            "source": "securelist_blog",
+            "risk_score": 3.0,
+            "severity": "informational",
+            "reference_url": "https://securelist.example/post",
+            "source_title": "Curated feed writeup",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": datetime.now(UTC),
+            "provenance": "writeup",
+            "extraction_mode": "fallback",
+            "corroboration_sources": 1,
+            "attributes": {"provenance": "writeup", "extraction_mode": "fallback"},
+        },
+        {
+            "id": str(uuid4()),
+            "value": "9.9.9.9",
+            "type": "ipv4",
+            "source": "threatfox",
+            "risk_score": 1.0,
+            "severity": "informational",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": datetime.now(UTC),
+            "provenance": "feed",
+            "extraction_mode": "feed",
+            "attributes": {"provenance": "feed", "extraction_mode": "feed"},
+        },
     ]
 
     result = await agent.run(items)
 
-    assert result.immediate_alerts == 0
-    assert result.digest_candidates == 0
-    assert len(telegram_bot.messages) == 0
+    assert result.immediate_alerts == 2
+    assert result.digest_candidates == 2
+    rendered = "\n".join(message["text"] for message in telegram_bot.messages)
+    assert "Publisher writeup" in rendered
+    assert "Curated feed writeup" in rendered
+    assert "9.9.9.9" not in rendered
 
 
 @pytest.mark.asyncio

@@ -163,7 +163,10 @@ def _article_ioc_note(article_ioc_count: int | None) -> str | None:
 def _is_otx_reference(source: str, reference_url: str | None) -> bool:
     if str(source or "").strip().lower() == "otx":
         return True
-    host = (urlparse(str(reference_url or "")).hostname or "").lower()
+    try:
+        host = (urlparse(refang(str(reference_url or ""))).hostname or "").lower()
+    except ValueError:
+        return False
     return host == OTX_HOST
 
 

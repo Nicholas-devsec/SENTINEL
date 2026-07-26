@@ -418,6 +418,9 @@ class DeliveryAgent(BaseAgent):
     def _is_web_discovery_item(self, item: dict[str, Any]) -> bool:
         return str(item.get("source") or "").strip().lower().startswith("discovery:")
 
+    def _bypasses_article_alert_threshold(self, item: dict[str, Any]) -> bool:
+        return self._is_article_card(item)
+
     def _hash_family_key(self, item: dict[str, Any]) -> str | None:
         ioc_type = str(item.get("type") or "").strip().lower()
         if ioc_type not in HASH_TYPES:
@@ -586,7 +589,8 @@ class DeliveryAgent(BaseAgent):
         qualified = [
             item
             for item in items
-            if policy.qualifies_immediate(item, is_web_discovery=self._is_web_discovery_item(item))
+            if self._bypasses_article_alert_threshold(item)
+            or policy.qualifies_immediate(item, is_web_discovery=self._is_web_discovery_item(item))
         ]
         if not qualified:
             return []
@@ -601,7 +605,10 @@ class DeliveryAgent(BaseAgent):
         for item in items:
             item_id = str(item.get("id") or "")
             reference_url = str(item.get("reference_url") or "").strip()
-            include = policy.qualifies_immediate(item, is_web_discovery=self._is_web_discovery_item(item))
+            include = self._bypasses_article_alert_threshold(item) or policy.qualifies_immediate(
+                item,
+                is_web_discovery=self._is_web_discovery_item(item),
+            )
             if not include and reference_url and reference_url in qualifying_urls:
                 include = True
             if not include:
@@ -770,7 +777,8 @@ class DeliveryAgent(BaseAgent):
         qualified = [
             item
             for item in recent_items
-            if policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
+            if self._bypasses_article_alert_threshold(item)
+            or policy.qualifies_digest(item, is_web_discovery=self._is_web_discovery_item(item))
         ]
         backfill = [
             item
