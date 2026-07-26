@@ -919,6 +919,40 @@ async def test_wrapper_can_fall_back_to_headless_browser_resolution(db_session_f
 
 
 @pytest.mark.asyncio
+async def test_google_news_wrapper_missing_browser_logs_operator_hint(caplog) -> None:
+    agent = DiscoveryAgent(
+        settings=google_news_settings(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404))),
+        session_factory=lambda: None,
+        now_fn=lambda: NOW,
+    )
+    agent._headless_browser_binary = lambda: None  # type: ignore[method-assign]
+
+    try:
+        with caplog.at_level("WARNING", logger="DiscoveryAgent"):
+            resolved = await agent._resolve_google_news_article_via_browser(
+                "https://news.google.com/rss/articles/CBMi-wrapped",
+                timeout=1,
+            )
+            resolved_again = await agent._resolve_google_news_article_via_browser(
+                "https://news.google.com/rss/articles/CBMi-wrapped-2",
+                timeout=1,
+            )
+    finally:
+        await agent.http_client.aclose()
+
+    assert resolved is None
+    assert resolved_again is None
+    warnings = [
+        record.message
+        for record in caplog.records
+        if "no headless browser binary" in record.message
+    ]
+    assert len(warnings) == 1
+    assert "google-chrome" in warnings[0]
+
+
+@pytest.mark.asyncio
 async def test_asset_candidate_url_is_discarded_before_fetch(db_session_factory) -> None:
     seen: list[str] = []
 

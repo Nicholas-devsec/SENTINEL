@@ -751,6 +751,7 @@ class DiscoveryAgent(BaseAgent):
             self.session_factory = session_factory
         self.memory = DiscoveryMemoryStore(self.session_factory)
         self.now_fn = now_fn or (lambda: datetime.now(UTC))
+        self._logged_missing_headless_browser = False
 
     # -- skill knobs -----------------------------------------------------
 
@@ -948,6 +949,13 @@ class DiscoveryAgent(BaseAgent):
     async def _resolve_google_news_article_via_browser(self, wrapper_url: str, *, timeout: float) -> str | None:
         browser = self._headless_browser_binary()
         if not browser:
+            if not self._logged_missing_headless_browser:
+                self.logger.warning(
+                    "Discovery cannot resolve Google News wrappers because no headless browser binary was found. "
+                    "Install one of: %s.",
+                    ", ".join(HEADLESS_BROWSER_CANDIDATES),
+                )
+                self._logged_missing_headless_browser = True
             return None
         try:
             process = await asyncio.create_subprocess_exec(

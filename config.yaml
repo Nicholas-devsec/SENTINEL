@@ -194,10 +194,12 @@ discovery:
     - name: crimeware-fresh
       enabled: true
       keywords:
-        - ioc
-        - iocs
         - indicators of compromise
+        - threat intelligence
+        - threat report
+        - malware analysis
         - c2
+        - command and control
         - stealer
         - loader
         - ransomware
@@ -205,7 +207,6 @@ discovery:
         - backdoor
         - malware
         - payload
-        - hash
         - cve
       # Open-web discovery only. Curated vendor RSS/blog sources belong in
       # `sources.feeds` and are blocked from this channel by DiscoveryAgent.
@@ -217,8 +218,11 @@ discovery:
           base_url: https://api.gdeltproject.org/api/v2/doc/doc
           query_terms:
             - indicators of compromise
-            - ioc
             - c2 infrastructure
+            - command and control
+            - malware analysis
+            - threat intelligence
+            - threat report
             - phishing
             - stealer
             - malware
@@ -231,15 +235,13 @@ discovery:
           provider: google_news_rss
           base_url: https://news.google.com/rss/search
           query_terms:
-            - indicators of compromise
-            - ioc
-            - c2 infrastructure
-            - phishing
-            - stealer
-            - malware
-            - ransomware
-          max_queries: 3
-          max_records: 10
+            - '"indicators of compromise" malware'
+            - '"indicators of compromise" ransomware'
+            - '"indicators of compromise" stealer'
+            - '"C2 infrastructure" malware'
+            - '"malware analysis" "indicators of compromise"'
+          max_queries: 5
+          max_records: 15
       freshness_hours: 96
       max_candidates_per_source: 15
       max_pages_per_run: 8
