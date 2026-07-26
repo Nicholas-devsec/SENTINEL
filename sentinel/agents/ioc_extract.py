@@ -51,6 +51,7 @@ DEFANGED_DOMAIN_RE = re.compile(
     r"[a-zA-Z]{2,63}\b"
 )
 DEFANGED_URL_SCHEME_PREFIX_RE = re.compile(r"(?:^|[^a-zA-Z0-9])h..ps?(?:\[:\]|:)\s*(?:\[//\]|//)\s*$", re.IGNORECASE)
+DEFANGED_EMAIL_PREFIX_RE = re.compile(r"(?:@|\[@\])\s*$")
 TLD_EXTRACT = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 
 
@@ -319,6 +320,15 @@ def _is_domain_embedded_in_defanged_url(text: str, span: tuple[int, int]) -> boo
     return not suffix or suffix.startswith(("/", "[", "?", "#", ":", ".", ",", ";"))
 
 
+def _is_domain_embedded_in_defanged_email(text: str, span: tuple[int, int]) -> bool:
+    start, end = span
+    prefix = text[max(0, start - 12) : start]
+    suffix = text[end : min(len(text), end + 8)]
+    if DEFANGED_EMAIL_PREFIX_RE.search(prefix) is None:
+        return False
+    return not suffix or suffix.startswith((" ", "\t", "\n", "\r", ",", ";", ")", "]", "|"))
+
+
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:
     """Extract candidate IOCs from prose. exclude_hostnames drops the article's own infrastructure."""
     excluded = _expand_excluded_hostnames(exclude_hostnames)
@@ -328,6 +338,8 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
     # defang marker itself acts as the confidence signal.
     for match in DEFANGED_DOMAIN_RE.finditer(text):
         if _is_domain_embedded_in_defanged_url(text, match.span()):
+            continue
+        if _is_domain_embedded_in_defanged_email(text, match.span()):
             continue
         domain = match.group(0).replace("[.]", ".").rstrip(".").lower()
         if not _is_excluded_hostname(domain, excluded) and not _is_common_benign_indicator_hostname(domain):

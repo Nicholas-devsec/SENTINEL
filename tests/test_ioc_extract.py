@@ -78,6 +78,28 @@ def test_suppresses_embedded_social_shortener_urls_from_articles() -> None:
     assert not any(value.startswith("https://x.com/") for _, value in extracted)
 
 
+def test_defanged_email_domain_is_not_extracted_as_standalone_domain() -> None:
+    text = """
+Indicators of compromise (IOCs)
+Indicator | Type | Role | Notes
+45[.]131[.]66[.]106 | IPv4 | Command and control | Beacon destination
+64[.]20[.]53[.]230 | IPv4 | Claimed exfiltration | Named in payload comment
+e*******7[@]proton[.]me | Email | Extortion contact | Sole documented attacker contact channel
+3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy | Bitcoin address | Claimed ransom address | Sample address
+CVE-2025-3248 | CVE | Initial access | Unauthenticated RCE
+CVE-2021-29441 | CVE | Privilege escalation | Chained with default signing key
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("ipv4", "45.131.66.106") in extracted
+    assert ("ipv4", "64.20.53.230") in extracted
+    assert ("cve", "CVE-2025-3248") in extracted
+    assert ("cve", "CVE-2021-29441") in extracted
+    assert ("domain", "proton.me") not in extracted
+
+
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
     text = (
         "URL hxxps[:]//inventory-card-thumbzilla-ip[.]trycloudflare[.]com/De/\n"
