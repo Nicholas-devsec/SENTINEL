@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html import unescape
@@ -109,6 +110,7 @@ HEADLESS_BROWSER_CANDIDATES = (
     "chromium-browser",
 )
 HEADLESS_BROWSER_VIRTUAL_TIME_MS = 8_000
+HEADLESS_BROWSER_TIMEOUT_FLOOR_SECONDS = 45.0
 
 CANONICAL_LINK_RE = re.compile(
     r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\'](?P<url>[^"\']+)["\']',
@@ -958,26 +960,42 @@ class DiscoveryAgent(BaseAgent):
                 self._logged_missing_headless_browser = True
             return None
         try:
-            process = await asyncio.create_subprocess_exec(
-                browser,
-                "--headless",
-                "--disable-gpu",
-                f"--virtual-time-budget={HEADLESS_BROWSER_VIRTUAL_TIME_MS}",
-                "--dump-dom",
-                wrapper_url,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            with tempfile.TemporaryDirectory(prefix="sentinel-chromium-") as user_data_dir:
+                process = await asyncio.create_subprocess_exec(
+                    browser,
+                    "--headless=new",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    f"--user-data-dir={user_data_dir}",
+                    f"--virtual-time-budget={HEADLESS_BROWSER_VIRTUAL_TIME_MS}",
+                    "--dump-dom",
+                    wrapper_url,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                process_timeout = max(float(timeout), HEADLESS_BROWSER_TIMEOUT_FLOOR_SECONDS)
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=process_timeout)
+                except TimeoutError:
+                    process.kill()
+                    await process.communicate()
+                    self.logger.warning(
+                        "Discovery headless browser timed out after %.0fs while resolving wrapper url=%s",
+                        process_timeout,
+                        wrapper_url,
+                    )
+                    return None
         except OSError as exc:
-            self.logger.warning("Discovery could not start headless browser for wrapper resolution: %s", exc)
-            return None
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        except TimeoutError:
-            process.kill()
-            await process.communicate()
             self.logger.warning(
-                "Discovery headless browser timed out while resolving wrapper url=%s", wrapper_url
+                "Discovery could not start headless browser for wrapper resolution with binary=%s: %s",
+                browser,
+                exc,
             )
             return None
         if process.returncode != 0:

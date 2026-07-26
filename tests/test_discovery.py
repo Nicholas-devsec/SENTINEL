@@ -953,6 +953,61 @@ async def test_google_news_wrapper_missing_browser_logs_operator_hint(caplog) ->
 
 
 @pytest.mark.asyncio
+async def test_google_news_browser_resolution_uses_ec2_safe_chromium_flags(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (
+                b'<html><body><c-wiz data-n-au="https://publisher.test/threat-report"></c-wiz></body></html>',
+                b"",
+            )
+
+        def kill(self) -> None:
+            captured["killed"] = True
+
+    async def fake_create_subprocess_exec(*args, **kwargs) -> FakeProcess:
+        captured["args"] = args
+        captured["stdout"] = kwargs.get("stdout")
+        captured["stderr"] = kwargs.get("stderr")
+        return FakeProcess()
+
+    async def fake_wait_for(awaitable, timeout):
+        captured["timeout"] = timeout
+        return await awaitable
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+    agent = DiscoveryAgent(
+        settings=google_news_settings(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404))),
+        session_factory=lambda: None,
+        now_fn=lambda: NOW,
+    )
+    agent._headless_browser_binary = lambda: "/usr/bin/chromium-browser"  # type: ignore[method-assign]
+
+    try:
+        resolved = await agent._resolve_google_news_article_via_browser(
+            "https://news.google.com/rss/articles/CBMi-wrapped",
+            timeout=1,
+        )
+    finally:
+        await agent.http_client.aclose()
+
+    args = captured["args"]
+    assert resolved == "https://publisher.test/threat-report"
+    assert args[0] == "/usr/bin/chromium-browser"
+    assert "--headless=new" in args
+    assert "--no-sandbox" in args
+    assert "--disable-dev-shm-usage" in args
+    assert any(str(arg).startswith("--user-data-dir=/tmp/sentinel-chromium-") for arg in args)
+    assert captured["timeout"] == 45.0
+    assert "killed" not in captured
+
+
+@pytest.mark.asyncio
 async def test_asset_candidate_url_is_discarded_before_fetch(db_session_factory) -> None:
     seen: list[str] = []
 
