@@ -527,10 +527,12 @@ class DeliveryAgent(BaseAgent):
         kept = [item for item in items if str(item.get("id") or "") not in recently]
         suppressed = len(items) - len(kept)
         if suppressed:
+            breakdown = self._suppression_breakdown(items, recently)
             self.logger.info(
-                "Alert ledger suppressed %s already-alerted IOC(s) within the %sh resend window",
+                "Alert ledger suppressed %s already-alerted IOC(s) within the %sh resend window%s",
                 suppressed,
                 self.settings.delivery.alert_resend_after_hours,
+                breakdown,
             )
         return kept
 
@@ -543,8 +545,32 @@ class DeliveryAgent(BaseAgent):
         kept = [item for item in items if str(item.get("id") or "") not in labeled]
         suppressed = len(items) - len(kept)
         if suppressed:
-            self.logger.info("Feedback ledger suppressed %s already-labeled IOC alert candidate(s)", suppressed)
+            breakdown = self._suppression_breakdown(items, labeled)
+            self.logger.info(
+                "Feedback ledger suppressed %s already-labeled IOC alert candidate(s)%s",
+                suppressed,
+                breakdown,
+            )
         return kept
+
+    def _suppression_bucket(self, item: dict[str, Any]) -> str:
+        if self._is_article_card(item):
+            if self._is_discovery_article_card(item):
+                return "discovery_article"
+            return "feed_article"
+        return "feed"
+
+    def _suppression_breakdown(self, items: list[dict[str, Any]], suppressed_ids: set[str]) -> str:
+        counts: dict[str, int] = {}
+        for item in items:
+            if str(item.get("id") or "") not in suppressed_ids:
+                continue
+            bucket = self._suppression_bucket(item)
+            counts[bucket] = counts.get(bucket, 0) + 1
+        if not counts:
+            return ""
+        parts = [f"{bucket}={counts[bucket]}" for bucket in sorted(counts)]
+        return f" ({', '.join(parts)})"
 
     async def _record_alert_events(self, cards: list[dict[str, Any]], *, alert_kind: str) -> None:
         now = datetime.now(UTC)

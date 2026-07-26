@@ -46,10 +46,14 @@ workflow:
   feed_ioc_store_limit_per_run: 3
   # How many article/writeups from configured source feeds are allowed into
   # the DB each cron run. These are RSS/blog entries from `sources.feeds`.
-  feed_article_store_limit_per_run: 1
+  # Keep this higher than the Telegram send budget so already-sent/labeled
+  # article IOCs do not starve the curated article alert slot.
+  feed_article_store_limit_per_run: 3
   # How many discovery/open-web articles are allowed into the DB each cron run.
   # These come from `discovery.profiles[*].feeds` and `search_providers`.
-  discovery_article_store_limit_per_run: 1
+  # Keep this higher than the Telegram send budget so already-sent/labeled
+  # article IOCs do not starve the discovery article alert slot.
+  discovery_article_store_limit_per_run: 3
   # Legacy pooled article/writeup DB budget. Used only when the two split
   # article store limits above are omitted from config.
   article_store_limit_per_run: 1

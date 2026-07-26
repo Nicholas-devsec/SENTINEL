@@ -1046,6 +1046,41 @@ def test_delivery_agent_applies_split_feed_and_discovery_article_limits() -> Non
     assert [card["value"] for card in selected if not card.get("source_title")] == ["feed-ioc.example"]
 
 
+def test_delivery_agent_reports_suppression_breakdown_by_channel() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    feed_id = str(uuid4())
+    curated_id = str(uuid4())
+    discovery_id = str(uuid4())
+    items = [
+        {"id": feed_id, "value": "feed.example", "type": "domain", "source": "threatfox"},
+        {
+            "id": curated_id,
+            "value": "curated.example",
+            "type": "domain",
+            "source": "rapid7_blog",
+            "reference_url": "https://rapid7.example/report",
+            "attributes": {"provenance": "writeup"},
+        },
+        {
+            "id": discovery_id,
+            "value": "discovery.example",
+            "type": "domain",
+            "source": "discovery:publisher.example",
+            "reference_url": "https://publisher.example/report",
+            "attributes": {"provenance": "discovery"},
+        },
+    ]
+
+    assert agent._suppression_breakdown(items, {feed_id, curated_id, discovery_id}) == (
+        " (discovery_article=1, feed=1, feed_article=1)"
+    )
+
+
 def test_delivery_agent_tops_up_missing_feed_type_buckets_for_feedback() -> None:
     settings = build_settings().model_copy(deep=True)
     settings.workflow.telegram_type_limits_per_run = {"ipv4": 2, "domain": 1, "hash": 1}
