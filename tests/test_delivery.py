@@ -11,7 +11,12 @@ from sentinel.agents.scorer import ScoredIOC
 from sentinel.config import FeedConfig, SentinelSettings
 from sentinel.db.models import FeedbackRecord
 from sentinel.delivery.email_digest import render_daily_digest
-from sentinel.delivery.telegram_bot import build_feedback_markup, format_daily_digest_intro, format_daily_digest_message
+from sentinel.delivery.telegram_bot import (
+    build_change_feedback_markup,
+    build_feedback_markup,
+    format_daily_digest_intro,
+    format_daily_digest_message,
+)
 
 
 class FakeTelegramBot:
@@ -159,6 +164,14 @@ def test_feedback_markup_uses_true_positive_and_false_positive_labels() -> None:
     assert second_row[0].callback_data == "false_positive:ioc-123"
     assert second_row[1].text == "Needs Review"
     assert second_row[1].callback_data == "needs_review:ioc-123"
+
+
+def test_change_feedback_markup_reopens_verdict_picker() -> None:
+    markup = build_change_feedback_markup("ioc-123")
+
+    assert len(markup.inline_keyboard) == 1
+    assert markup.inline_keyboard[0][0].text == "Change verdict"
+    assert markup.inline_keyboard[0][0].callback_data == "change_verdict:ioc-123"
 
 
 @pytest.mark.asyncio
@@ -724,7 +737,8 @@ async def test_delivery_agent_records_feedback_from_callback() -> None:
     assert query.message.edited_text is not None
     assert "Feedback recorded: False Positive" in query.message.text
     assert query.message.parse_mode == "HTML"
-    assert query.message.reply_markup is None
+    assert query.message.reply_markup.inline_keyboard[0][0].text == "Change verdict"
+    assert query.message.reply_markup.inline_keyboard[0][0].callback_data == f"change_verdict:{ioc_id}"
     assert "suppressed" in query.answer_text
     assert record == 1
     assert session_factory.storage[0].analyst_id == "42"
@@ -774,7 +788,7 @@ async def test_delivery_agent_confirms_needs_review_callback() -> None:
     assert query.answer_text == "Recorded: needs review"
     assert query.show_alert is True
     assert "Feedback recorded: Needs Review" in query.message.text
-    assert query.message.reply_markup is None
+    assert query.message.reply_markup.inline_keyboard[0][0].text == "Change verdict"
     assert record.verdict == "needs_review"
 
 
@@ -795,7 +809,7 @@ async def test_delivery_agent_records_low_level_true_positive_callback() -> None
     assert query.answer_text == "Recorded: low-level true positive"
     assert query.show_alert is True
     assert "Feedback recorded: Low-level True Positive" in query.message.text
-    assert query.message.reply_markup is None
+    assert query.message.reply_markup.inline_keyboard[0][0].text == "Change verdict"
     assert record.verdict == "low_level_true_positive"
 
 
@@ -847,6 +861,30 @@ async def test_delivery_agent_appends_retriage_feedback_event() -> None:
     assert second.answer_text == "Recorded FP and suppressed 1 IOC(s)"
     assert "Feedback recorded: False Positive" in second.message.text
     assert record == 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_change_verdict_callback_restores_feedback_buttons() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    ioc_id = str(uuid4())
+    query = FakeQuery(data=f"change_verdict:{ioc_id}", user_id="42")
+
+    result = await agent.handle_callback_query(query)
+
+    assert result is True
+    assert query.answer_text == "Choose a new verdict"
+    assert query.show_alert is False
+    first_row = query.message.reply_markup.inline_keyboard[0]
+    second_row = query.message.reply_markup.inline_keyboard[1]
+    assert first_row[0].callback_data == f"confirmed:{ioc_id}"
+    assert first_row[1].callback_data == f"low_level_true_positive:{ioc_id}"
+    assert second_row[0].callback_data == f"false_positive:{ioc_id}"
+    assert second_row[1].callback_data == f"needs_review:{ioc_id}"
 
 
 @pytest.mark.asyncio

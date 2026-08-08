@@ -66,6 +66,12 @@ def build_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def build_change_feedback_markup(ioc_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Change verdict", callback_data=f"change_verdict:{ioc_id}")]]
+    )
+
+
 def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text

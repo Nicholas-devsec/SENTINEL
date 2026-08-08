@@ -24,6 +24,7 @@ from sentinel.db.models import AlertEvent, FeedbackRecord, IOC, IOCSighting
 from sentinel.delivery.email_digest import render_daily_digest, send_daily_digest
 from sentinel.delivery.telegram_bot import (
     TELEGRAM_PARSE_MODE,
+    build_change_feedback_markup,
     build_feedback_markup,
     format_alert_message,
     format_grouped_alert_message,
@@ -163,6 +164,11 @@ class DeliveryAgent(BaseAgent):
         if not ioc_id:
             return None
         return build_feedback_markup(str(ioc_id))
+
+    def _build_change_markup(self, ioc_id: str | None) -> InlineKeyboardMarkup | None:
+        if not ioc_id:
+            return None
+        return build_change_feedback_markup(str(ioc_id))
 
     def _sort_last_seen_value(self, value: Any) -> datetime:
         if isinstance(value, str):
@@ -1135,6 +1141,9 @@ class DeliveryAgent(BaseAgent):
 
     async def handle_callback_query(self, query: Any) -> FeedbackRecord | bool:
         raw_verdict, ioc_id = query.data.split(":", 1)
+        if raw_verdict == "change_verdict":
+            await self._restore_feedback_markup(query, ioc_id=ioc_id)
+            return True
         verdict = normalize_verdict(raw_verdict)
         analyst_id = str(query.from_user.id)
         logger.info("Received Telegram feedback callback verdict=%s ioc_id=%s analyst_id=%s", verdict, ioc_id, analyst_id)
@@ -1151,7 +1160,7 @@ class DeliveryAgent(BaseAgent):
                 )
                 ack_text = "Already suppressed" if not changed else f"Recorded FP and suppressed {affected} IOC(s)"
                 await query.answer(ack_text, show_alert=True)
-                await self._confirm_callback_message(query, verdict=FALSE_POSITIVE, repeated=not changed)
+                await self._confirm_callback_message(query, verdict=FALSE_POSITIVE, repeated=not changed, ioc_id=ioc_id)
                 return affected
             existing = await self._feedback_exists(
                 ioc_id=ioc_id,
@@ -1169,7 +1178,7 @@ class DeliveryAgent(BaseAgent):
                 self._feedback_ack_text(record.verdict, repeated=existing),
                 show_alert=True,
             )
-            await self._confirm_callback_message(query, verdict=record.verdict, repeated=existing)
+            await self._confirm_callback_message(query, verdict=record.verdict, repeated=existing, ioc_id=ioc_id)
             logger.info(
                 "Recorded Telegram feedback verdict=%s ioc_id=%s analyst_id=%s repeated=%s",
                 record.verdict,
@@ -1264,12 +1273,31 @@ class DeliveryAgent(BaseAgent):
         prefix = "Already recorded" if repeated else "Recorded"
         return f"{prefix}: {label}"
 
-    async def _confirm_callback_message(self, query: Any, *, verdict: str, repeated: bool) -> None:
+    async def _restore_feedback_markup(self, query: Any, *, ioc_id: str) -> None:
+        message = getattr(query, "message", None)
+        try:
+            await query.answer("Choose a new verdict", show_alert=False)
+        except Exception:
+            logger.exception("Failed to acknowledge Telegram change-verdict callback")
+        if message is None:
+            return
+        markup = self._build_markup(ioc_id)
+        try:
+            if hasattr(message, "edit_reply_markup"):
+                await message.edit_reply_markup(reply_markup=markup)
+                return
+            await self._send_callback_confirmation_reply(message, "Use the alert buttons to choose a new verdict.")
+        except Exception:
+            logger.exception("Failed to restore Telegram feedback buttons")
+            await self._send_callback_confirmation_reply(message, "Use the alert buttons to choose a new verdict.")
+
+    async def _confirm_callback_message(self, query: Any, *, verdict: str, repeated: bool, ioc_id: str) -> None:
         message = getattr(query, "message", None)
         if message is None:
             return
         confirmation = self._feedback_confirmation_note(verdict, repeated=repeated)
         confirmation_html = f"<b>{html.escape(confirmation)}</b>"
+        change_markup = self._build_change_markup(ioc_id)
         try:
             current_html = str(getattr(message, "html_text", None) or "")
             current_text = str(getattr(message, "text", "") or "")
@@ -1279,7 +1307,7 @@ class DeliveryAgent(BaseAgent):
                 await message.edit_text(
                     f"{current_html}\n\n{confirmation_html}",
                     parse_mode=TELEGRAM_PARSE_MODE,
-                    reply_markup=None,
+                    reply_markup=change_markup,
                 )
                 return
             current_caption_html = str(getattr(message, "html_caption", None) or "")
@@ -1290,11 +1318,11 @@ class DeliveryAgent(BaseAgent):
                 await message.edit_caption(
                     caption=f"{current_caption_html}\n\n{confirmation_html}",
                     parse_mode=TELEGRAM_PARSE_MODE,
-                    reply_markup=None,
+                    reply_markup=change_markup,
                 )
                 return
             if hasattr(message, "edit_reply_markup"):
-                await message.edit_reply_markup(reply_markup=None)
+                await message.edit_reply_markup(reply_markup=change_markup)
                 await self._send_callback_confirmation_reply(message, confirmation)
                 return
             await self._send_callback_confirmation_reply(message, confirmation)
