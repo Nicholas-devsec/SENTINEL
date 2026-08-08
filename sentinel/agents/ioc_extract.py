@@ -371,6 +371,11 @@ def _is_domain_in_file_artifact_context(section_text: str, value: str) -> bool:
     return False
 
 
+def _looks_like_file_artifact_domain(value: str) -> bool:
+    suffix = value.strip().lower().rsplit(".", 1)[-1]
+    return suffix in FILE_EXTENSIONS
+
+
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:
     """Extract candidate IOCs from prose. exclude_hostnames drops the article's own infrastructure."""
     excluded = _expand_excluded_hostnames(exclude_hostnames)
@@ -384,6 +389,8 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
         if _is_domain_embedded_in_defanged_email(text, match.span()):
             continue
         domain = match.group(0).replace("[.]", ".").rstrip(".").lower()
+        if _looks_like_file_artifact_domain(domain):
+            continue
         if not _is_excluded_hostname(domain, excluded) and not _is_common_benign_indicator_hostname(domain):
             found.append(ExtractedIOC(type="domain", value=domain))
 
@@ -463,10 +470,12 @@ BARE_DOMAIN_RE = re.compile(
 )
 # Trailing labels that make a dotted token a filename, not a domain.
 FILE_EXTENSIONS = {
-    "exe", "dll", "sys", "bat", "cmd", "ps1", "vbs", "js", "jar", "py", "sh",
+    "exe", "dll", "sys", "bat", "cmd", "ps1", "vbs", "js", "mjs", "cjs",
+    "jsx", "ts", "tsx", "jar", "py", "sh",
     "zip", "rar", "7z", "gz", "tar", "iso", "img", "bin", "dat", "tmp", "log",
     "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "rtf", "txt", "csv",
     "lnk", "scr", "msi", "hta", "chm", "php", "asp", "aspx", "jsp", "html", "htm",
+    "json", "map", "lock", "yaml", "yml", "toml",
 }
 
 
