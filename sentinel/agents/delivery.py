@@ -476,6 +476,27 @@ class DeliveryAgent(BaseAgent):
         ioc_id = card.get("id")
         return [str(ioc_id)] if ioc_id else []
 
+    def _normalized_alert_reference_url(self, value: Any) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = urlparse(raw)
+        except ValueError:
+            return raw.rstrip("/")
+        if not parsed.scheme or not parsed.netloc:
+            return raw.rstrip("/")
+        host = (parsed.hostname or "").lower()
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+        path = parsed.path.rstrip("/") or "/"
+        return parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=host,
+            path=path,
+            fragment="",
+        ).geturl()
+
     async def _recently_alerted_ids(self, ioc_ids: list[str]) -> set[str]:
         parsed: list[UUID] = []
         for raw in ioc_ids:
@@ -497,6 +518,34 @@ class DeliveryAgent(BaseAgent):
                 .where(AlertEvent.sent_at >= cutoff)
             )
             return {str(ioc_id) for (ioc_id,) in rows.all()}
+
+    async def _recently_alerted_reference_urls(self, reference_urls: list[str]) -> set[str]:
+        targets = {
+            normalized
+            for normalized in (self._normalized_alert_reference_url(reference_url) for reference_url in reference_urls)
+            if normalized
+        }
+        if not targets:
+            return set()
+        cutoff = datetime.now(UTC) - timedelta(
+            hours=max(1, int(self.settings.delivery.alert_resend_after_hours))
+        )
+        async with self.session_factory() as session:
+            if not hasattr(session, "execute"):
+                return set()
+            rows = await session.execute(
+                select(AlertEvent.reference_url)
+                .where(AlertEvent.reference_url.is_not(None))
+                .where(AlertEvent.sent_at >= cutoff)
+            )
+        recent = {
+            normalized
+            for normalized in (
+                self._normalized_alert_reference_url(reference_url) for (reference_url,) in rows.all()
+            )
+            if normalized
+        }
+        return targets & recent
 
     async def _feedback_labeled_ids(self, ioc_ids: list[str]) -> set[str]:
         parsed: list[UUID] = []
@@ -522,14 +571,31 @@ class DeliveryAgent(BaseAgent):
         recently = await self._recently_alerted_ids(
             [str(item.get("id")) for item in items if item.get("id")]
         )
-        if not recently:
+        recent_references = await self._recently_alerted_reference_urls(
+            [
+                str(item.get("reference_url") or "")
+                for item in items
+                if self._is_article_card(item) and str(item.get("reference_url") or "").strip()
+            ]
+        )
+        if not recently and not recent_references:
             return items
-        kept = [item for item in items if str(item.get("id") or "") not in recently]
+
+        def is_suppressed(item: dict[str, Any]) -> bool:
+            if str(item.get("id") or "") in recently:
+                return True
+            if not self._is_article_card(item):
+                return False
+            reference_url = self._normalized_alert_reference_url(item.get("reference_url"))
+            return bool(reference_url and reference_url in recent_references)
+
+        kept = [item for item in items if not is_suppressed(item)]
         suppressed = len(items) - len(kept)
         if suppressed:
-            breakdown = self._suppression_breakdown(items, recently)
+            suppressed_ids = {str(item.get("id") or "") for item in items if is_suppressed(item)}
+            breakdown = self._suppression_breakdown(items, suppressed_ids)
             self.logger.info(
-                "Alert ledger suppressed %s already-alerted IOC(s) within the %sh resend window%s",
+                "Alert ledger suppressed %s already-alerted IOC(s)/article(s) within the %sh resend window%s",
                 suppressed,
                 self.settings.delivery.alert_resend_after_hours,
                 breakdown,

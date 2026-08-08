@@ -1081,6 +1081,43 @@ def test_delivery_agent_reports_suppression_breakdown_by_channel() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_delivery_agent_suppresses_remaining_iocs_from_already_alerted_article() -> None:
+    settings = build_settings().model_copy(deep=True)
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    article_url = "https://www.cloudsek.com/ar/blog/tax-season-open-season-phishing-and-malware-campaigns-targeting-indian-taxpayers/"
+    hidden_ioc = {
+        "id": str(uuid4()),
+        "value": "7479fbc27320ae246db9030cca80809ec63de0e9",
+        "type": "sha1",
+        "source": "discovery:www.cloudsek.com",
+        "risk_score": 43.86,
+        "severity": "informational",
+        "reference_url": article_url.rstrip("/"),
+        "source_title": "Tax Season, Open Season",
+        "last_seen": datetime.now(UTC),
+        "attributes": {"provenance": "discovery", "article_ioc_count": 8},
+        "mitre_techniques": [],
+        "mitre_tactics": [],
+    }
+
+    async def fake_recently_alerted_ids(_ioc_ids):
+        return set()
+
+    async def fake_recently_alerted_reference_urls(_reference_urls):
+        return {agent._normalized_alert_reference_url(article_url)}
+
+    agent._recently_alerted_ids = fake_recently_alerted_ids
+    agent._recently_alerted_reference_urls = fake_recently_alerted_reference_urls
+
+    assert await agent._filter_recently_alerted([hidden_ioc]) == []
+
+
 def test_delivery_agent_tops_up_missing_feed_type_buckets_for_feedback() -> None:
     settings = build_settings().model_copy(deep=True)
     settings.workflow.telegram_type_limits_per_run = {"ipv4": 2, "domain": 1, "hash": 1}
