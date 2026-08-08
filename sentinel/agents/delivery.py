@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 FALLBACK_DIGEST_MIN_SCORE = 25.0
 HASH_TYPES = {"md5", "sha1", "sha256"}
 DIRECT_IOC_FEED_SOURCES = {"threatfox", "urlhaus", "feodotracker", "otx", "malwarebazaar", "phishtank"}
+ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP = 2
 CAMPAIGN_STOPWORDS = {
     "about",
     "access",
@@ -316,6 +317,42 @@ class DeliveryAgent(BaseAgent):
             }
         ]
 
+    def _article_campaign_ioc_keys(self, item: dict[str, Any]) -> set[str]:
+        if not self._is_article_card(item):
+            return set()
+        keys: set[str] = set()
+        for entry in self._ioc_entries_for_card(item):
+            ioc_type = str(entry.get("type") or "").strip().lower()
+            if not ioc_type or ioc_type == "cve":
+                continue
+            value = str(entry.get("value") or "").strip().lower()
+            if not value:
+                continue
+            keys.add(f"{ioc_type}:{value}")
+        return keys
+
+    def _suppress_duplicate_article_campaign_cards(self, cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept: list[dict[str, Any]] = []
+        kept_article_keys: list[set[str]] = []
+        suppressed = 0
+        for card in cards:
+            keys = self._article_campaign_ioc_keys(card)
+            if keys and any(
+                len(keys & existing) >= ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP
+                for existing in kept_article_keys
+            ):
+                suppressed += 1
+                continue
+            kept.append(card)
+            if keys:
+                kept_article_keys.append(keys)
+        if suppressed:
+            self.logger.info(
+                "Suppressed %s duplicate article campaign alert card(s) by IOC overlap",
+                suppressed,
+            )
+        return kept
+
     def _merge_digest_card(self, base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
         merged_iocs: dict[tuple[str, str], dict[str, str]] = {}
         for member in self._ioc_entries_for_card(base) + self._ioc_entries_for_card(incoming):
@@ -571,6 +608,18 @@ class DeliveryAgent(BaseAgent):
         recently = await self._recently_alerted_ids(
             [str(item.get("id")) for item in items if item.get("id")]
         )
+        recent_ioc_refs: dict[str, int] = {}
+        for item in items:
+            if str(item.get("id") or "") not in recently or not self._is_article_card(item):
+                continue
+            reference_url = self._normalized_alert_reference_url(item.get("reference_url"))
+            if reference_url:
+                recent_ioc_refs[reference_url] = recent_ioc_refs.get(reference_url, 0) + 1
+        suppressed_overlap_refs = {
+            reference_url
+            for reference_url, count in recent_ioc_refs.items()
+            if count >= ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP
+        }
         recent_references = await self._recently_alerted_reference_urls(
             [
                 str(item.get("reference_url") or "")
@@ -578,7 +627,7 @@ class DeliveryAgent(BaseAgent):
                 if self._is_article_card(item) and str(item.get("reference_url") or "").strip()
             ]
         )
-        if not recently and not recent_references:
+        if not recently and not recent_references and not suppressed_overlap_refs:
             return items
 
         def is_suppressed(item: dict[str, Any]) -> bool:
@@ -587,7 +636,7 @@ class DeliveryAgent(BaseAgent):
             if not self._is_article_card(item):
                 return False
             reference_url = self._normalized_alert_reference_url(item.get("reference_url"))
-            return bool(reference_url and reference_url in recent_references)
+            return bool(reference_url and (reference_url in recent_references or reference_url in suppressed_overlap_refs))
 
         kept = [item for item in items if not is_suppressed(item)]
         suppressed = len(items) - len(kept)
@@ -1382,6 +1431,7 @@ class DeliveryAgent(BaseAgent):
             immediate_candidates = await self._filter_recently_alerted(immediate_candidates)
             immediate_candidates = await self._filter_feedback_labeled(immediate_candidates)
             immediate = self._group_immediate_alerts(immediate_candidates)
+            immediate = self._suppress_duplicate_article_campaign_cards(immediate)
             immediate = self._apply_delivery_limits(immediate)
         digest_candidates = self._select_digest_candidates(items)
         sent_immediate = 0

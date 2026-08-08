@@ -1118,6 +1118,108 @@ async def test_delivery_agent_suppresses_remaining_iocs_from_already_alerted_art
     assert await agent._filter_recently_alerted([hidden_ioc]) == []
 
 
+def test_delivery_agent_suppresses_same_run_article_campaign_overlap() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    microsoft_card = {
+        "id": str(uuid4()),
+        "value": "918fa52ae45ed60ba7cc8bdc99c3cbe9ab92e0375ec31fc05d0d4513be11c593",
+        "type": "sha256",
+        "source": "discovery:www.microsoft.com",
+        "risk_score": 52.55,
+        "severity": "medium",
+        "reference_url": "https://www.microsoft.com/en-us/security/blog/captivecrunch",
+        "source_title": "CaptiveCrunch: Midnight Blizzard targets travelers",
+        "attributes": {"provenance": "discovery", "article_ioc_count": 12},
+        "grouped_iocs": [
+            {"type": "domain", "value": "owa-ms365.com"},
+            {"type": "domain", "value": "ms365-live.com"},
+            {"type": "ipv4", "value": "31.57.243.154"},
+            {"type": "ipv4", "value": "213.145.86.112"},
+        ],
+    }
+    gbhackers_card = {
+        "id": str(uuid4()),
+        "value": "owa-ms365.com",
+        "type": "domain",
+        "source": "gbhackers_blog",
+        "risk_score": 43.98,
+        "severity": "informational",
+        "reference_url": "https://gbhackers.com/chocoshell-steals-microsoft-365/",
+        "source_title": "ChocoShell Steals Microsoft 365 Tokens and Browser Sessions From Travelers",
+        "attributes": {"provenance": "writeup", "article_ioc_count": 12},
+        "grouped_iocs": [
+            {"type": "domain", "value": "owa-ms365.com"},
+            {"type": "domain", "value": "ms365-live.com"},
+            {"type": "domain", "value": "m365-owa.com"},
+            {"type": "ipv4", "value": "31.57.243.154"},
+        ],
+    }
+
+    assert agent._suppress_duplicate_article_campaign_cards([microsoft_card, gbhackers_card]) == [microsoft_card]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_suppresses_article_when_multiple_iocs_were_alerted_from_another_source() -> None:
+    settings = build_settings().model_copy(deep=True)
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    first_overlap_id = str(uuid4())
+    second_overlap_id = str(uuid4())
+    fresh_id = str(uuid4())
+    items = [
+        {
+            "id": first_overlap_id,
+            "value": "owa-ms365.com",
+            "type": "domain",
+            "source": "gbhackers_blog",
+            "risk_score": 43.98,
+            "severity": "informational",
+            "reference_url": "https://gbhackers.com/chocoshell-steals-microsoft-365/",
+            "attributes": {"provenance": "writeup", "article_ioc_count": 12},
+        },
+        {
+            "id": second_overlap_id,
+            "value": "31.57.243.154",
+            "type": "ipv4",
+            "source": "gbhackers_blog",
+            "risk_score": 42.0,
+            "severity": "informational",
+            "reference_url": "https://gbhackers.com/chocoshell-steals-microsoft-365/",
+            "attributes": {"provenance": "writeup", "article_ioc_count": 12},
+        },
+        {
+            "id": fresh_id,
+            "value": "m365-owa.com",
+            "type": "domain",
+            "source": "gbhackers_blog",
+            "risk_score": 41.0,
+            "severity": "informational",
+            "reference_url": "https://gbhackers.com/chocoshell-steals-microsoft-365/",
+            "attributes": {"provenance": "writeup", "article_ioc_count": 12},
+        },
+    ]
+
+    async def fake_recently_alerted_ids(_ioc_ids):
+        return {first_overlap_id, second_overlap_id}
+
+    async def fake_recently_alerted_reference_urls(_reference_urls):
+        return set()
+
+    agent._recently_alerted_ids = fake_recently_alerted_ids
+    agent._recently_alerted_reference_urls = fake_recently_alerted_reference_urls
+
+    assert await agent._filter_recently_alerted(items) == []
+
+
 def test_delivery_agent_tops_up_missing_feed_type_buckets_for_feedback() -> None:
     settings = build_settings().model_copy(deep=True)
     settings.workflow.telegram_type_limits_per_run = {"ipv4": 2, "domain": 1, "hash": 1}
