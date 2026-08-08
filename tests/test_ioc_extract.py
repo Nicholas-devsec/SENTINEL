@@ -100,6 +100,26 @@ CVE-2021-29441 | CVE | Privilege escalation | Chained with default signing key
     assert ("domain", "proton.me") not in extracted
 
 
+def test_file_artifact_name_with_defanged_dot_is_not_extracted_as_domain() -> None:
+    text = """
+Indicators of Compromise
+Files
+Delete[.]me - File observed during reconnaissance activity, commonly associated with NetScan
+Network
+137[.]220[.]59[.]55 - C2 infrastructure
+safedata[.]s3[.]wasabisys[.]com - exfiltration destination
+d6828e30ab66774a91a96ae93be4ae4c - payload hash
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("domain", "delete.me") not in extracted
+    assert ("domain", "safedata.s3.wasabisys.com") in extracted
+    assert ("ipv4", "137.220.59.55") in extracted
+    assert ("md5", "d6828e30ab66774a91a96ae93be4ae4c") in extracted
+
+
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
     text = (
         "URL hxxps[:]//inventory-card-thumbzilla-ip[.]trycloudflare[.]com/De/\n"

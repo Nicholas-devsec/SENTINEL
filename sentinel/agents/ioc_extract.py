@@ -329,6 +329,48 @@ def _is_domain_embedded_in_defanged_email(text: str, span: tuple[int, int]) -> b
     return not suffix or suffix.startswith((" ", "\t", "\n", "\r", ",", ";", ")", "]", "|"))
 
 
+FILE_ARTIFACT_CONTEXT_TERMS = (
+    "file observed",
+    "file name",
+    "filename",
+    "file path",
+    "process",
+    "executable",
+    "binary",
+    "artifact",
+)
+NETWORK_CONTEXT_TERMS = (
+    "beacon",
+    "c2",
+    "command and control",
+    "destination",
+    "dns",
+    "domain",
+    "exfiltration",
+    "host",
+    "hostname",
+    "infrastructure",
+    "ip",
+    "server",
+    "url",
+)
+
+
+def _is_domain_in_file_artifact_context(section_text: str, value: str) -> bool:
+    target = value.strip().lower()
+    if not target:
+        return False
+    for line in section_text.splitlines():
+        clean = refang(line).lower()
+        if target not in clean:
+            continue
+        if any(term in clean for term in NETWORK_CONTEXT_TERMS):
+            return False
+        if any(term in clean for term in FILE_ARTIFACT_CONTEXT_TERMS):
+            return True
+    return False
+
+
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:
     """Extract candidate IOCs from prose. exclude_hostnames drops the article's own infrastructure."""
     excluded = _expand_excluded_hostnames(exclude_hostnames)
@@ -725,6 +767,11 @@ def extract_iocs_from_section(
 
     found = _augment_root_urls_with_path_cells(section_text, found)
     found = _dedupe(found)
+    found = [
+        item
+        for item in found
+        if item.type != "domain" or not _is_domain_in_file_artifact_context(section_text, item.value)
+    ]
 
     enriched: list[ExtractedIOC] = []
     seen: set[tuple[str, str]] = set()
