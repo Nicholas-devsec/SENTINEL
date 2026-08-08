@@ -160,6 +160,10 @@ def _article_ioc_note(article_ioc_count: int | None) -> str | None:
     return f"More IOCs can be found in the article/writeup ({article_ioc_count} extracted total)."
 
 
+def _format_article_ioc_note(article_ioc_note: str) -> str:
+    return f"<b>⚠ {_escape(article_ioc_note)}</b>"
+
+
 def _is_otx_reference(source: str, reference_url: str | None) -> bool:
     if str(source or "").strip().lower() == "otx":
         return True
@@ -323,7 +327,7 @@ def format_alert_message(
         ]
     )
     if article_ioc_note:
-        lines.append(_escape(article_ioc_note))
+        lines.append(_format_article_ioc_note(article_ioc_note))
     if why:
         lines.extend(["", f"<b>Why this score</b>: {_escape(why)}"])
     lines.extend(["", f"<b>Evidence</b>: {_escape(findings_text)}"])
@@ -391,7 +395,7 @@ def format_grouped_alert_message(
         lines.append(f'📄 <a href="{_escape(article_href)}">{_escape(_reference_link_label(source, reference_url))}</a>')
     lines.extend(["", f"<b>IOCs ({len(iocs)})</b>"])
     if article_ioc_note:
-        lines.append(_escape(article_ioc_note))
+        lines.append(_format_article_ioc_note(article_ioc_note))
     active_label: str | None = None
     for item in iocs[:MAX_GROUPED_IOCS]:
         ioc_type = str(item.get("type", "unknown"))

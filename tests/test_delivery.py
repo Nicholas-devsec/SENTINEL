@@ -1677,7 +1677,7 @@ def test_format_grouped_alert_message_shows_ioc_section_labels() -> None:
     assert "<u>HelloBackdoor</u>" in rendered
     assert "<u>HelloBackdoor Droppers</u>" in rendered
     assert "<u>wtsapi32.dll</u>" in rendered
-    assert "More IOCs can be found in the article/writeup (14 extracted total)." in rendered
+    assert "<b>⚠ More IOCs can be found in the article/writeup (14 extracted total).</b>" in rendered
     assert "<code>16c211c96735f2fae9361b89bd7a31bf</code> [md5]" in rendered
     assert "<code>5[.]39[.]253[.]206</code> [ipv4]" in rendered
 
@@ -1705,7 +1705,7 @@ def test_grouped_alert_message_notes_more_iocs_at_article_display_cap() -> None:
     )
 
     assert "<b>IOCs (5)</b>" in rendered
-    assert "More IOCs can be found in the article/writeup (5 extracted total)." in rendered
+    assert "<b>⚠ More IOCs can be found in the article/writeup (5 extracted total).</b>" in rendered
 
 
 def test_format_alert_message_shows_hash_intel_links() -> None:
@@ -1841,4 +1841,4 @@ def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_cou
     # defanged so the alert never contains a live malicious link.
     assert '<a href="https://example.com/report">Article</a>' in rendered
     assert "<code>evil[.]example</code> [domain]" in rendered
-    assert "More IOCs can be found in the article/writeup (12 extracted total)." in rendered
+    assert "<b>⚠ More IOCs can be found in the article/writeup (12 extracted total).</b>" in rendered
