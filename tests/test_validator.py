@@ -478,4 +478,62 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
     assert entry["corroboration_sources"] == 2
     assert entry["provenance"] == "writeup"
     assert entry["extraction_mode"] == "ioc_section"
-    assert entry["article_ioc_count"] == 14
+    assert entry["article_ioc_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scoring_context_uses_valid_article_sighting_count_not_raw_extracted_count(
+    agent: ValidationAgent, db_session_factory
+) -> None:
+    import uuid
+
+    first_ioc_id = uuid.uuid4()
+    second_ioc_id = uuid.uuid4()
+    material = SourceMaterial(
+        source="discovery:cyberpress.org",
+        url="https://cyberpress.org/bindcloak-backdoor-steals-tokens/?amp=1",
+        title="New BINDCLOAK Backdoor Steals Windows Tokens",
+        published_at=datetime(2026, 8, 4, tzinfo=UTC),
+        extraction_status="extracted",
+        extracted_ioc_count=9,
+        metadata_json={},
+    )
+    async with db_session_factory() as session:
+        session.add(material)
+        await session.flush()
+        for ioc_id, value, ioc_type, lineage in [
+            (first_ioc_id, "7a14a99d70d42d3f7bf72f843185fc07", "md5", "lineage-bindcloak-md5"),
+            (second_ioc_id, "577b1cc894636f4ac5ad670b0079b9b7ade137c3", "sha1", "lineage-bindcloak-sha1"),
+        ]:
+            session.add(
+                IOC(
+                    id=ioc_id,
+                    value=value,
+                    dedupe_hash=f"hash-{value}",
+                    type=ioc_type,
+                    source="discovery:cyberpress.org",
+                    source_trust=0.60,
+                    first_seen=datetime(2026, 8, 4, tzinfo=UTC),
+                    last_seen=datetime(2026, 8, 4, tzinfo=UTC),
+                )
+            )
+            session.add(
+                IOCSighting(
+                    ioc_id=ioc_id,
+                    source="discovery:cyberpress.org",
+                    source_trust=0.60,
+                    provenance="discovery",
+                    reference_url=material.url,
+                    source_material_id=material.id,
+                    first_seen=datetime(2026, 8, 4, tzinfo=UTC),
+                    last_seen=datetime(2026, 8, 4, tzinfo=UTC),
+                    lineage_hash=lineage,
+                    attributes={"extraction_mode": "ioc_section"},
+                )
+            )
+        await session.commit()
+
+        context = await get_scoring_context(session, [first_ioc_id, second_ioc_id])
+
+    assert context[first_ioc_id]["article_ioc_count"] == 2
+    assert context[second_ioc_id]["article_ioc_count"] == 2

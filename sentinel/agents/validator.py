@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sentinel.agents.base import BaseAgent
@@ -491,30 +491,78 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
             IOCSighting.source,
             IOCSighting.provenance,
             IOCSighting.attributes,
+            IOCSighting.source_material_id,
+            IOCSighting.reference_url,
             SourceMaterial.extracted_ioc_count,
         )
         .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
         .where(IOCSighting.ioc_id.in_(ids))
     )
+    fetched_rows = rows.all()
+    material_ids = {
+        source_material_id
+        for _ioc_id, _source, provenance, _attributes, source_material_id, _reference_url, _extracted_ioc_count in fetched_rows
+        if source_material_id is not None and str(provenance or "").strip().lower() in {"writeup", "discovery"}
+    }
+    reference_urls = {
+        str(reference_url or "").strip()
+        for _ioc_id, _source, provenance, _attributes, source_material_id, reference_url, _extracted_ioc_count in fetched_rows
+        if source_material_id is None
+        and str(reference_url or "").strip()
+        and str(provenance or "").strip().lower() in {"writeup", "discovery"}
+    }
+    article_counts_by_material: dict[Any, int] = {}
+    article_counts_by_reference: dict[str, int] = {}
+    if material_ids:
+        material_count_rows = await session.execute(
+            select(IOCSighting.source_material_id, func.count(func.distinct(IOCSighting.ioc_id)))
+            .where(IOCSighting.source_material_id.in_(material_ids))
+            .where(IOCSighting.provenance.in_(["writeup", "discovery"]))
+            .group_by(IOCSighting.source_material_id)
+        )
+        article_counts_by_material = {
+            source_material_id: int(count or 0)
+            for source_material_id, count in material_count_rows.all()
+        }
+    if reference_urls:
+        reference_count_rows = await session.execute(
+            select(IOCSighting.reference_url, func.count(func.distinct(IOCSighting.ioc_id)))
+            .where(IOCSighting.reference_url.in_(reference_urls))
+            .where(IOCSighting.provenance.in_(["writeup", "discovery"]))
+            .group_by(IOCSighting.reference_url)
+        )
+        article_counts_by_reference = {
+            str(reference_url or "").strip(): int(count or 0)
+            for reference_url, count in reference_count_rows.all()
+            if str(reference_url or "").strip()
+        }
     context: dict[Any, dict[str, Any]] = {}
     distinct_sources: dict[Any, set[str]] = {}
-    for ioc_id, source, provenance, attributes, extracted_ioc_count in rows.all():
+    for ioc_id, source, provenance, attributes, source_material_id, reference_url, extracted_ioc_count in fetched_rows:
         distinct_sources.setdefault(ioc_id, set()).add(source)
         extraction_mode = (attributes or {}).get("extraction_mode")
         # Curated IOC-section extractions get promoted to the strongest rank.
         rank = _PROVENANCE_RANK.get(provenance or "feed", 0)
         if extraction_mode == "ioc_section":
             rank = max(rank, 3)
+        article_ioc_count = 0
+        if str(provenance or "").strip().lower() in {"writeup", "discovery"}:
+            if source_material_id is not None:
+                article_ioc_count = article_counts_by_material.get(source_material_id, 0)
+            elif reference_url:
+                article_ioc_count = article_counts_by_reference.get(str(reference_url).strip(), 0)
+        if not article_ioc_count:
+            article_ioc_count = int(extracted_ioc_count or 0)
         current = context.get(ioc_id)
         if current is None or rank > current["_rank"]:
             context[ioc_id] = {
                 "provenance": provenance,
                 "extraction_mode": extraction_mode,
                 "_rank": rank,
-                "article_ioc_count": int(extracted_ioc_count or 0),
+                "article_ioc_count": article_ioc_count,
             }
-        elif current is not None and int(extracted_ioc_count or 0) > int(current.get("article_ioc_count") or 0):
-            current["article_ioc_count"] = int(extracted_ioc_count or 0)
+        elif current is not None and article_ioc_count > int(current.get("article_ioc_count") or 0):
+            current["article_ioc_count"] = article_ioc_count
     for ioc_id, entry in context.items():
         entry.pop("_rank", None)
         entry["corroboration_sources"] = len(distinct_sources.get(ioc_id, {""}))
