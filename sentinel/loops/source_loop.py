@@ -50,6 +50,7 @@ class SourceQualityLoop(ThreatIntelLoop):
         super().__init__(*args, **kwargs)
         self.target_source = target_source
         self._last_feedback_count: int | None = None
+        self._last_source_feedback_stats: SourceFeedbackStats | None = None
         self._last_trust_before: float | None = None
         self._last_trust_after: float | None = None
         self._last_eval_details: dict | None = None
@@ -87,6 +88,7 @@ class SourceQualityLoop(ThreatIntelLoop):
             false_positive=false_positive,
         )
         self._last_feedback_count = stats.feedback_count
+        self._last_source_feedback_stats = stats
         return stats
 
     def current_trust(self, source_name: str | None = None) -> float:
@@ -147,14 +149,51 @@ class SourceQualityLoop(ThreatIntelLoop):
         if self.target_source is None:
             raise ValueError("SourceQualityLoop requires a target_source for prompt building.")
         current_trust = self.current_trust(self.target_source)
+        details = dict(self._last_eval_details or {})
+        stats = self._last_source_feedback_stats
+        feedback_snapshot = (
+            {
+                "confirmed": stats.confirmed,
+                "low_level_true_positive": stats.low_level_true_positive,
+                "false_positive": stats.false_positive,
+                "weighted_precision": round(stats.precision, 4),
+                "false_positive_rate": round(stats.false_positive_rate, 4),
+                "feedback_count": stats.feedback_count,
+            }
+            if stats is not None
+            else {}
+        )
+        replay_snapshot = {
+            "current_metric": details.get("metric"),
+            "precision": details.get("precision"),
+            "recall": details.get("recall"),
+            "target_source_confusion": (details.get("per_source") or {}).get(self.target_source, {}),
+            "total_labeled": details.get("total_labeled"),
+            "alert_threshold": details.get("alert_threshold"),
+            "trust_weight": details.get("trust_weight"),
+            "trust_sweep": details.get("trust_sweep", {}),
+            "keep_policy": {
+                "min_keep_delta": float(self.settings.karpathy.min_keep_delta),
+                "min_labeled_samples": int(self.settings.karpathy.min_labeled_samples),
+                "max_true_positive_drop": int(self.settings.karpathy.max_true_positive_drop),
+                "max_false_positive_increase": int(self.settings.karpathy.max_false_positive_increase),
+            },
+        }
         return (
             f"Loop type: {self.loop_type}\n"
             f"Experiment number: {experiment_number}\n"
             f"Target source: {self.target_source}\n"
             f"Current trust: {current_trust:.2f}\n"
             "Return JSON with keys: source_name, new_trust, reasoning, expected_effect.\n"
+            "Return only valid JSON, with no markdown fences or extra prose.\n"
             "Only optimize the trust score for the target source. Do not propose any other edits.\n"
             "The absolute trust change must be <= 0.05 and the value must stay within 0.0 and 1.0.\n\n"
+            "Use the replay snapshot as the evidence for the next bounded experiment. "
+            "Prefer the trust_sweep grid_best_trust only when it improves current_metric by at least "
+            "min_keep_delta without violating the keep_policy. If the sweep is flat, keep current trust "
+            "and explain that no safe source-trust update is supported yet.\n\n"
+            f"Target feedback snapshot:\n{json.dumps(feedback_snapshot, indent=2, sort_keys=True)}\n\n"
+            f"Replay evaluation snapshot:\n{json.dumps(replay_snapshot, indent=2, sort_keys=True)}\n\n"
             f"Current skill file:\n{current_skill}\n\n"
             f"Recent history:\n{json.dumps(history[-5:], indent=2)}\n"
         )
@@ -171,7 +210,7 @@ class SourceQualityLoop(ThreatIntelLoop):
             raise ValueError(f"Karpathy source loop must target '{self.target_source}', got '{source_name}'.")
         new_trust = round(float(payload["new_trust"]), 2)
         trust_before = self.current_trust(source_name)
-        if abs(new_trust - trust_before) > 0.05:
+        if abs(new_trust - trust_before) > 0.050001:
             raise ValueError("Karpathy source loop trust changes must stay within +/- 0.05 per experiment.")
         new_trust = max(0.0, min(1.0, new_trust))
         reasoning = str(payload["reasoning"]).strip()

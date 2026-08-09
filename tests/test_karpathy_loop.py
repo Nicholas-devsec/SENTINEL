@@ -15,8 +15,10 @@ from sentinel.loops.source_loop import SourceQualityLoop
 class FakeProvider:
     def __init__(self, responses: list[dict]) -> None:
         self.responses = list(responses)
+        self.prompts: list[str] = []
 
     async def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
         if not self.responses:
             raise RuntimeError("No more provider responses")
         return json.dumps(self.responses.pop(0))
@@ -370,6 +372,46 @@ async def test_source_loop_replay_counts_low_level_true_positive_as_weighted_pos
     metric_after = await loop.measure_metric()
     assert metric_after == pytest.approx(1.0)
     assert loop._last_eval_details["confusion"]["tp"] == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
+async def test_source_loop_prompt_includes_replay_evidence_and_sweep(source_repo: Path) -> None:
+    labeled_rows = [
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 85.0, "verdict": "confirmed"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 80.0, "verdict": "confirmed"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 71.0, "verdict": "false_positive"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 70.5, "verdict": "false_positive"},
+    ]
+    provider = FakeProvider(
+        [
+            {
+                "source_name": "otx",
+                "new_trust": 0.85,
+                "reasoning": "Replay sweep shows lower trust suppresses false positives.",
+                "expected_effect": "Improve precision without suppressing confirmed threats.",
+            }
+        ]
+    )
+    loop = SourceQualityLoop(
+        provider=provider,
+        skill_path=source_repo / "skills/sources.SKILL.md",
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=FakeSessionFactory(feedback_rows=[], labeled_rows=labeled_rows),
+        repo_path=source_repo,
+        changelog_path=str(source_repo / "skills/CHANGELOG.md"),
+        target_source="otx",
+    )
+
+    await loop.optimize(max_experiments=1)
+
+    prompt = provider.prompts[0]
+    assert "Target feedback snapshot" in prompt
+    assert "Replay evaluation snapshot" in prompt
+    assert '"target_source_confusion"' in prompt
+    assert '"trust_sweep"' in prompt
+    assert '"grid_best_trust"' in prompt
+    assert '"min_keep_delta"' in prompt
 
 
 @pytest.mark.asyncio
