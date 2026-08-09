@@ -100,29 +100,32 @@ async def test_replay_metric_changes_when_trust_changes(db_session_factory, skil
     evaluator = build_evaluator(db_session_factory, skill_path)
 
     baseline = await evaluator.evaluate()
-    # Both otx FPs replay above the threshold: tp=2 fp=2 -> F0.5 = 0.5556
+    # The continuous metric improves as noisy-source risk scores move toward the
+    # analyst target of 0.0, even before every thresholded decision changes.
     assert baseline.true_positive == 2
     assert baseline.false_positive == 2
-    assert baseline.metric == pytest.approx(0.5556, abs=1e-3)
+    assert baseline.brier_score == pytest.approx(0.2659, abs=1e-3)
+    assert baseline.metric == pytest.approx(0.7341, abs=1e-3)
 
     skill_path.write_text(SKILL_TEMPLATE.format(otx_trust="0.80"), encoding="utf-8")
     improved = await evaluator.evaluate()
-    # otx risk drops by 0.20*100*0.10 = 2.0 points: both FPs suppressed.
+    # otx risk drops by 0.20*100*0.10 = 2.0 points: both FPs suppress at the
+    # threshold, and the continuous calibration score improves as well.
     assert improved.false_positive == 0
     assert improved.true_negative == 2
-    assert improved.metric == pytest.approx(1.0)
+    assert improved.brier_score == pytest.approx(0.2520, abs=1e-3)
     assert improved.metric > baseline.metric
 
-    # Raising trust of the noisy source degrades the metric symmetrically.
+    # Raising trust of the noisy source worsens calibration.
     skill_path.write_text(SKILL_TEMPLATE.format(otx_trust="0.95"), encoding="utf-8")
     degraded = await evaluator.evaluate()
     assert degraded.false_positive == 2
-    assert degraded.metric == pytest.approx(baseline.metric)
+    assert degraded.metric < baseline.metric
 
 
 @pytest.mark.asyncio
 async def test_replay_penalizes_suppressing_confirmed_threats(db_session_factory, skill_path: Path) -> None:
-    """Recall keeps the loop from winning by muting a source that finds real threats."""
+    """Continuous replay still penalizes muting a source that finds real threats."""
     async with db_session_factory() as session:
         ioc = IOC(
             value="real-threat.test",
@@ -150,14 +153,15 @@ async def test_replay_penalizes_suppressing_confirmed_threats(db_session_factory
     evaluator = build_evaluator(db_session_factory, skill_path)
 
     baseline = await evaluator.evaluate()
-    assert baseline.metric == pytest.approx(1.0)
+    assert baseline.metric == pytest.approx(0.9159, abs=1e-3)
 
-    # Cratering threatfox trust suppresses the confirmed threat -> recall drops to 0.
+    # Cratering threatfox trust suppresses the confirmed threat and worsens the
+    # continuous calibration score.
     content = skill_path.read_text(encoding="utf-8").replace("- threatfox: 0.94", "- threatfox: 0.80")
     skill_path.write_text(content, encoding="utf-8")
     degraded = await evaluator.evaluate()
     assert degraded.false_negative == 1
-    assert degraded.metric == 0.0
+    assert degraded.metric < baseline.metric
 
 
 @pytest.mark.asyncio

@@ -282,11 +282,11 @@ async def test_karpathy_loop_rejects_missing_section_without_mutating_skill(temp
 async def test_source_loop_replay_metric_responds_to_trust_changes(source_repo: Path) -> None:
     """The live metric must move when the skill file's trust score is edited.
 
-    Labeled data: otx contributed two false positives that scored just above the
-    alert threshold (70) at trust 0.90. Lowering otx trust in the skill file
-    should suppress those FP alerts (risk drops by w_trust*100*delta) and raise
-    the replayed F0.5 — the exact mechanism the loop optimizes.
-    """
+        Labeled data: otx contributed two false positives that scored just above the
+        alert threshold (70) at trust 0.90. Lowering otx trust in the skill file
+        should suppress those FP alerts (risk drops by w_trust*100*delta) and improve
+        the continuous replay score — the exact mechanism the loop optimizes.
+        """
     labeled_rows = [
         # threatfox: real threats, comfortably above threshold.
         {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 85.0, "verdict": "confirmed"},
@@ -307,10 +307,10 @@ async def test_source_loop_replay_metric_responds_to_trust_changes(source_repo: 
         target_source="threatfox",
     )
 
-    # Skill trust matches stored trust: both otx FPs still alert.
-    # tp=2 fp=2 fn=0 -> precision 0.5, recall 1.0, F0.5 = 0.5556
+    # Skill trust matches stored trust: both otx FPs still alert, and the
+    # continuous score reflects their distance from the analyst target of 0.0.
     metric_before = await loop.measure_metric()
-    assert metric_before == pytest.approx(0.5556, abs=1e-3)
+    assert metric_before == pytest.approx(0.7341, abs=1e-3)
 
     # Lower otx trust by 0.05: replayed risk drops by 0.20*100*0.05 = 1.0 point.
     content = skill_path.read_text(encoding="utf-8").replace("- otx: 0.90", "- otx: 0.85")
@@ -323,9 +323,10 @@ async def test_source_loop_replay_metric_responds_to_trust_changes(source_repo: 
     content = skill_path.read_text(encoding="utf-8").replace("- otx: 0.85", "- otx: 0.80")
     skill_path.write_text(content, encoding="utf-8")
 
-    # risk 71.0 -> 69.0, 70.5 -> 68.5: both FPs suppressed, precision 1.0.
+    # risk 71.0 -> 69.0, 70.5 -> 68.5: both FPs suppressed, and the continuous
+    # score improves further.
     metric_after = await loop.measure_metric()
-    assert metric_after == pytest.approx(1.0)
+    assert metric_after == pytest.approx(0.7480, abs=1e-3)
     assert metric_after > metric_middle
 
     # Audit details captured for the experiment log.
@@ -361,7 +362,7 @@ async def test_source_loop_replay_counts_low_level_true_positive_as_weighted_pos
     )
 
     metric_before = await loop.measure_metric()
-    assert metric_before == pytest.approx(0.9091, abs=1e-3)
+    assert metric_before == pytest.approx(0.9843, abs=1e-3)
     assert loop._last_eval_details["confusion"]["fn"] == pytest.approx(0.5)
 
     skill_path.write_text(
@@ -370,7 +371,7 @@ async def test_source_loop_replay_counts_low_level_true_positive_as_weighted_pos
     )
 
     metric_after = await loop.measure_metric()
-    assert metric_after == pytest.approx(1.0)
+    assert metric_after > metric_before
     assert loop._last_eval_details["confusion"]["tp"] == pytest.approx(1.5)
 
 

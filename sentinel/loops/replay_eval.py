@@ -1,8 +1,9 @@
 """Replay evaluation for the source Karpathy loop.
 
-The previous live metric was the historical confirmed/false_positive ratio for
-a source — a number that cannot change when a trust score is edited, so the
-loop could never actually learn. This evaluator makes trust edits observable:
+The previous live metric relied on thresholded alert decisions alone, which
+made the learning surface flat whenever a trust edit failed to flip any alerts.
+This evaluator keeps the same replay mechanics but optimizes a continuous
+proper-scoring objective instead:
 
 1. Load the feedback-labeled IOC window (analyst verdicts are ground truth).
 2. Recompute each IOC's risk score under the *current* skill-file trust
@@ -11,14 +12,12 @@ loop could never actually learn. This evaluator makes trust edits observable:
    so the exact replayed score is
        risk_new = risk_stored + w_trust * 100 * (trust_skill - trust_stored)
    using the per-IOC trust snapshot stored at ingestion time.
-3. Re-apply the alert threshold and score would-have-alerted against verdicts
-   with F-beta (beta=0.5: precision-weighted, because alert noise is the cost
-   analysts actually feel, but recall still counts so the loop cannot win by
-   muting every source).
+3. Convert replayed risk into a pseudo-probability `p = risk / 100` and score
+   it against analyst verdict targets using a weighted Brier-style loss:
+   confirmed=1.0, low_level_true_positive=0.65, false_positive=0.0.
 
-Raising a noisy source's trust pushes its false positives back above the
-threshold and the metric drops; lowering it suppresses them and the metric
-rises — unless it also suppresses confirmed threats, which recall penalizes.
+Thresholded confusion statistics are still recorded as guardrails, but the loop
+learns from continuous score improvement even when no hard alert flips occur.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ from sqlalchemy import select
 
 from sentinel.alert_policy import AlertPolicy
 from sentinel.db.models import IOC, FeedbackRecord
-from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
+from sentinel.feedback import FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight, scoring_target
 
 
 TRUST_SCORE_LINE_RE = re.compile(
@@ -44,6 +43,7 @@ TRUST_SCORE_LINE_RE = re.compile(
 @dataclass(slots=True)
 class ReplayEvalResult:
     metric: float
+    brier_score: float
     precision: float
     recall: float
     true_positive: float
@@ -60,6 +60,7 @@ class ReplayEvalResult:
     def to_details(self) -> dict[str, Any]:
         return {
             "metric": self.metric,
+            "brier_score": self.brier_score,
             "precision": self.precision,
             "recall": self.recall,
             "confusion": {
@@ -82,13 +83,6 @@ def parse_trust_scores(skill_text: str) -> dict[str, float]:
         match.group("name").lower(): float(match.group("value"))
         for match in TRUST_SCORE_LINE_RE.finditer(skill_text)
     }
-
-
-def _f_beta(precision: float, recall: float, beta: float) -> float:
-    if precision == 0.0 and recall == 0.0:
-        return 0.0
-    beta_sq = beta * beta
-    return (1 + beta_sq) * precision * recall / (beta_sq * precision + recall)
 
 
 @dataclass(slots=True)
@@ -155,20 +149,22 @@ class ReplayEvaluator:
         adjusted = item.risk_score_stored + self.trust_weight * 100.0 * (trust_now - item.source_trust_stored)
         return max(0.0, min(100.0, adjusted))
 
-    def _confusion_metric(self, labeled: list[LabeledIOC], trust_scores: dict[str, float]) -> float:
-        tp = fp = fn = 0.0
+    def _weighted_brier_metric(self, labeled: list[LabeledIOC], trust_scores: dict[str, float]) -> float:
+        weighted_error = 0.0
+        total_weight = 0.0
         for item in labeled:
-            predicted_alert = self._replay_score(item, trust_scores) >= self.alert_threshold
-            pos_weight = positive_weight(item.verdict)
-            if predicted_alert and pos_weight > 0.0:
-                tp += pos_weight
-            elif predicted_alert and item.verdict == FALSE_POSITIVE:
-                fp += 1.0
-            elif not predicted_alert and pos_weight > 0.0:
-                fn += pos_weight
-        precision = tp / (tp + fp) if (tp + fp) else 0.0
-        recall = tp / (tp + fn) if (tp + fn) else 0.0
-        return _f_beta(precision, recall, self.beta)
+            predicted_probability = self._replay_score(item, trust_scores) / 100.0
+            target_probability = scoring_target(item.verdict) / 100.0
+            if item.verdict == FALSE_POSITIVE:
+                sample_weight = 1.0
+            else:
+                sample_weight = max(positive_weight(item.verdict), 1e-9)
+            weighted_error += sample_weight * ((predicted_probability - target_probability) ** 2)
+            total_weight += sample_weight
+        if total_weight <= 0.0:
+            return 0.0
+        brier_score = weighted_error / total_weight
+        return 1.0 - brier_score
 
     async def sweep(self, source: str, candidate_trusts: list[float]) -> dict[float, float]:
         """Replay metric for each candidate trust value of one source.
@@ -184,7 +180,7 @@ class ReplayEvaluator:
         for candidate in candidate_trusts:
             clamped = round(max(0.0, min(1.0, float(candidate))), 2)
             overridden = {**trust_scores, source.lower(): clamped}
-            results[clamped] = self._confusion_metric(labeled, overridden)
+            results[clamped] = self._weighted_brier_metric(labeled, overridden)
         return results
 
     async def evaluate(self) -> ReplayEvalResult:
@@ -212,9 +208,11 @@ class ReplayEvaluator:
                 bucket["tn"] += 1.0
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
-        metric = _f_beta(precision, recall, self.beta)
+        metric = self._weighted_brier_metric(labeled, trust_scores)
+        brier_score = 1.0 - metric
         return ReplayEvalResult(
             metric=metric,
+            brier_score=brier_score,
             precision=precision,
             recall=recall,
             true_positive=tp,

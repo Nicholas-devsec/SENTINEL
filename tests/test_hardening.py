@@ -290,10 +290,10 @@ async def test_replay_sweep_finds_grid_optimum(db_session_factory, tmp_path: Pat
         now_fn=lambda: NOW,
     )
     sweep = await evaluator.sweep("otx", [0.80, 0.90, 0.95])
-    # Lowering otx trust by 0.10 drops its replayed FPs 2 points below the
-    # threshold and suppresses both; raising trust keeps them alerting.
+    # Lowering otx trust improves the continuous replay score by bringing the
+    # noisy-source predictions closer to the analyst target of 0.0.
     assert sweep[0.80] > sweep[0.90]
-    assert sweep[0.80] == pytest.approx(1.0)
+    assert sweep[0.80] == pytest.approx(0.7480, abs=1e-3)
     assert max(sweep, key=sweep.get) == 0.80
 
 
