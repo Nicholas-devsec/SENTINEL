@@ -345,7 +345,11 @@ git:
   author_email: sentinel@bot
 
 karpathy:
-  min_keep_delta: 0.01
+  # Brier-based replay improvements are naturally small because the metric is an
+  # average squared error on [0,1]. Keep this floor aligned to the observed
+  # replay headroom while relying on min_labeled_samples and replay guardrails
+  # to reject noisy changes.
+  min_keep_delta: 0.001
   max_false_positive_increase: 0
   max_true_positive_drop: 0
   lease_ttl_seconds: 1800

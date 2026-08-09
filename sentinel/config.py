@@ -240,7 +240,11 @@ class GitSettings(BaseModel):
 
 
 class KarpathySettings(BaseModel):
-    min_keep_delta: float = 0.01
+    # Proper-score improvements tend to be small in absolute terms because the
+    # Brier objective is an average squared error on [0, 1]. Keep a small but
+    # non-zero floor here; uncertainty and behavioral guardrails are enforced
+    # separately via min_labeled_samples and TP/FP replay checks.
+    min_keep_delta: float = 0.001
     max_false_positive_increase: int = 0
     max_true_positive_drop: int = 0
     lease_ttl_seconds: int = 1800
