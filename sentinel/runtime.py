@@ -13,6 +13,7 @@ from typing import Any, Sequence
 from git import GitCommandError, InvalidGitRepositoryError, Repo
 from sqlalchemy import case, func, select
 
+from sentinel.alert_policy import build_alert_policy
 from sentinel.agents.scorer import build_external_links_for_ioc
 from sentinel.config import SentinelSettings
 from sentinel.db.models import (
@@ -29,6 +30,7 @@ from sentinel.db.session import AsyncSessionFactory
 from sentinel.loops.detection_loop import DetectionEffectivenessLoop
 from sentinel.loops.karpathy_loop import ExperimentOutcome
 from sentinel.loops.providers.openai_provider import OpenAIProvider
+from sentinel.loops.replay_eval import ReplayEvaluator, parse_trust_scores
 from sentinel.loops.scoring_loop import ScoreCalibrationLoop
 from sentinel.loops.source_loop import SourceQualityLoop
 from sentinel.feedback import DISCOVERY_MEMORY_VERDICTS, FALSE_POSITIVE, LEARNING_VERDICTS, normalize_verdict, positive_weight
@@ -50,6 +52,62 @@ LIVE_DATA_THRESHOLDS = {
     "scoring": {"analyst_verdicts": 10},
     "detection": {"generated_rules": 10, "pushed_rules": 1},
 }
+
+
+async def _select_source_target_by_replay_headroom(
+    *,
+    candidate_sources: list[tuple[str, float, int]],
+    skill_path: Path,
+    settings: SentinelSettings,
+    session_factory: Any,
+) -> tuple[str | None, int | None, float | None, float | None]:
+    if not candidate_sources or not skill_path.exists():
+        return None, None, None, None
+    trust_scores = parse_trust_scores(skill_path.read_text(encoding="utf-8"))
+    evaluator = ReplayEvaluator(
+        session_factory=session_factory,
+        skill_path=skill_path,
+        alert_policy=build_alert_policy(settings),
+        trust_weight=float(settings.enrichment.weights.source_trust),
+        window_hours=int(settings.karpathy.replay_window_hours),
+    )
+    baseline = await evaluator.evaluate()
+    best_choice: tuple[str, int, float, float, float] | None = None
+    for source, fp_rate, feedback_count in candidate_sources:
+        current_trust = trust_scores.get(source.lower())
+        if current_trust is None:
+            continue
+        grid = sorted(
+            {
+                round(max(0.0, min(1.0, current_trust + step / 100.0)), 2)
+                for step in range(-5, 6)
+            }
+        )
+        sweep = await evaluator.sweep(source, grid)
+        if not sweep:
+            continue
+        best_trust = max(
+            sweep,
+            key=lambda trust: (sweep[trust], -abs(trust - current_trust)),
+        )
+        best_metric = float(sweep[best_trust])
+        improvement = best_metric - float(baseline.metric)
+        choice = (source, feedback_count, improvement, best_trust, fp_rate)
+        if best_choice is None or (
+            improvement,
+            feedback_count,
+            fp_rate,
+            source,
+        ) > (
+            best_choice[2],
+            best_choice[1],
+            best_choice[4],
+            best_choice[0],
+        ):
+            best_choice = choice
+    if best_choice is None:
+        return None, None, None, None
+    return best_choice[0], best_choice[1], best_choice[2], best_choice[3]
 
 
 def _sample_campaign_key(item: dict[str, Any]) -> str:
@@ -746,9 +804,26 @@ async def inspect_live_karpathy_readiness(
                     continue
                 fp_rate = stats["false_positive"] / (stats["positive"] + stats["false_positive"])
                 candidates.append((source, fp_rate, total))
+            target_headroom_delta: float | None = None
+            target_best_trust: float | None = None
             if candidates:
-                target_source, _, feedback_count = sorted(candidates, key=lambda item: (-item[1], -item[2], item[0]))[0]
-                counts["target_source_feedback_rows"] = feedback_count
+                (
+                    target_source,
+                    feedback_count,
+                    target_headroom_delta,
+                    target_best_trust,
+                ) = await _select_source_target_by_replay_headroom(
+                    candidate_sources=candidates,
+                    skill_path=resolved_skill,
+                    settings=settings,
+                    session_factory=active_session_factory,
+                )
+                if target_source is None:
+                    target_source, _, feedback_count = sorted(candidates, key=lambda item: (-item[1], -item[2], item[0]))[0]
+                if feedback_count is not None:
+                    counts["target_source_feedback_rows"] = feedback_count
+                if target_headroom_delta is not None:
+                    counts["target_source_headroom_bp"] = int(round(target_headroom_delta * 10000))
             minimums = LIVE_DATA_THRESHOLDS["source"]
             checks.append(
                 KarpathyCheck(
@@ -768,7 +843,14 @@ async def inspect_live_karpathy_readiness(
                 KarpathyCheck(
                     name="target_source_selected",
                     passed=target_source is not None,
-                    detail="Selected highest-false-positive eligible source for optimization." if target_source else "No source met the live source-loop eligibility threshold.",
+                    detail=(
+                        f"Selected source with best replay headroom delta={target_headroom_delta:.4f}"
+                        f" best_trust={target_best_trust:.2f}."
+                        if target_source and target_headroom_delta is not None and target_best_trust is not None
+                        else "Selected highest-false-positive eligible source for optimization."
+                        if target_source
+                        else "No source met the live source-loop eligibility threshold."
+                    ),
                 )
             )
             if target_source is not None:

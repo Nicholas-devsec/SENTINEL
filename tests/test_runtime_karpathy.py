@@ -44,11 +44,12 @@ def build_settings() -> SentinelSettings:
 
 
 class FakeSession:
-    def __init__(self, *, feedback_rows=None, iocs=None, experiment_logs=None, leases=None) -> None:
+    def __init__(self, *, feedback_rows=None, iocs=None, experiment_logs=None, leases=None, labeled_rows=None) -> None:
         self.feedback_rows = feedback_rows if feedback_rows is not None else []
         self.iocs = iocs if iocs is not None else []
         self.experiment_logs = experiment_logs if experiment_logs is not None else []
         self.leases = leases if leases is not None else {}
+        self.labeled_rows = labeled_rows if labeled_rows is not None else []
 
     async def __aenter__(self) -> FakeSession:
         return self
@@ -58,11 +59,12 @@ class FakeSession:
 
 
 class FakeSessionFactory:
-    def __init__(self, *, feedback_rows=None, iocs=None, experiment_logs=None, leases=None) -> None:
+    def __init__(self, *, feedback_rows=None, iocs=None, experiment_logs=None, leases=None, labeled_rows=None) -> None:
         self.feedback_rows = feedback_rows if feedback_rows is not None else []
         self.iocs = iocs if iocs is not None else []
         self.experiment_logs = experiment_logs if experiment_logs is not None else []
         self.leases = leases if leases is not None else {}
+        self.labeled_rows = labeled_rows if labeled_rows is not None else []
 
     def __call__(self) -> FakeSession:
         return FakeSession(
@@ -70,6 +72,7 @@ class FakeSessionFactory:
             iocs=self.iocs,
             experiment_logs=self.experiment_logs,
             leases=self.leases,
+            labeled_rows=self.labeled_rows,
         )
 
 
@@ -140,7 +143,7 @@ async def test_live_preflight_blocks_source_loop_without_feedback(monkeypatch, t
 
 
 @pytest.mark.asyncio
-async def test_live_preflight_selects_highest_false_positive_source(monkeypatch, tmp_path: Path) -> None:
+async def test_live_preflight_selects_source_with_best_replay_headroom(monkeypatch, tmp_path: Path) -> None:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     skill_path = repo_path / LOOP_SKILL_PATHS["source"]
@@ -169,16 +172,33 @@ async def test_live_preflight_selects_highest_false_positive_source(monkeypatch,
         {"source": "otx", "verdict": "confirmed"},
         {"source": "otx", "verdict": "confirmed"},
     ]
+    labeled_rows = [
+        # threatfox rows are far from their verdict targets, but a +/-0.05 trust
+        # sweep barely changes their calibration.
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 24.0, "verdict": "false_positive"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 23.5, "verdict": "false_positive"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 23.0, "verdict": "false_positive"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 52.0, "verdict": "confirmed"},
+        {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 50.0, "verdict": "confirmed"},
+        # otx sits closer to the middle, so a bounded trust move has more
+        # measurable uplift under the continuous replay score.
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 41.0, "verdict": "false_positive"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 42.0, "verdict": "confirmed"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 43.0, "verdict": "confirmed"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 44.0, "verdict": "confirmed"},
+        {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 45.0, "verdict": "confirmed"},
+    ]
 
     report = await inspect_live_karpathy_readiness(
         loop_type="source",
         settings=build_settings(),
-        session_factory=FakeSessionFactory(feedback_rows=feedback_rows),
+        session_factory=FakeSessionFactory(feedback_rows=feedback_rows, labeled_rows=labeled_rows),
     )
 
     assert report.ready is True
-    assert report.target_source == "threatfox"
+    assert report.target_source == "otx"
     assert report.counts["target_source_feedback_rows"] == 5
+    assert report.counts["target_source_headroom_bp"] > 0
 
 
 @pytest.mark.asyncio
@@ -209,13 +229,25 @@ async def test_live_preflight_treats_low_level_true_positive_as_positive_feedbac
         {"source": "otx", "verdict": "confirmed"},
         {"source": "otx", "verdict": "confirmed"},
         {"source": "otx", "verdict": "false_positive"},
-        {"source": "otx", "verdict": "false_positive"},
     ]
 
     report = await inspect_live_karpathy_readiness(
         loop_type="source",
         settings=build_settings(),
-        session_factory=FakeSessionFactory(feedback_rows=feedback_rows),
+        session_factory=FakeSessionFactory(
+            feedback_rows=feedback_rows,
+            labeled_rows=[
+                {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 41.0, "verdict": "false_positive"},
+                {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 42.0, "verdict": "false_positive"},
+                {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 43.0, "verdict": "low_level_true_positive"},
+                {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 44.0, "verdict": "low_level_true_positive"},
+                {"source": "threatfox", "source_trust_stored": 0.94, "risk_score_stored": 45.0, "verdict": "low_level_true_positive"},
+                {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 10.0, "verdict": "confirmed"},
+                {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 11.0, "verdict": "confirmed"},
+                {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 12.0, "verdict": "confirmed"},
+                {"source": "otx", "source_trust_stored": 0.90, "risk_score_stored": 13.0, "verdict": "false_positive"},
+            ],
+        ),
     )
 
     assert report.ready is True
