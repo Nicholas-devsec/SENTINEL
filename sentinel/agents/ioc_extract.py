@@ -354,6 +354,17 @@ NETWORK_CONTEXT_TERMS = (
     "server",
     "url",
 )
+FILE_ARTIFACT_DESCRIPTOR_LABELS = {
+    "artifact",
+    "backdoor",
+    "dropper",
+    "infected",
+    "loader",
+    "malicious",
+    "payload",
+    "sample",
+    "variant",
+}
 
 
 def _is_domain_in_file_artifact_context(section_text: str, value: str) -> bool:
@@ -372,8 +383,15 @@ def _is_domain_in_file_artifact_context(section_text: str, value: str) -> bool:
 
 
 def _looks_like_file_artifact_domain(value: str) -> bool:
-    suffix = value.strip().lower().rsplit(".", 1)[-1]
-    return suffix in FILE_EXTENSIONS
+    labels = [label for label in value.strip().lower().split(".") if label]
+    if not labels:
+        return False
+    suffix = labels[-1]
+    if suffix in FILE_EXTENSIONS:
+        return True
+    return suffix in FILE_ARTIFACT_DESCRIPTOR_LABELS and any(
+        label in FILE_EXTENSIONS for label in labels[1:-1]
+    )
 
 
 def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = None) -> list[ExtractedIOC]:

@@ -125,22 +125,26 @@ def test_script_artifact_names_with_defanged_dots_are_not_domains() -> None:
 Indicators of Compromise
 Files
 setup[.]mjs - obfuscated npm preinstall script
+setup[.]mjs[.]malicious - Variant of setup.mjs based on TLSH pivot
 Math_Symbol[.]js - first wave loader file
 math_init[.]js - renamed second wave loader file
 fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb
 9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc
 47[.]79[.]66[.]58
+hxxps://npm-cache[.]com:443/router
 """
     section = find_ioc_section(text)
     assert section is not None
     extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
 
     assert ("domain", "setup.mjs") not in extracted
+    assert ("domain", "setup.mjs.malicious") not in extracted
     assert ("domain", "math_symbol.js") not in extracted
     assert ("domain", "math_init.js") not in extracted
     assert ("sha256", "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb") in extracted
     assert ("sha256", "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc") in extracted
     assert ("ipv4", "47.79.66.58") in extracted
+    assert ("url", "https://npm-cache.com:443/router") in extracted
 
 
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
