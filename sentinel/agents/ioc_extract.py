@@ -586,6 +586,51 @@ def _is_non_ioc_section_heading(text: str) -> bool:
     return normalized in NON_IOC_SECTION_HEADINGS
 
 
+JAVA_IDENTIFIER_CONTEXT_TERMS = (
+    "cause-exception",
+    "cause-message",
+    "class",
+    "converter-type",
+    "debugging information",
+    "exception",
+    "import ",
+    "java.",
+    "nested exception",
+    "package ",
+    "required-type",
+    "root cause",
+    "stack trace",
+    "threw exception",
+)
+JAVA_PACKAGE_ROOTS = {
+    "com",
+    "freemarker",
+    "java",
+    "javax",
+    "jakarta",
+    "jetbrains",
+    "net",
+    "org",
+    "sun",
+}
+
+
+def _looks_like_java_identifier_domain(token: str, *, context: str) -> bool:
+    cleaned = refang(token).strip().rstrip(",;:.").strip()
+    labels = [label for label in cleaned.split(".") if label]
+    lowered = [label.lower() for label in labels]
+    if len(lowered) < 3:
+        return False
+    if not lowered or lowered[0] not in JAVA_PACKAGE_ROOTS:
+        return False
+    if any(label in FILE_EXTENSIONS for label in lowered):
+        return False
+    context_lower = refang(context).lower()
+    has_java_context = any(term in context_lower for term in JAVA_IDENTIFIER_CONTEXT_TERMS)
+    has_class_case = any(any(char.isupper() for char in label) for label in labels)
+    return has_java_context or has_class_case or len(lowered) >= 4
+
+
 def _cell_indicator_token(cell: str) -> str | None:
     """Indicator-shaped token from a short list/table cell, if one exists."""
     stripped = refang(cell.strip().lstrip("-*•").strip())
@@ -600,10 +645,20 @@ def _cell_indicator_token(cell: str) -> str | None:
             return token
         if IPV4_RE.fullmatch(token):
             return token
-        if len(parts) <= 5 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
+        if (
+            len(parts) <= 5
+            and BARE_DOMAIN_RE.fullmatch(token)
+            and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS
+            and not _looks_like_java_identifier_domain(token, context=cell)
+        ):
             return token
     token = parts[0].rstrip(",;")
-    if len(parts) <= 5 and BARE_DOMAIN_RE.fullmatch(token) and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS:
+    if (
+        len(parts) <= 5
+        and BARE_DOMAIN_RE.fullmatch(token)
+        and token.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS
+        and not _looks_like_java_identifier_domain(token, context=cell)
+    ):
         return token
     return None
 
@@ -779,6 +834,8 @@ def extract_iocs_from_section(
                 if not BARE_DOMAIN_RE.fullmatch(token):
                     continue
                 if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
+                    continue
+                if _looks_like_java_identifier_domain(part, context=line):
                     continue
                 if (
                     _is_excluded_hostname(token, excluded)

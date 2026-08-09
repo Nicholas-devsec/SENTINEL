@@ -527,3 +527,31 @@ Customers using Rapid7 gain access to all IOCs.
     assert extracted[("domain", "google.services.lug")] == "CURP campaign"
     assert extracted[("url", "https://dirty.example/payload")] == "DlrtyGames campaign"
     assert ("cve", "CVE-2025-33053") not in extracted
+
+
+def test_java_stack_trace_identifiers_are_not_extracted_as_domains() -> None:
+    text = """IOC
+On an exploited system, the TeamCity server logs will contain detailed exception traces.
+cause-exception     : freemarker.template.utility.UndeclaredThrowableException
+class               : java.util.HashSet
+required-type       : java.util.HashSet
+converter-type      : com.thoughtworks.xstream.converters.collections.CollectionConverter
+class[1]            : java.util.LinkedHashMap
+converter-type[1]   : com.thoughtworks.xstream.converters.collections.MapConverter
+com.thoughtworks.xstream.converters.ConversionException:
+at com.thoughtworks.xstream.core.TreeUnmarshaller.convert(TreeUnmarshaller.java:81)
+CVE-2026-63077
+evil-c2[.]example[.]com
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("domain", "freemarker.template.utility.undeclaredthrowableexception") not in extracted
+    assert ("domain", "java.util.hashset") not in extracted
+    assert ("domain", "java.util.linkedhashmap") not in extracted
+    assert ("domain", "com.thoughtworks.xstream.converters.collections.collectionconverter") not in extracted
+    assert ("domain", "com.thoughtworks.xstream.converters.collections.mapconverter") not in extracted
+    assert ("domain", "com.thoughtworks.xstream.converters.conversionexception") not in extracted
+    assert ("cve", "CVE-2026-63077") in extracted
+    assert ("domain", "evil-c2.example.com") in extracted
