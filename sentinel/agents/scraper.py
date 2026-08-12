@@ -564,6 +564,74 @@ class URLHausAdapter:
         return records
 
 
+class TweetFeedAdapter:
+    source_name = "tweetfeed"
+
+    def __init__(self, api_url: str, *, trust_score: float, client: httpx.AsyncClient | None = None) -> None:
+        self.api_url = api_url
+        self.trust_score = trust_score
+        self.client = client or httpx.AsyncClient(timeout=30.0)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "User-Agent": DEFAULT_BROWSER_HEADERS["User-Agent"],
+        }
+
+    def _normalize_ioc_type(self, raw_type: str | None, value: str) -> str:
+        if not raw_type:
+            return _infer_ioc_type(value)
+        normalized = raw_type.strip().lower()
+        mapping = {
+            "ip": "ipv4",
+            "ipv4": "ipv4",
+            "ipv6": "ipv6",
+            "domain": "domain",
+            "url": "url",
+            "md5": "md5",
+            "sha1": "sha1",
+            "sha256": "sha256",
+        }
+        return mapping.get(normalized, _infer_ioc_type(value))
+
+    async def fetch(self) -> list[RawIOC]:
+        response = await self.client.get(self.api_url, headers=self._headers())
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            return []
+
+        records: list[RawIOC] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("value") or "").strip()
+            if not value:
+                continue
+            seen = _normalize_timestamp(str(item.get("date") or ""))
+            tags = [str(tag).strip() for tag in item.get("tags") or [] if str(tag).strip()]
+            user = str(item.get("user") or "").strip()
+            tweet = str(item.get("tweet") or "").strip()
+            records.append(
+                RawIOC(
+                    value=value,
+                    type=self._normalize_ioc_type(item.get("type") if isinstance(item.get("type"), str) else None, value),
+                    source=self.source_name,
+                    source_trust=self.trust_score,
+                    first_seen=seen,
+                    last_seen=seen,
+                    tags=sorted(set(tags)),
+                    description=f"TweetFeed IOC shared by @{user}" if user else "TweetFeed community IOC",
+                    reference_url=tweet or None,
+                    attributes={
+                        "reporter": user or None,
+                        "tweet": tweet or None,
+                    },
+                )
+            )
+        return records
+
+
 class PhishTankAdapter:
     source_name = "phishtank"
 
@@ -857,6 +925,8 @@ class ScraperAgent(BaseAgent):
                         client=self.http_client,
                     )
                 )
+            elif source_name == "tweetfeed":
+                ioc_adapters.append(TweetFeedAdapter(feed.url, trust_score=trust_score, client=self.http_client))
             elif source_name == "phishtank":
                 ioc_adapters.append(
                     PhishTankAdapter(

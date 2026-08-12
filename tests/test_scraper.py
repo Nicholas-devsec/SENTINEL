@@ -15,6 +15,7 @@ from sentinel.agents.scraper import (
     ScraperAgent,
     SourceScrapeDiagnostic,
     ThreatFoxAdapter,
+    TweetFeedAdapter,
     URLHausAdapter,
 )
 from sentinel.config import FeedConfig, SentinelSettings
@@ -30,6 +31,7 @@ def settings() -> SentinelSettings:
                 "feeds": [
                     {"name": "threatfox", "url": "https://feeds.local/threatfox", "trust": 0.1},
                     {"name": "urlhaus", "url": "https://feeds.local/urlhaus.csv", "trust": 0.1},
+                    {"name": "tweetfeed", "url": "https://feeds.local/tweetfeed", "trust": 0.1},
                     {"name": "feodotracker", "url": "https://feeds.local/feodo.json", "trust": 0.1},
                     {"name": "otx", "url": "https://feeds.local/otx", "trust": 0.1},
                     {"name": "rss_default", "url": "https://feeds.local/rss.xml", "trust": 0.1},
@@ -167,6 +169,51 @@ async def test_urlhaus_adapter_skips_comment_banner_lines() -> None:
 
     assert len(records) == 1
     assert records[0].value == "http://malicious.test"
+
+
+@pytest.mark.asyncio
+async def test_tweetfeed_adapter_parses_community_iocs() -> None:
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update(dict(request.headers))
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "date": "2026-04-08 12:00:00",
+                    "user": "Unit42_Intel",
+                    "type": "ip",
+                    "value": "138.124.183.147",
+                    "tags": ["#CobaltStrike", "#IcedID"],
+                    "tweet": "https://x.com/Unit42_Intel/status/1524474195471745028",
+                },
+                {
+                    "date": "2026-04-08 12:05:00",
+                    "user": "GootLoaderSites",
+                    "type": "url",
+                    "value": "https://www.kipperfamily.co.uk/forum.php",
+                    "tags": ["#GootLoader"],
+                    "tweet": "https://x.com/GootLoaderSites/status/1524475379997675522",
+                },
+            ],
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = TweetFeedAdapter("https://feeds.local/tweetfeed", trust_score=0.62, client=client)
+        records = await adapter.fetch()
+
+    assert len(records) == 2
+    assert records[0].value == "138.124.183.147"
+    assert records[0].type == "ipv4"
+    assert records[0].source == "tweetfeed"
+    assert records[0].source_trust == 0.62
+    assert records[0].reference_url == "https://x.com/Unit42_Intel/status/1524474195471745028"
+    assert records[0].attributes["reporter"] == "Unit42_Intel"
+    assert records[1].type == "url"
+    assert seen_headers["accept"] == "application/json"
+    assert seen_headers["user-agent"].startswith("Mozilla/5.0")
 
 
 @pytest.mark.asyncio
@@ -407,6 +454,8 @@ async def test_scraper_agent_filters_stale_items_and_extracts_related_cves(setti
                 200,
                 text="id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter\n",
             )
+        if request.url.path.endswith("tweetfeed"):
+            return httpx.Response(200, json=[])
         if request.url.path.endswith("feodo.json"):
             return httpx.Response(200, json=[])
         if request.url.path.endswith("otx"):
@@ -468,6 +517,8 @@ async def test_scraper_agent_uses_strict_rolling_24_hour_window(settings: Sentin
                     "2,2026-04-08 06:30:00,http://stale.test,online,2026-04-08 06:40:00,malware_download,phishing,https://urlhaus.local/2,tester\n"
                 ),
             )
+        if request.url.path.endswith("tweetfeed"):
+            return httpx.Response(200, json=[])
         if request.url.path.endswith("feodo.json"):
             return httpx.Response(200, json=[])
         if request.url.path.endswith("otx"):
@@ -689,6 +740,23 @@ async def test_scraper_routes_misnamed_otx_url_to_ioc_adapter_not_writeup_adapte
 
 
 @pytest.mark.asyncio
+async def test_scraper_routes_tweetfeed_to_ioc_adapter(settings: SentinelSettings) -> None:
+    settings.sources.feeds = [
+        FeedConfig(
+            name="tweetfeed",
+            url="https://api.tweetfeed.live/v1/week",
+            trust=0.62,
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))) as client:
+        agent = ScraperAgent(settings=settings, http_client=client)
+        ioc_adapters, writeup_adapters = agent._build_adapters()
+
+    assert [adapter.source_name for adapter in ioc_adapters] == ["tweetfeed"]
+    assert writeup_adapters == []
+
+
+@pytest.mark.asyncio
 async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: SentinelSettings) -> None:
     redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
     # Title must hit a writeup_search term or the keyword filter drops the item
@@ -714,6 +782,8 @@ async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: 
                 200,
                 json=[{"ip_address": "203.0.113.8", "first_seen": "2026-04-08T12:00:00Z"}],
             )
+        if request.url.path.endswith("tweetfeed"):
+            return httpx.Response(200, json=[])
         if request.url.path.endswith("otx"):
             assert request.headers["X-OTX-API-KEY"] == "test-otx-key"
             return httpx.Response(
@@ -813,6 +883,8 @@ async def test_scraper_agent_skips_queue_when_redis_disabled(settings: SentinelS
             )
         if request.url.path.endswith("feodo.json"):
             return httpx.Response(200, json=[{"ip_address": "203.0.113.8", "first_seen": "2026-04-08T12:00:00Z"}])
+        if request.url.path.endswith("tweetfeed"):
+            return httpx.Response(200, json=[])
         if request.url.path.endswith("otx"):
             return httpx.Response(
                 200,

@@ -10,6 +10,7 @@ updated_by: human
 - abuse.ch ThreatFox recent IOC API
 - AlienVault OTX TAXII 2.1 feed
 - abuse.ch URLhaus CSV and recent URL API
+- TweetFeed.live Twitter/X community IOC API
 - abuse.ch FeodoTracker JSON
 - Cisco Talos blog RSS
 - Palo Alto Unit 42 blog RSS
@@ -23,6 +24,7 @@ updated_by: human
 ## Trust Scores
 - threatfox: 0.94
 - urlhaus: 0.91
+- tweetfeed: 0.62
 - feodotracker: 0.93
 - otx: 0.90
 - talos_blog: 0.68
@@ -40,6 +42,7 @@ updated_by: human
 ## Source Handling Rules
 - Normalize source names before queuing indicators.
 - Record feed metadata needed for analyst traceability.
+- Treat TweetFeed IOCs as community-reported hunting/watchlist candidates unless corroborated by enrichment or another source.
 
 ## Learner Updates
 <!-- learner: append here -->

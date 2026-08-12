@@ -7,7 +7,7 @@ replay-evaluated self-improvement loop over its skill files.
 
 ## What actually works today
 
-- **Live IOC pulls** from ThreatFox, URLhaus, FeodoTracker, OTX,
+- **Live IOC pulls** from ThreatFox, URLhaus, TweetFeed, FeodoTracker, OTX,
   MalwareBazaar, and PhishTank with freshness filtering
   (`sentinel/agents/scraper.py`).
 - **Writeup ingestion**: RSS/blog entries are treated as source material, not
