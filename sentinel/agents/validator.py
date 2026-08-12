@@ -347,6 +347,9 @@ class ValidationAgent(BaseAgent):
         if source_material_ids and item.reference_url:
             material_id = source_material_ids.get(item.reference_url)
         sighting_attributes: dict[str, Any] = {"tags": item.attributes.get("tags", [])}
+        for key in ("description", "reporter", "tweet", "reference_url"):
+            if key in item.attributes:
+                sighting_attributes[key] = item.attributes[key]
         # Discovery attribution rides along so analyst feedback can be credited
         # back to the search profile / extraction mode that produced the alert.
         from sentinel.agents.discovery import ATTRIBUTION_KEYS
@@ -560,6 +563,7 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
                 "extraction_mode": extraction_mode,
                 "_rank": rank,
                 "article_ioc_count": article_ioc_count,
+                "attributes": dict(attributes or {}),
             }
         elif current is not None and article_ioc_count > int(current.get("article_ioc_count") or 0):
             current["article_ioc_count"] = article_ioc_count

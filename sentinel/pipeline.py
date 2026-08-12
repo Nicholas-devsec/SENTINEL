@@ -568,6 +568,8 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
             payload["provenance"] = context.get("provenance")
             payload["extraction_mode"] = context.get("extraction_mode")
             payload.setdefault("attributes", {})
+            if isinstance(context.get("attributes"), dict):
+                payload["attributes"].update(context["attributes"])
             if context.get("article_ioc_count") is not None:
                 payload["attributes"]["article_ioc_count"] = int(context.get("article_ioc_count") or 0)
             if payload["provenance"] is not None:
@@ -786,7 +788,7 @@ async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) 
         return {"sent": False, "reason": "no_tweetfeed_iocs"}
 
     raw_item = fetched[0]
-    validator = ValidationAgent(settings=settings)
+    validator = ValidationAgent()
     validation_report = await validator.run_with_report([raw_item])
     if not validation_report.all_iocs:
         return {"sent": False, "reason": "tweetfeed_ioc_not_validated", "value": raw_item.value}
@@ -822,6 +824,8 @@ async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) 
     payload["corroboration_sources"] = corroboration.get(persisted.id, 1)
     payload["provenance"] = context.get("provenance") or "feed"
     payload.setdefault("attributes", {})
+    if isinstance(context.get("attributes"), dict):
+        payload["attributes"].update(context["attributes"])
     payload["attributes"]["provenance"] = payload["provenance"]
 
     delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))

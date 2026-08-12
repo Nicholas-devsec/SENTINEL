@@ -467,7 +467,7 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
                 first_seen=datetime(2026, 7, 1, tzinfo=UTC),
                 last_seen=datetime(2026, 7, 1, tzinfo=UTC),
                 lineage_hash="lineage-writeup",
-                attributes={"extraction_mode": "ioc_section"},
+                attributes={"extraction_mode": "ioc_section", "reporter": "researcher", "tags": ["#phishing"]},
             )
         )
         await session.commit()
@@ -478,6 +478,8 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
     assert entry["corroboration_sources"] == 2
     assert entry["provenance"] == "writeup"
     assert entry["extraction_mode"] == "ioc_section"
+    assert entry["attributes"]["reporter"] == "researcher"
+    assert entry["attributes"]["tags"] == ["#phishing"]
     assert entry["article_ioc_count"] == 1
 
 
