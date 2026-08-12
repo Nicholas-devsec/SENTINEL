@@ -807,7 +807,7 @@ async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) 
         return {"sent": False, "reason": "tweetfeed_ioc_not_enriched", "value": row.value}
     await _persist_enrichment(enriched_items)
 
-    scorer = ScoringAgent(mitre_repository=MitreAttackRepository(settings.mitre.stix_path))
+    scorer = ScoringAgent(mitre_repository=MitreAttackRepository(stix_path=settings.mitre.stix_path))
     scored_items = await scorer.run(enriched_items)
     persisted_rows = await _persist_scoring(scored_items)
     persisted_by_identity = {_ioc_identity(row.value, row.type, row.source): row for row in persisted_rows}

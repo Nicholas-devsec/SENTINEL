@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
 from sentinel.agents.enricher import EnrichedIOC
+from sentinel.agents.scorer import ScoredIOC
 from sentinel.agents.scraper import RawIOC, RawWriteup, ScrapeReport
 from sentinel.agents.validator import ValidationReport
 from sentinel.config import SentinelSettings
@@ -15,6 +18,7 @@ from sentinel.pipeline import (
     build_agents,
     run_daily_digest,
     run_pipeline_once,
+    send_tweetfeed_sample_alert,
 )
 
 
@@ -42,6 +46,14 @@ class FakeValidatorAgent(FakeAgent):
     async def run_with_report(self, *args, **kwargs):
         self.calls.append({"args": args, "kwargs": kwargs})
         return ValidationReport(new_iocs=self.result, corroborated_iocs=[], sightings_recorded=len(self.result))
+
+
+class NullAsyncSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -138,6 +150,149 @@ def test_workflow_feed_limit_refills_after_hash_family_dedupe() -> None:
         ("ipv4", "1.1.1.1"),
         ("ipv4", "2.2.2.2"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_tweetfeed_sample_alert_uses_runtime_constructors(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    row_id = uuid4()
+    persisted_row = SimpleNamespace(
+        id=row_id,
+        value="w50kzn94.xyz",
+        type="domain",
+        source="tweetfeed",
+        last_seen=now,
+    )
+
+    settings = SentinelSettings.model_validate(
+        {
+            "sources": {
+                "feeds": [{"name": "tweetfeed", "url": "https://api.tweetfeed.live/v1/today", "trust": 0.62}],
+            },
+            "mitre": {"stix_path": "data/enterprise-attack.json"},
+            "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "disabled"},
+            "delivery": {"telegram_token": "token", "telegram_chat_id": "12345"},
+        }
+    )
+
+    class FakeScraper:
+        def __init__(self, *, settings):
+            self.settings = settings
+
+        def get_source_trust_scores(self):
+            return {"tweetfeed": 0.62}
+
+        async def aclose(self):
+            return None
+
+    class FakeTweetFeed:
+        def __init__(self, url, *, trust_score):
+            self.client = self
+
+        async def fetch(self):
+            return [
+                RawIOC(
+                    value="w50kzn94.xyz",
+                    type="domain",
+                    source="tweetfeed",
+                    source_trust=0.62,
+                    first_seen=now,
+                    last_seen=now,
+                    attributes={"reporter": "researcher", "tags": ["#phishing"]},
+                )
+            ]
+
+        async def aclose(self):
+            return None
+
+    class FakeValidator:
+        def __init__(self):
+            pass
+
+        async def run_with_report(self, items):
+            return ValidationReport(new_iocs=[persisted_row], corroborated_iocs=[], sightings_recorded=1)
+
+    class FakeEnricher:
+        def __init__(self, *, settings):
+            pass
+
+        async def run(self, rows, *, context_by_value):
+            return [
+                EnrichedIOC(
+                    value="w50kzn94.xyz",
+                    type="domain",
+                    source="tweetfeed",
+                    source_trust=0.62,
+                    first_seen=now,
+                    last_seen=now,
+                    risk_score=50.0,
+                    reference_url="https://x.com/researcher/status/123",
+                    attributes={"reporter": "researcher", "tags": ["#phishing"]},
+                )
+            ]
+
+        async def aclose(self):
+            return None
+
+    class FakeMitreRepository:
+        def __init__(self, *, stix_path):
+            self.stix_path = stix_path
+
+    class FakeScorer:
+        def __init__(self, *, mitre_repository):
+            assert isinstance(mitre_repository, FakeMitreRepository)
+
+        async def run(self, items):
+            return [
+                ScoredIOC(
+                    value="w50kzn94.xyz",
+                    type="domain",
+                    source="tweetfeed",
+                    risk_score=50.0,
+                    severity="medium",
+                    reference_url="https://x.com/researcher/status/123",
+                    attributes={"reporter": "researcher", "tags": ["#phishing"]},
+                )
+            ]
+
+    class FakeDelivery:
+        def __init__(self, *, settings, telegram_bot):
+            self.sent_payload = None
+
+        async def send_immediate_alert(self, payload):
+            self.sent_payload = payload
+            assert payload["id"] == str(row_id)
+            assert payload["attributes"]["reporter"] == "researcher"
+            return True
+
+        async def aclose(self):
+            return None
+
+    async def fake_context(session, ids):
+        return {row_id: {"provenance": "feed", "attributes": {"reporter": "researcher", "tags": ["#phishing"]}}}
+
+    async def fake_corroboration(session, ids):
+        return {row_id: 1}
+
+    monkeypatch.setattr("sentinel.pipeline.init_db", lambda: __import__("asyncio").sleep(0))
+    monkeypatch.setattr("sentinel.pipeline.ScraperAgent", FakeScraper)
+    monkeypatch.setattr("sentinel.pipeline.TweetFeedAdapter", FakeTweetFeed)
+    monkeypatch.setattr("sentinel.pipeline.ValidationAgent", FakeValidator)
+    monkeypatch.setattr("sentinel.pipeline.EnrichmentAgent", FakeEnricher)
+    monkeypatch.setattr("sentinel.pipeline.MitreAttackRepository", FakeMitreRepository)
+    monkeypatch.setattr("sentinel.pipeline.ScoringAgent", FakeScorer)
+    monkeypatch.setattr("sentinel.pipeline.DeliveryAgent", FakeDelivery)
+    monkeypatch.setattr("sentinel.pipeline._build_telegram_bot", lambda settings: object())
+    monkeypatch.setattr("sentinel.pipeline.AsyncSessionFactory", lambda: NullAsyncSession())
+    monkeypatch.setattr("sentinel.pipeline.get_scoring_context", fake_context)
+    monkeypatch.setattr("sentinel.pipeline.get_corroboration", fake_corroboration)
+    monkeypatch.setattr("sentinel.pipeline._persist_enrichment", lambda items: __import__("asyncio").sleep(0))
+    monkeypatch.setattr("sentinel.pipeline._persist_scoring", lambda items: __import__("asyncio").sleep(0, result=[persisted_row]))
+
+    result = await send_tweetfeed_sample_alert(settings=settings)
+
+    assert result["sent"] is True
+    assert result["id"] == str(row_id)
 
 
 def test_workflow_store_type_limits_shape_feed_ioc_mix() -> None:
