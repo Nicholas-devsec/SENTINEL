@@ -15,7 +15,7 @@ from sentinel.agents.delivery import DeliveryAgent
 from sentinel.agents.enricher import EnrichedIOC, EnrichmentAgent
 from sentinel.agents.rule_generator import GeneratedArtifacts, RuleGeneratorAgent
 from sentinel.agents.scorer import ScoredIOC, ScoringAgent, build_external_links_for_ioc, map_severity
-from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent
+from sentinel.agents.scraper import RawWriteup, ScrapeReport, ScraperAgent, TweetFeedAdapter
 from sentinel.agents.validator import ValidationAgent, get_corroboration, get_scoring_context
 from sentinel.config import SentinelSettings, _is_missing_secret, get_settings
 from sentinel.db.migrations import ensure_schema
@@ -760,3 +760,82 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
         closer = getattr(delivery, "aclose", None)
         if closer is not None:
             await closer()
+
+
+async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    await init_db()
+    scraper = ScraperAgent(settings=settings)
+    try:
+        trust_scores = scraper.get_source_trust_scores()
+    finally:
+        await scraper.aclose()
+    configured_feed = next(
+        (feed for feed in settings.sources.feeds if feed.enabled and feed.name.lower() == "tweetfeed"),
+        None,
+    )
+    feed_url = configured_feed.url if configured_feed is not None else "https://api.tweetfeed.live/v1/today"
+    feed_trust = trust_scores.get("tweetfeed", configured_feed.trust if configured_feed is not None else 0.62)
+
+    adapter = TweetFeedAdapter(feed_url, trust_score=feed_trust)
+    try:
+        fetched = await adapter.fetch()
+    finally:
+        await adapter.client.aclose()
+    if not fetched:
+        return {"sent": False, "reason": "no_tweetfeed_iocs"}
+
+    raw_item = fetched[0]
+    validator = ValidationAgent(settings=settings)
+    validation_report = await validator.run_with_report([raw_item])
+    if not validation_report.all_iocs:
+        return {"sent": False, "reason": "tweetfeed_ioc_not_validated", "value": raw_item.value}
+
+    row = validation_report.all_iocs[0]
+    async with AsyncSessionFactory() as session:
+        context_by_id = await get_scoring_context(session, [row.id])
+    context = context_by_id.get(row.id, {})
+
+    enricher = EnrichmentAgent(settings=settings)
+    try:
+        enriched_items = await enricher.run([row], context_by_value={row.value: context})
+    finally:
+        await enricher.aclose()
+    if not enriched_items:
+        return {"sent": False, "reason": "tweetfeed_ioc_not_enriched", "value": row.value}
+    await _persist_enrichment(enriched_items)
+
+    scorer = ScoringAgent(mitre_repository=MitreAttackRepository(settings.mitre.stix_path))
+    scored_items = await scorer.run(enriched_items)
+    persisted_rows = await _persist_scoring(scored_items)
+    persisted_by_identity = {_ioc_identity(row.value, row.type, row.source): row for row in persisted_rows}
+    scored = scored_items[0]
+    payload = asdict(scored)
+    persisted = persisted_by_identity.get(_ioc_identity(payload["value"], payload["type"], payload["source"]))
+    if persisted is None:
+        return {"sent": False, "reason": "tweetfeed_ioc_not_persisted", "value": payload["value"]}
+
+    async with AsyncSessionFactory() as session:
+        corroboration = await get_corroboration(session, [persisted.id])
+    payload["id"] = str(persisted.id)
+    payload["last_seen"] = persisted.last_seen
+    payload["corroboration_sources"] = corroboration.get(persisted.id, 1)
+    payload["provenance"] = context.get("provenance") or "feed"
+    payload.setdefault("attributes", {})
+    payload["attributes"]["provenance"] = payload["provenance"]
+
+    delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
+    try:
+        sent = await delivery.send_immediate_alert(payload)
+    finally:
+        closer = getattr(delivery, "aclose", None)
+        if closer is not None:
+            await closer()
+    return {
+        "sent": bool(sent),
+        "id": str(persisted.id),
+        "value": payload["value"],
+        "type": payload["type"],
+        "source": payload["source"],
+        "risk_score": payload["risk_score"],
+    }

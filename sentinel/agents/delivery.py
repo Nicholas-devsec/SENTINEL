@@ -36,7 +36,7 @@ from sentinel.feedback import CONFIRMED, FALSE_POSITIVE, LOW_LEVEL_TRUE_POSITIVE
 logger = logging.getLogger(__name__)
 FALLBACK_DIGEST_MIN_SCORE = 25.0
 HASH_TYPES = {"md5", "sha1", "sha256"}
-DIRECT_IOC_FEED_SOURCES = {"threatfox", "urlhaus", "feodotracker", "otx", "malwarebazaar", "phishtank"}
+DIRECT_IOC_FEED_SOURCES = {"threatfox", "urlhaus", "tweetfeed", "feodotracker", "otx", "malwarebazaar", "phishtank"}
 ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP = 2
 CAMPAIGN_STOPWORDS = {
     "about",

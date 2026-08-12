@@ -183,6 +183,8 @@ def _is_otx_reference(source: str, reference_url: str | None) -> bool:
 def _reference_link_label(source: str, reference_url: str | None) -> str:
     if _is_otx_reference(source, reference_url):
         return "OTX Pulse"
+    if source.lower() == "tweetfeed":
+        return "Tweet"
     return "Article"
 
 
@@ -201,6 +203,15 @@ def _format_source_context(source: str, attributes: dict[str, Any] | None = None
             else:
                 parts.append(malware)
         return " | ".join(parts)
+    if source.lower() == "tweetfeed":
+        parts = ["TweetFeed"]
+        reporter = str(attrs.get("reporter") or "").strip().lstrip("@")
+        if reporter:
+            parts.append(f"@{reporter}")
+        tags = [str(tag).strip() for tag in attrs.get("tags", []) if str(tag).strip()]
+        if tags:
+            parts.append(", ".join(tags[:3]))
+        return " | ".join(parts)
     return source
 
 
@@ -217,22 +228,24 @@ def summarize_ioc(
     attrs = attributes or {}
     threat_type = str(attrs.get("threat_type") or "").strip().lower()
     malware = str(attrs.get("malware_printable") or attrs.get("malware") or "").strip()
+    tag_text = " ".join(str(tag).lower() for tag in attrs.get("tags", []) if str(tag).strip())
+    context_text = f"{lowered} {tag_text}"
     if ioc_type == "ipv4":
         if threat_type == "botnet_cc":
             return f"botnet C2 IP tied to {malware}" if malware else "botnet command-and-control IP"
-        if "c2" in lowered or "command and control" in lowered:
+        if "c2" in context_text or "command and control" in context_text:
             return "IPv4 address of C2 server"
         return "IPv4 infrastructure indicator"
     if ioc_type == "ipv6":
-        if "c2" in lowered or "command and control" in lowered:
+        if "c2" in context_text or "command and control" in context_text:
             return "IPv6 address of C2 server"
         return "IPv6 infrastructure indicator"
     if ioc_type == "domain":
         if "github.io" in display:
             return "domain hosting attacker-controlled content"
-        if "phish" in lowered or "lure" in lowered:
+        if "phish" in context_text or "lure" in context_text or "scam" in context_text:
             return "domain used in phishing infrastructure"
-        if "c2" in lowered or "beacon" in lowered:
+        if "c2" in context_text or "beacon" in context_text:
             return "domain of C2 server"
         return "malicious domain indicator"
     if ioc_type == "url":
@@ -241,17 +254,19 @@ def summarize_ioc(
             return "GitHub repo or path used by attacker"
         if "github.io/" in display:
             return "GitHub Pages path serving attacker content"
-        if any(keyword in lowered for keyword in ("installer", "download", "payload")):
+        if "phish" in context_text or "lure" in context_text or "scam" in context_text:
+            return "phishing or scam URL"
+        if any(keyword in context_text for keyword in ("installer", "download", "payload")):
             return "malicious download or payload URL"
         if "cdn" in display.lower():
             return "malicious hosted asset or stage URL"
         return "malicious URL indicator"
     if ioc_type in {"md5", "sha1", "sha256"}:
-        if "phish" in lowered or "kit" in lowered:
+        if "phish" in context_text or "kit" in context_text:
             return "hash of phishing kit artifact"
-        if re.search(r"\b(installer|download|loader)\b", lowered):
+        if re.search(r"\b(installer|download|loader)\b", context_text):
             return "malicious installer hash"
-        if any(keyword in lowered for keyword in ("beacon", "payload", "stealer", "ransomware", "malware", "sharkloader")):
+        if any(keyword in context_text for keyword in ("beacon", "payload", "stealer", "ransomware", "malware", "sharkloader")):
             return "malware artifact hash"
         return "suspicious file hash"
     if ioc_type == "cve":

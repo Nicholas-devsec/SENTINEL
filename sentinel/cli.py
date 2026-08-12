@@ -9,7 +9,7 @@ from sentinel.config import get_settings, validate_runtime_settings
 from sentinel.delivery.telegram_listener import run_telegram_listener
 from sentinel.delivery.telegram_bot import fetch_chat_candidates, format_chat_candidates
 from sentinel.logging_utils import configure_logging
-from sentinel.pipeline import _build_telegram_bot, rescore_existing_iocs, run_daily_digest, run_pipeline_once
+from sentinel.pipeline import _build_telegram_bot, rescore_existing_iocs, run_daily_digest, run_pipeline_once, send_tweetfeed_sample_alert
 from sentinel.runtime import (
     collect_ops_status,
     format_karpathy_status,
@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("run-once", help="Run the full live MVP pipeline once")
     subcommands.add_parser("cron-run", help="Cron-friendly one-shot pipeline: scrape -> store -> enrich -> Telegram")
     subcommands.add_parser("scraper-diagnose", help="Fetch live sources and print per-feed scrape diagnostics")
+    subcommands.add_parser("tweetfeed-alert", help="Fetch one TweetFeed IOC, persist/enrich/score it, and send a Telegram alert")
     subcommands.add_parser("daily-digest", help="Send the daily digest for the last 24 hours")
     subcommands.add_parser(
         "rescore",
@@ -154,6 +155,10 @@ async def _dispatch(command: str, **kwargs) -> None:
                 f"pre_balance_kept={diagnostic.pre_balance_kept} kept={diagnostic.kept} "
                 f"stale_dropped={diagnostic.stale_dropped} balance_dropped={diagnostic.balance_dropped} error={error}"
             )
+        return
+    if command == "tweetfeed-alert":
+        result = await send_tweetfeed_sample_alert(settings=settings)
+        print(result)
         return
     if command == "daily-digest":
         result = await run_daily_digest(settings=settings)

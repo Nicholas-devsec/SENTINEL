@@ -63,6 +63,8 @@ def build_external_links_for_ioc(ioc: dict[str, Any]) -> dict[str, str]:
         links.setdefault("OTX", f"https://otx.alienvault.com/browse/global/pulses?q={quote(value, safe='')}")
     if source == "urlhaus" and ioc_type == "url":
         links.setdefault("URLhaus", f"https://urlhaus.abuse.ch/browse.php?search={quote(value, safe='')}")
+    if source == "tweetfeed":
+        links.setdefault("TweetFeed", f"https://tweetfeed.live/search/?q={quote(value, safe='')}")
     return links
 
 

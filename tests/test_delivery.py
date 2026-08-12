@@ -228,6 +228,44 @@ async def test_delivery_agent_sends_immediate_alerts_and_counts_digest_candidate
     assert len(telegram_bot.messages) == 1
     assert "SENTINEL Alert" in telegram_bot.messages[0]["text"]
     assert "<b>Evidence</b>:" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_tweetfeed_alert_with_ioc_id_has_feedback_buttons_and_context() -> None:
+    telegram_bot = FakeTelegramBot()
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    ioc_id = str(uuid4())
+
+    sent = await agent.send_immediate_alert(
+        {
+            "id": ioc_id,
+            "value": "w50kzn94.xyz",
+            "type": "domain",
+            "source": "tweetfeed",
+            "risk_score": 50.0,
+            "severity": "medium",
+            "reference_url": "https://x.com/researcher/status/123",
+            "related_cves": [],
+            "external_links": {},
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": datetime.now(UTC),
+            "attributes": {"reporter": "researcher", "tags": ["#phishing", "#scam"]},
+        }
+    )
+
+    assert sent is True
+    assert telegram_bot.messages[0]["reply_markup"] is not None
+    first_row = telegram_bot.messages[0]["reply_markup"].inline_keyboard[0]
+    assert first_row[0].callback_data == f"confirmed:{ioc_id}"
+    assert "TweetFeed | @researcher | #phishing, #scam" in telegram_bot.messages[0]["text"]
+    assert "domain used in phishing infrastructure" in telegram_bot.messages[0]["text"]
+    assert '<a href="https://x.com/researcher/status/123">Tweet</a>' in telegram_bot.messages[0]["text"]
     assert telegram_bot.messages[0]["parse_mode"] == "HTML"
     assert telegram_bot.messages[0]["reply_markup"] is not None
     first_row = telegram_bot.messages[0]["reply_markup"].inline_keyboard[0]

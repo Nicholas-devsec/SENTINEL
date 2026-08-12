@@ -312,12 +312,13 @@ def validate_runtime_settings(settings: SentinelSettings, *, command: str) -> No
         "send-real-samples",
         "send-discovery-samples",
         "send-needs-review",
+        "tweetfeed-alert",
     }:
         _validate_required_value("DATABASE_URL", settings.db.url)
         _validate_required_value("TELEGRAM_BOT_TOKEN", settings.delivery.telegram_token)
         _validate_required_value("TELEGRAM_CHAT_ID", settings.delivery.telegram_chat_id)
 
-    if commands & {"run-once", "scheduler"}:
+    if commands & {"run-once", "scheduler", "tweetfeed-alert"}:
         _validate_required_value("MITRE_STIX_PATH", settings.mitre.stix_path)
         mitre_path = Path(settings.mitre.stix_path)
         if not mitre_path.exists():
