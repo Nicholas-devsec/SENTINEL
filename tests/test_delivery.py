@@ -1236,7 +1236,78 @@ def test_delivery_agent_suppresses_same_run_article_campaign_overlap() -> None:
         ],
     }
 
-    assert agent._suppress_duplicate_article_campaign_cards([microsoft_card, gbhackers_card]) == [microsoft_card]
+    merged = agent._suppress_duplicate_article_campaign_cards([microsoft_card, gbhackers_card])
+
+    assert len(merged) == 1
+    assert merged[0]["source"] == "discovery:www.microsoft.com"
+    assert {entry["value"] for entry in merged[0]["grouped_iocs"]} == {
+        "owa-ms365.com",
+        "ms365-live.com",
+        "m365-owa.com",
+        "31.57.243.154",
+        "213.145.86.112",
+    }
+    assert merged[0]["attributes"]["similar_article_count"] == 2
+
+
+def test_delivery_agent_merges_same_run_article_campaign_by_title_signature_without_ioc_overlap() -> None:
+    agent = DeliveryAgent(
+        settings=build_settings(),
+        telegram_bot=FakeTelegramBot(),
+        sendgrid_client=None,
+        session_factory=FakeSessionFactory(),
+    )
+    gbhackers_id = str(uuid4())
+    microsoft_id = str(uuid4())
+    gbhackers_card = {
+        "id": gbhackers_id,
+        "value": "a1fdf65020ce4a0f0940c793c6425baf8a0b994ec48b9baaf72788661a9d29f4",
+        "type": "sha256",
+        "source": "gbhackers_blog",
+        "risk_score": 57.49,
+        "severity": "medium",
+        "reference_url": "https://gbhackers.example/deadlock-ransomware",
+        "source_title": "DeadLock Ransomware Disables Windows Defender, Backups and Event Logs Before Encrypting",
+        "attributes": {"provenance": "writeup", "article_ioc_count": 6},
+        "grouped_ids": [gbhackers_id],
+        "grouped_iocs": [
+            {"type": "sha256", "value": "a1fdf65020ce4a0f0940c793c6425baf8a0b994ec48b9baaf72788661a9d29f4"},
+            {"type": "domain", "value": "deadlock.liveblog365.com"},
+            {"type": "domain", "value": "dlock.liveblog365.com"},
+            {"type": "domain", "value": "deadblogdbdu5wprek7wa2o4ce7rnt6u6ntqeud3hzjjcveosgpsqqqd.onion"},
+        ],
+    }
+    microsoft_card = {
+        "id": microsoft_id,
+        "value": "deadlockblog.medianewsonline.com",
+        "type": "domain",
+        "source": "discovery:www.microsoft.com",
+        "risk_score": 31.66,
+        "severity": "informational",
+        "reference_url": "https://www.microsoft.com/en-us/security/blog/2026/08/10/deadlock-ransomware-breaking-down-a-rust-based-encryptor-with-decentralized-recovery-infrastructure/",
+        "source_title": "DeadLock ransomware: Breaking down a Rust-based encryptor with decentralized recovery infrastructure",
+        "attributes": {"provenance": "discovery", "article_ioc_count": 6},
+        "grouped_ids": [microsoft_id],
+        "grouped_iocs": [
+            {"type": "domain", "value": "deadlockblog.medianewsonline.com"},
+            {"type": "domain", "value": "deadlockblog.great-site.net"},
+        ],
+    }
+
+    merged = agent._suppress_duplicate_article_campaign_cards([gbhackers_card, microsoft_card])
+
+    assert len(merged) == 1
+    assert merged[0]["source"] == "gbhackers_blog"
+    assert set(merged[0]["grouped_ids"]) == {gbhackers_id, microsoft_id}
+    assert {entry["value"] for entry in merged[0]["grouped_iocs"]} == {
+        "a1fdf65020ce4a0f0940c793c6425baf8a0b994ec48b9baaf72788661a9d29f4",
+        "deadlock.liveblog365.com",
+        "dlock.liveblog365.com",
+        "deadblogdbdu5wprek7wa2o4ce7rnt6u6ntqeud3hzjjcveosgpsqqqd.onion",
+        "deadlockblog.medianewsonline.com",
+        "deadlockblog.great-site.net",
+    }
+    assert merged[0]["attributes"]["similar_article_count"] == 2
 
 
 @pytest.mark.asyncio

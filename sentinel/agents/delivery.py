@@ -340,21 +340,46 @@ class DeliveryAgent(BaseAgent):
     def _suppress_duplicate_article_campaign_cards(self, cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
         kept: list[dict[str, Any]] = []
         kept_article_keys: list[set[str]] = []
+        kept_campaign_signatures: list[frozenset[str]] = []
         suppressed = 0
         for card in cards:
             keys = self._article_campaign_ioc_keys(card)
-            if keys and any(
-                len(keys & existing) >= ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP
-                for existing in kept_article_keys
-            ):
+            signature = self._campaign_signature(card) if self._is_article_card(card) else frozenset()
+            duplicate_index: int | None = None
+            if keys:
+                duplicate_index = next(
+                    (
+                        index
+                        for index, existing in enumerate(kept_article_keys)
+                        if len(keys & existing) >= ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP
+                    ),
+                    None,
+                )
+            if duplicate_index is None and signature:
+                duplicate_index = next(
+                    (
+                        index
+                        for index, existing in enumerate(kept_campaign_signatures)
+                        if signature & existing
+                    ),
+                    None,
+                )
+            if duplicate_index is not None:
+                kept[duplicate_index] = self._merge_digest_card(kept[duplicate_index], card)
+                kept_article_keys[duplicate_index] = (
+                    kept_article_keys[duplicate_index] | keys | self._article_campaign_ioc_keys(kept[duplicate_index])
+                )
+                kept_campaign_signatures[duplicate_index] = (
+                    kept_campaign_signatures[duplicate_index] | signature | self._campaign_signature(kept[duplicate_index])
+                )
                 suppressed += 1
                 continue
             kept.append(card)
-            if keys:
-                kept_article_keys.append(keys)
+            kept_article_keys.append(keys)
+            kept_campaign_signatures.append(signature)
         if suppressed:
             self.logger.info(
-                "Suppressed %s duplicate article campaign alert card(s) by IOC overlap",
+                "Suppressed %s duplicate article campaign alert card(s) by IOC overlap or campaign signature",
                 suppressed,
             )
         return kept
@@ -401,8 +426,21 @@ class DeliveryAgent(BaseAgent):
             int(incoming.get("attributes", {}).get("article_ioc_count", 0) or 0),
             len(merged_iocs),
         )
+        grouped_ids = sorted(
+            {
+                str(ioc_id)
+                for ioc_id in [
+                    base.get("id"),
+                    incoming.get("id"),
+                    *(base.get("grouped_ids") or []),
+                    *(incoming.get("grouped_ids") or []),
+                ]
+                if ioc_id
+            }
+        )
         return {
             **primary,
+            "grouped_ids": grouped_ids,
             "grouped_iocs": sorted(
                 merged_iocs.values(),
                 key=lambda entry: (
