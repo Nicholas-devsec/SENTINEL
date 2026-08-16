@@ -325,6 +325,63 @@ async def test_validator_deduplicates_against_existing_database_rows(agent: Vali
 
 
 @pytest.mark.asyncio
+async def test_validator_never_stores_duplicate_ioc_rows_across_sources_or_provenance(
+    agent: ValidationAgent,
+    db_session_factory,
+) -> None:
+    first_seen = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    inputs = [
+        RawIOC(
+            value="Duplicate.Example",
+            type="domain",
+            source="threatfox",
+            source_trust=0.94,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            provenance="feed",
+        ),
+        RawIOC(
+            value="duplicate.example",
+            type="domain",
+            source="gbhackers_blog",
+            source_trust=0.64,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            reference_url="https://gbhackers.example/duplicate-campaign",
+            provenance="writeup",
+        ),
+        RawIOC(
+            value="DUPLICATE.EXAMPLE",
+            type="domain",
+            source="discovery:research.example",
+            source_trust=0.55,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            reference_url="https://research.example/duplicate-campaign",
+            provenance="discovery",
+        ),
+    ]
+
+    report = await agent.run_with_report(inputs)
+
+    assert len(report.new_iocs) == 1
+    assert report.corroborated_iocs == []
+    async with db_session_factory() as session:
+        rows = list((await session.scalars(select(IOC))).all())
+        sightings = list((await session.scalars(select(IOCSighting))).all())
+
+    assert len(rows) == 1
+    assert rows[0].value == "duplicate.example"
+    assert {sighting.source for sighting in sightings} == {
+        "threatfox",
+        "gbhackers_blog",
+        "discovery:research.example",
+    }
+    assert {sighting.provenance for sighting in sightings} == {"feed", "writeup", "discovery"}
+    assert all(sighting.ioc_id == rows[0].id for sighting in sightings)
+
+
+@pytest.mark.asyncio
 async def test_validator_accepts_ipv6_and_sha256_iocs(agent: ValidationAgent) -> None:
     inputs = [
         {

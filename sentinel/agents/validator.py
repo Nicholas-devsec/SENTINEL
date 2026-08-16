@@ -381,14 +381,19 @@ class ValidationAgent(BaseAgent):
         *,
         source_material_ids: dict[str, Any] | None = None,
     ) -> ValidationReport:
+        items = list(validated)
         new_rows: list[IOC] = []
         corroborated: list[IOC] = []
         sightings = 0
-        batch_rows: dict[str, IOC] = {}
-        for item in validated:
+        dedupe_hashes = sorted({item.dedupe_hash for item in items})
+        existing_rows = (
+            await session.scalars(select(IOC).where(IOC.dedupe_hash.in_(dedupe_hashes)))
+            if dedupe_hashes
+            else []
+        )
+        batch_rows: dict[str, IOC] = {row.dedupe_hash: row for row in existing_rows}
+        for item in items:
             row = batch_rows.get(item.dedupe_hash)
-            if row is None:
-                row = await session.scalar(select(IOC).where(IOC.dedupe_hash == item.dedupe_hash))
             if row is not None and str(row.analyst_verdict or "").strip().lower() == "false_positive":
                 continue
             if row is None:
