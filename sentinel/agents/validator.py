@@ -501,6 +501,8 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
             IOCSighting.attributes,
             IOCSighting.source_material_id,
             IOCSighting.reference_url,
+            IOCSighting.last_seen,
+            SourceMaterial.published_at,
             SourceMaterial.extracted_ioc_count,
         )
         .outerjoin(SourceMaterial, IOCSighting.source_material_id == SourceMaterial.id)
@@ -509,12 +511,32 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
     fetched_rows = rows.all()
     material_ids = {
         source_material_id
-        for _ioc_id, _source, provenance, _attributes, source_material_id, _reference_url, _extracted_ioc_count in fetched_rows
+        for (
+            _ioc_id,
+            _source,
+            provenance,
+            _attributes,
+            source_material_id,
+            _reference_url,
+            _sighting_last_seen,
+            _material_published_at,
+            _extracted_ioc_count,
+        ) in fetched_rows
         if source_material_id is not None and str(provenance or "").strip().lower() in {"writeup", "discovery"}
     }
     reference_urls = {
         str(reference_url or "").strip()
-        for _ioc_id, _source, provenance, _attributes, source_material_id, reference_url, _extracted_ioc_count in fetched_rows
+        for (
+            _ioc_id,
+            _source,
+            provenance,
+            _attributes,
+            source_material_id,
+            reference_url,
+            _sighting_last_seen,
+            _material_published_at,
+            _extracted_ioc_count,
+        ) in fetched_rows
         if source_material_id is None
         and str(reference_url or "").strip()
         and str(provenance or "").strip().lower() in {"writeup", "discovery"}
@@ -546,7 +568,17 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
         }
     context: dict[Any, dict[str, Any]] = {}
     distinct_sources: dict[Any, set[str]] = {}
-    for ioc_id, source, provenance, attributes, source_material_id, reference_url, extracted_ioc_count in fetched_rows:
+    for (
+        ioc_id,
+        source,
+        provenance,
+        attributes,
+        source_material_id,
+        reference_url,
+        sighting_last_seen,
+        material_published_at,
+        extracted_ioc_count,
+    ) in fetched_rows:
         distinct_sources.setdefault(ioc_id, set()).add(source)
         extraction_mode = (attributes or {}).get("extraction_mode")
         # Curated IOC-section extractions get promoted to the strongest rank.
@@ -568,6 +600,7 @@ async def get_scoring_context(session: AsyncSession, ioc_ids: Iterable[Any]) -> 
                 "extraction_mode": extraction_mode,
                 "_rank": rank,
                 "article_ioc_count": article_ioc_count,
+                "context_observed_at": material_published_at or sighting_last_seen,
                 "attributes": dict(attributes or {}),
             }
         elif current is not None and article_ioc_count > int(current.get("article_ioc_count") or 0):

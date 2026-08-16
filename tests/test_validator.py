@@ -571,6 +571,7 @@ async def test_get_scoring_context_picks_strongest_provenance_and_counts_sources
     assert entry["attributes"]["reporter"] == "researcher"
     assert entry["attributes"]["tags"] == ["#phishing"]
     assert entry["article_ioc_count"] == 1
+    assert entry["context_observed_at"] == datetime(2026, 7, 1, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

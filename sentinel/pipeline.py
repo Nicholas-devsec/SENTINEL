@@ -246,6 +246,86 @@ def _ordered_processing_rows(
     )
 
 
+def _coerce_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return None
+
+
+def _discovery_freshness_hours(settings: SentinelSettings) -> int:
+    enabled_profiles = [profile for profile in settings.discovery.profiles if profile.enabled]
+    if not enabled_profiles:
+        return 0
+    return max(int(profile.freshness_hours) for profile in enabled_profiles)
+
+
+def _fresh_scoring_context(
+    settings: SentinelSettings,
+    context: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    if not context:
+        return {}
+    provenance = str(context.get("provenance") or "").strip().lower()
+    if provenance not in {"writeup", "discovery"}:
+        return dict(context)
+
+    observed_at = _coerce_utc(context.get("context_observed_at"))
+    reference = now or datetime.now(UTC)
+    reference = reference if reference.tzinfo else reference.replace(tzinfo=UTC)
+    if provenance == "writeup":
+        max_age_hours = int(settings.sources.writeup_max_item_age_hours)
+    else:
+        max_age_hours = _discovery_freshness_hours(settings)
+    if observed_at is not None and (max_age_hours <= 0 or observed_at >= reference - timedelta(hours=max_age_hours)):
+        return dict(context)
+
+    downgraded = {
+        "provenance": "feed",
+        "extraction_mode": "feed",
+        "corroboration_sources": context.get("corroboration_sources", 1),
+        "attributes": {},
+        "stale_article_context": {
+            "provenance": provenance,
+            "observed_at": observed_at.isoformat() if observed_at is not None else None,
+            "max_age_hours": max_age_hours,
+        },
+    }
+    return downgraded
+
+
+def _fresh_contexts_by_id(
+    settings: SentinelSettings,
+    contexts: dict[Any, dict[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> dict[Any, dict[str, Any]]:
+    reference = now or datetime.now(UTC)
+    return {
+        ioc_id: _fresh_scoring_context(settings, context, now=reference)
+        for ioc_id, context in contexts.items()
+    }
+
+
+def _suppress_stale_article_payload(payload: dict[str, Any], context: dict[str, Any]) -> None:
+    stale_context = context.get("stale_article_context")
+    if not stale_context:
+        return
+    payload["source_title"] = None
+    payload["reference_url"] = None
+    payload.setdefault("attributes", {})
+    payload["attributes"]["stale_article_context"] = stale_context
+
+
 async def init_db() -> None:
     await ensure_schema(get_engine())
 
@@ -522,7 +602,10 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
         # the score reflects evidence and analyst curation, not feed identity.
         stage_started = time.perf_counter()
         async with AsyncSessionFactory() as session:
-            context_by_id = await get_scoring_context(session, [row.id for row in processing_rows])
+            context_by_id = _fresh_contexts_by_id(
+                settings,
+                await get_scoring_context(session, [row.id for row in processing_rows]),
+            )
         context_by_value = {
             row.value: context_by_id[row.id] for row in processing_rows if row.id in context_by_id
         }
@@ -576,6 +659,7 @@ async def run_pipeline_once(settings: SentinelSettings | None = None) -> Pipelin
                 payload["attributes"]["provenance"] = payload["provenance"]
             if payload["extraction_mode"] is not None:
                 payload["attributes"]["extraction_mode"] = payload["extraction_mode"]
+            _suppress_stale_article_payload(payload, context)
             delivery_payload.append(payload)
         generated = await agents["rule_generator"].run(delivery_payload)
         await _persist_generated(generated)
@@ -666,7 +750,10 @@ async def rescore_existing_iocs(settings: SentinelSettings | None = None) -> Res
         changed = 0
         async with AsyncSessionFactory() as session:
             rows = list((await session.scalars(select(IOC))).all())
-            context_by_id = await get_scoring_context(session, [row.id for row in rows])
+            context_by_id = _fresh_contexts_by_id(
+                settings,
+                await get_scoring_context(session, [row.id for row in rows]),
+            )
             for row in rows:
                 before = float(row.risk_score or 0.0)
                 breakdown = enricher.breakdown_from_stored(
@@ -724,9 +811,14 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                     )
                 ).all()
             )
-            context_by_id = await get_scoring_context(session, [row.id for row in rows])
-        items = [
-            {
+            context_by_id = _fresh_contexts_by_id(
+                settings,
+                await get_scoring_context(session, [row.id for row in rows]),
+            )
+        items = []
+        for row in rows:
+            context = context_by_id.get(row.id, {})
+            item = {
                 "id": str(row.id),
                 "value": row.value,
                 "type": row.type,
@@ -743,20 +835,19 @@ async def run_daily_digest(settings: SentinelSettings | None = None) -> Any:
                 "mitre_techniques": row.mitre_techniques,
                 "mitre_tactics": row.mitre_tactics,
                 "last_seen": row.last_seen,
-                "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
-                "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
-                "corroboration_sources": (context_by_id.get(row.id) or {}).get("corroboration_sources", 1),
+                "provenance": context.get("provenance"),
+                "extraction_mode": context.get("extraction_mode"),
+                "corroboration_sources": context.get("corroboration_sources", 1),
                 "attributes": {
-                    "article_ioc_count": int((context_by_id.get(row.id) or {}).get("article_ioc_count") or 0),
-                    "provenance": (context_by_id.get(row.id) or {}).get("provenance"),
-                    "extraction_mode": (context_by_id.get(row.id) or {}).get("extraction_mode"),
+                    "article_ioc_count": int(context.get("article_ioc_count") or 0),
+                    "provenance": context.get("provenance"),
+                    "extraction_mode": context.get("extraction_mode"),
                     "score_breakdown": getattr(row, "score_breakdown", None),
                 },
             }
-            for row in rows
-        ]
-        for item in items:
+            _suppress_stale_article_payload(item, context)
             item["external_links"] = build_external_links_for_ioc(item)
+            items.append(item)
         return await delivery.daily_digest(delivery._select_digest_candidates(items))
     finally:
         closer = getattr(delivery, "aclose", None)
@@ -795,7 +886,7 @@ async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) 
 
     row = validation_report.all_iocs[0]
     async with AsyncSessionFactory() as session:
-        context_by_id = await get_scoring_context(session, [row.id])
+        context_by_id = _fresh_contexts_by_id(settings, await get_scoring_context(session, [row.id]))
     context = context_by_id.get(row.id, {})
 
     enricher = EnrichmentAgent(settings=settings)
@@ -827,6 +918,7 @@ async def send_tweetfeed_sample_alert(settings: SentinelSettings | None = None) 
     if isinstance(context.get("attributes"), dict):
         payload["attributes"].update(context["attributes"])
     payload["attributes"]["provenance"] = payload["provenance"]
+    _suppress_stale_article_payload(payload, context)
 
     delivery = DeliveryAgent(settings=settings, telegram_bot=_build_telegram_bot(settings))
     try:

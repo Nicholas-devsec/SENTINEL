@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -15,6 +15,8 @@ from sentinel.pipeline import (
     PipelineResult,
     _apply_workflow_limits,
     _dedupe_enriched_hash_families,
+    _fresh_scoring_context,
+    _suppress_stale_article_payload,
     build_agents,
     run_daily_digest,
     run_pipeline_once,
@@ -40,6 +42,73 @@ class FakeScraperAgent(FakeAgent):
     async def run_with_diagnostics(self, *args, **kwargs):
         self.calls.append({"args": args, "kwargs": kwargs})
         return ScrapeReport(items=self.result, diagnostics=[], writeups=[])
+
+
+def test_fresh_scoring_context_downgrades_stale_writeup_context() -> None:
+    settings = SentinelSettings()
+    settings.sources.writeup_max_item_age_hours = 72
+    now = datetime(2026, 8, 16, 7, 5, tzinfo=UTC)
+
+    context = _fresh_scoring_context(
+        settings,
+        {
+            "provenance": "writeup",
+            "extraction_mode": "ioc_section",
+            "corroboration_sources": 2,
+            "context_observed_at": now - timedelta(days=6),
+            "attributes": {"article_title": "Old but corroborated"},
+        },
+        now=now,
+    )
+
+    assert context["provenance"] == "feed"
+    assert context["extraction_mode"] == "feed"
+    assert context["corroboration_sources"] == 2
+    assert context["attributes"] == {}
+    assert context["stale_article_context"]["provenance"] == "writeup"
+
+
+def test_fresh_scoring_context_keeps_current_writeup_context() -> None:
+    settings = SentinelSettings()
+    settings.sources.writeup_max_item_age_hours = 72
+    now = datetime(2026, 8, 16, 7, 5, tzinfo=UTC)
+
+    context = _fresh_scoring_context(
+        settings,
+        {
+            "provenance": "writeup",
+            "extraction_mode": "ioc_section",
+            "corroboration_sources": 1,
+            "context_observed_at": now - timedelta(hours=12),
+            "attributes": {"article_title": "Fresh"},
+        },
+        now=now,
+    )
+
+    assert context["provenance"] == "writeup"
+    assert context["extraction_mode"] == "ioc_section"
+    assert context["attributes"]["article_title"] == "Fresh"
+
+
+def test_suppress_stale_article_payload_removes_article_delivery_fields() -> None:
+    payload = {
+        "source_title": "The Permanent Threat",
+        "reference_url": "https://unit42.paloaltonetworks.com/aeternum-blockchain-c2-analysis/",
+        "attributes": {"provenance": "feed"},
+    }
+    context = {
+        "stale_article_context": {
+            "provenance": "writeup",
+            "observed_at": "2026-08-10T22:00:02+00:00",
+            "max_age_hours": 72,
+        }
+    }
+
+    _suppress_stale_article_payload(payload, context)
+
+    assert payload["source_title"] is None
+    assert payload["reference_url"] is None
+    assert payload["attributes"]["stale_article_context"] == context["stale_article_context"]
 
 
 class FakeValidatorAgent(FakeAgent):
