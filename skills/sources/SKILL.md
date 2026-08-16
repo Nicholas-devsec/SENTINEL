@@ -11,6 +11,7 @@ updated_by: human
 - AlienVault OTX TAXII 2.1 feed
 - abuse.ch URLhaus CSV and recent URL API
 - TweetFeed.live Twitter/X community IOC API
+- OpenPhish Community snapshot-diff phishing URL feed
 - abuse.ch FeodoTracker JSON
 - Cisco Talos blog RSS
 - Palo Alto Unit 42 blog RSS
@@ -25,6 +26,7 @@ updated_by: human
 - threatfox: 0.94
 - urlhaus: 0.91
 - tweetfeed: 0.62
+- openphish: 0.82
 - feodotracker: 0.93
 - otx: 0.90
 - talos_blog: 0.68
@@ -43,6 +45,7 @@ updated_by: human
 - Normalize source names before queuing indicators.
 - Record feed metadata needed for analyst traceability.
 - Treat TweetFeed IOCs as community-reported hunting/watchlist candidates unless corroborated by enrichment or another source.
+- Treat OpenPhish Community as a snapshot-diff feed: baseline without emitting, emit only URLs added since a prior successful snapshot inside the configured freshness window, and rebaseline without emitting after stale gaps.
 
 ## Learner Updates
 <!-- learner: append here -->

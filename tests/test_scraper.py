@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 
 import fakeredis.aioredis
 import httpx
@@ -10,6 +12,7 @@ from sentinel.agents.scraper import (
     FeodoTrackerAdapter,
     MalwareBazaarAdapter,
     OTXPulseAdapter,
+    OpenPhishAdapter,
     PhishTankAdapter,
     RSSAdapter,
     ScraperAgent,
@@ -19,6 +22,17 @@ from sentinel.agents.scraper import (
     URLHausAdapter,
 )
 from sentinel.config import FeedConfig, SentinelSettings
+
+
+class MemorySnapshotStateStore:
+    def __init__(self, state: dict | None = None) -> None:
+        self.state = dict(state or {})
+
+    async def load(self) -> dict:
+        return dict(self.state)
+
+    async def save(self, state: dict) -> None:
+        self.state = dict(state)
 
 
 @pytest.fixture
@@ -169,6 +183,172 @@ async def test_urlhaus_adapter_skips_comment_banner_lines() -> None:
 
     assert len(records) == 1
     assert records[0].value == "http://malicious.test"
+
+
+@pytest.mark.asyncio
+async def test_openphish_adapter_baselines_first_snapshot_without_emitting() -> None:
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    body = "https://phish.example/login\nhttps://other.example/verify\n"
+    store = MemorySnapshotStateStore()
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            text=body,
+            headers={"etag": '"snapshot-1"'},
+        )
+    )
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = OpenPhishAdapter(
+            "https://feeds.local/openphish.txt",
+            trust_score=0.82,
+            lookback_hours=24,
+            client=client,
+            state_store=store,
+            now_factory=lambda: now,
+        )
+        records = await adapter.fetch()
+
+    assert records == []
+    assert store.state["snapshot_urls"] == ["https://other.example/verify", "https://phish.example/login"]
+    assert store.state["content_sha256"] == hashlib.sha256(body.encode()).hexdigest()
+    assert store.state["etag"] == '"snapshot-1"'
+    assert store.state["last_rebaseline_reason"] == "initial_baseline"
+
+
+@pytest.mark.asyncio
+async def test_openphish_adapter_emits_only_added_urls_after_fresh_snapshot_diff() -> None:
+    previous = datetime(2026, 8, 16, 11, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    old_body = "https://old.example/login\n"
+    new_body = "https://old.example/login\nhttps://new.example/verify\n"
+    store = MemorySnapshotStateStore(
+        {
+            "etag": '"snapshot-1"',
+            "content_sha256": hashlib.sha256(old_body.encode()).hexdigest(),
+            "snapshot_urls": ["https://old.example/login"],
+            "last_successful_at": previous.isoformat(),
+        }
+    )
+    seen_headers: dict[str, str] = {}
+    transport = httpx.MockTransport(
+        lambda request: (
+            seen_headers.update(dict(request.headers)),
+            httpx.Response(200, text=new_body, headers={"etag": '"snapshot-2"'}),
+        )[1]
+    )
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = OpenPhishAdapter(
+            "https://feeds.local/openphish.txt",
+            trust_score=0.82,
+            lookback_hours=24,
+            client=client,
+            state_store=store,
+            now_factory=lambda: now,
+        )
+        records = await adapter.fetch()
+
+    assert seen_headers["if-none-match"] == '"snapshot-1"'
+    assert [record.value for record in records] == ["https://new.example/verify"]
+    assert records[0].type == "url"
+    assert records[0].source == "openphish"
+    assert records[0].first_seen == now
+    assert records[0].attributes["snapshot_diff"] is True
+    assert store.state["snapshot_urls"] == ["https://new.example/verify", "https://old.example/login"]
+    assert store.state["last_emitted_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_openphish_adapter_treats_empty_snapshot_as_valid_fresh_baseline() -> None:
+    previous = datetime(2026, 8, 16, 11, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    body = "https://new.example/verify\n"
+    store = MemorySnapshotStateStore(
+        {
+            "content_sha256": hashlib.sha256(b"").hexdigest(),
+            "snapshot_urls": [],
+            "last_successful_at": previous.isoformat(),
+        }
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text=body))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = OpenPhishAdapter(
+            "https://feeds.local/openphish.txt",
+            trust_score=0.82,
+            lookback_hours=24,
+            client=client,
+            state_store=store,
+            now_factory=lambda: now,
+        )
+        records = await adapter.fetch()
+
+    assert [record.value for record in records] == ["https://new.example/verify"]
+    assert store.state["last_emitted_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_openphish_adapter_rebaselines_stale_snapshot_gap_without_emitting() -> None:
+    previous = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    old_body = "https://old.example/login\n"
+    new_body = "https://old.example/login\nhttps://new.example/verify\n"
+    store = MemorySnapshotStateStore(
+        {
+            "content_sha256": hashlib.sha256(old_body.encode()).hexdigest(),
+            "snapshot_urls": ["https://old.example/login"],
+            "last_successful_at": previous.isoformat(),
+        }
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text=new_body))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = OpenPhishAdapter(
+            "https://feeds.local/openphish.txt",
+            trust_score=0.82,
+            lookback_hours=24,
+            client=client,
+            state_store=store,
+            now_factory=lambda: now,
+        )
+        records = await adapter.fetch()
+
+    assert records == []
+    assert store.state["snapshot_urls"] == ["https://new.example/verify", "https://old.example/login"]
+    assert store.state["last_rebaseline_reason"] == "stale_snapshot_gap"
+    assert store.state["last_emitted_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_openphish_adapter_skips_unchanged_etag_response() -> None:
+    previous = datetime(2026, 8, 16, 11, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    store = MemorySnapshotStateStore(
+        {
+            "etag": '"snapshot-1"',
+            "content_sha256": "abc",
+            "snapshot_urls": ["https://old.example/login"],
+            "last_successful_at": previous.isoformat(),
+        }
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(304))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        adapter = OpenPhishAdapter(
+            "https://feeds.local/openphish.txt",
+            trust_score=0.82,
+            lookback_hours=24,
+            client=client,
+            state_store=store,
+            now_factory=lambda: now,
+        )
+        records = await adapter.fetch()
+
+    assert records == []
+    assert store.state["snapshot_urls"] == ["https://old.example/login"]
+    assert store.state["last_unchanged_at"] == now.isoformat()
+    assert store.state["last_successful_at"] == now.isoformat()
 
 
 @pytest.mark.asyncio
@@ -753,6 +933,23 @@ async def test_scraper_routes_tweetfeed_to_ioc_adapter(settings: SentinelSetting
         ioc_adapters, writeup_adapters = agent._build_adapters()
 
     assert [adapter.source_name for adapter in ioc_adapters] == ["tweetfeed"]
+    assert writeup_adapters == []
+
+
+@pytest.mark.asyncio
+async def test_scraper_routes_openphish_to_ioc_adapter(settings: SentinelSettings) -> None:
+    settings.sources.feeds = [
+        FeedConfig(
+            name="openphish",
+            url="https://raw.githubusercontent.com/openphish/public_feed/refs/heads/main/feed.txt",
+            trust=0.82,
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(304))) as client:
+        agent = ScraperAgent(settings=settings, http_client=client)
+        ioc_adapters, writeup_adapters = agent._build_adapters()
+
+    assert [adapter.source_name for adapter in ioc_adapters] == ["openphish"]
     assert writeup_adapters == []
 
 

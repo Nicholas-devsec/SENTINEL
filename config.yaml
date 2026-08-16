@@ -134,6 +134,10 @@ sources:
       url: https://api.tweetfeed.live/v1/week
       trust: 0.62
       enabled: true
+    - name: openphish
+      url: https://raw.githubusercontent.com/openphish/public_feed/refs/heads/main/feed.txt
+      trust: 0.82
+      enabled: true
     - name: feodotracker
       url: https://feodotracker.abuse.ch/downloads/ipblocklist.json
       trust: 0.93

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import re
@@ -20,7 +21,7 @@ from sqlalchemy import select
 
 from sentinel.agents.base import BaseAgent
 from sentinel.config import SentinelSettings, _is_disabled_value, _is_missing_secret, get_settings
-from sentinel.db.models import DiscoveryMemory
+from sentinel.db.models import DiscoveryMemory, Source
 
 
 TRUST_SCORES_SECTION = re.compile(r"## Trust Scores\s+(.*?)(?:\n## |\Z)", re.DOTALL)
@@ -109,6 +110,14 @@ class WriteupAdapter(Protocol):
     source_name: str
 
     async def fetch_writeups(self) -> list[RawWriteup]:
+        ...
+
+
+class SnapshotStateStore(Protocol):
+    async def load(self) -> dict[str, Any]:
+        ...
+
+    async def save(self, state: dict[str, Any]) -> None:
         ...
 
 
@@ -564,6 +573,247 @@ class URLHausAdapter:
         return records
 
 
+class DatabaseSnapshotStateStore:
+    """Persist snapshot feed state in the configured source row."""
+
+    def __init__(self, *, source_name: str, feed_url: str, trust_score: float) -> None:
+        self.source_name = source_name
+        self.feed_url = feed_url
+        self.trust_score = trust_score
+
+    async def load(self) -> dict[str, Any]:
+        from sentinel.db.session import AsyncSessionFactory
+
+        async with AsyncSessionFactory() as session:
+            row = await session.scalar(select(Source).where(Source.name == self.source_name))
+            if row is None:
+                return {}
+            metadata = row.metadata_json or {}
+            return dict(metadata.get("snapshot_state") or {})
+
+    async def save(self, state: dict[str, Any]) -> None:
+        from sentinel.db.session import AsyncSessionFactory
+
+        async with AsyncSessionFactory() as session:
+            row = await session.scalar(select(Source).where(Source.name == self.source_name))
+            if row is None:
+                row = Source(
+                    name=self.source_name,
+                    url=self.feed_url,
+                    trust=self.trust_score,
+                    metadata_json={},
+                )
+                session.add(row)
+                await session.flush()
+            row.url = self.feed_url
+            row.trust = self.trust_score
+            metadata = dict(row.metadata_json or {})
+            metadata["snapshot_state"] = state
+            row.metadata_json = metadata
+            await session.commit()
+
+
+class OpenPhishAdapter:
+    source_name = "openphish"
+
+    def __init__(
+        self,
+        feed_url: str,
+        *,
+        trust_score: float,
+        lookback_hours: int = 24,
+        client: httpx.AsyncClient | None = None,
+        state_store: SnapshotStateStore | None = None,
+        now_factory: Any | None = None,
+    ) -> None:
+        self.feed_url = feed_url
+        self.trust_score = trust_score
+        self.lookback_hours = lookback_hours
+        self.client = client or httpx.AsyncClient(timeout=30.0)
+        self.state_store = state_store or DatabaseSnapshotStateStore(
+            source_name=self.source_name,
+            feed_url=feed_url,
+            trust_score=trust_score,
+        )
+        self.now_factory = now_factory or _now_utc
+
+    def _headers(self, state: dict[str, Any]) -> dict[str, str]:
+        headers = {
+            "Accept": "text/plain",
+            "User-Agent": DEFAULT_BROWSER_HEADERS["User-Agent"],
+        }
+        etag = str(state.get("etag") or "").strip()
+        if etag:
+            headers["If-None-Match"] = etag
+        last_modified = str(state.get("last_modified") or "").strip()
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        return headers
+
+    def _parse_urls(self, body: str) -> list[str]:
+        urls: set[str] = set()
+        for raw_line in body.splitlines():
+            value = raw_line.strip()
+            if not value or value.startswith("#"):
+                continue
+            if value.startswith(("http://", "https://")):
+                urls.add(value)
+        return sorted(urls)
+
+    def _fresh_enough_to_diff(self, state: dict[str, Any], now: datetime) -> bool:
+        raw_value = str(state.get("last_successful_at") or "").strip()
+        if not raw_value:
+            return False
+        previous = _normalize_timestamp(raw_value)
+        return now - previous <= timedelta(hours=max(0, int(self.lookback_hours)))
+
+    def _next_state(
+        self,
+        *,
+        state: dict[str, Any],
+        now: datetime,
+        content_hash: str | None = None,
+        urls: list[str] | None = None,
+        response: httpx.Response | None = None,
+        unchanged: bool = False,
+        emitted: int = 0,
+        rebaseline_reason: str | None = None,
+    ) -> dict[str, Any]:
+        next_state = dict(state)
+        next_state["last_checked_at"] = now.isoformat()
+        next_state["last_successful_at"] = now.isoformat()
+        next_state["last_emitted_count"] = emitted
+        if rebaseline_reason:
+            next_state["last_rebaseline_reason"] = rebaseline_reason
+        elif "last_rebaseline_reason" in next_state:
+            next_state.pop("last_rebaseline_reason", None)
+        if unchanged:
+            next_state["last_unchanged_at"] = now.isoformat()
+        if content_hash is not None:
+            next_state["content_sha256"] = content_hash
+        if urls is not None:
+            next_state["snapshot_urls"] = urls
+            next_state["snapshot_count"] = len(urls)
+        if response is not None:
+            etag = response.headers.get("etag")
+            last_modified = response.headers.get("last-modified")
+            if etag:
+                next_state["etag"] = etag
+            if last_modified:
+                next_state["last_modified"] = last_modified
+        return next_state
+
+    async def fetch(self) -> list[RawIOC]:
+        try:
+            state = await self.state_store.load()
+        except Exception:
+            return []
+
+        now = self.now_factory()
+        response = await self.client.get(self.feed_url, headers=self._headers(state))
+        if response.status_code == 304:
+            try:
+                await self.state_store.save(self._next_state(state=state, now=now, response=response, unchanged=True))
+            except Exception:
+                return []
+            return []
+        response.raise_for_status()
+
+        content_hash = hashlib.sha256(response.content).hexdigest()
+        urls = self._parse_urls(response.text)
+        raw_snapshot_urls = state.get("snapshot_urls")
+        if not isinstance(raw_snapshot_urls, list):
+            raw_snapshot_urls = []
+        previous_urls = {
+            str(value).strip()
+            for value in raw_snapshot_urls
+            if isinstance(value, str) and value.strip()
+        }
+        state_has_baseline = isinstance(state.get("snapshot_urls"), list) and bool(state.get("content_sha256"))
+        if content_hash == state.get("content_sha256"):
+            try:
+                await self.state_store.save(
+                    self._next_state(
+                        state=state,
+                        now=now,
+                        content_hash=content_hash,
+                        urls=urls,
+                        response=response,
+                        unchanged=True,
+                    )
+                )
+            except Exception:
+                return []
+            return []
+
+        if not state_has_baseline:
+            try:
+                await self.state_store.save(
+                    self._next_state(
+                        state=state,
+                        now=now,
+                        content_hash=content_hash,
+                        urls=urls,
+                        response=response,
+                        rebaseline_reason="initial_baseline",
+                    )
+                )
+            except Exception:
+                return []
+            return []
+
+        if not self._fresh_enough_to_diff(state, now):
+            try:
+                await self.state_store.save(
+                    self._next_state(
+                        state=state,
+                        now=now,
+                        content_hash=content_hash,
+                        urls=urls,
+                        response=response,
+                        rebaseline_reason="stale_snapshot_gap",
+                    )
+                )
+            except Exception:
+                return []
+            return []
+
+        added_urls = [url for url in urls if url not in previous_urls]
+        try:
+            await self.state_store.save(
+                self._next_state(
+                    state=state,
+                    now=now,
+                    content_hash=content_hash,
+                    urls=urls,
+                    response=response,
+                    emitted=len(added_urls),
+                )
+            )
+        except Exception:
+            return []
+
+        return [
+            RawIOC(
+                value=url,
+                type="url",
+                source=self.source_name,
+                source_trust=self.trust_score,
+                first_seen=now,
+                last_seen=now,
+                tags=["phishing", "openphish_community"],
+                description="OpenPhish community phishing URL",
+                reference_url="https://openphish.com/",
+                attributes={
+                    "feed_tier": "community",
+                    "update_frequency": "12h",
+                    "snapshot_diff": True,
+                },
+            )
+            for url in added_urls
+        ]
+
+
 class TweetFeedAdapter:
     source_name = "tweetfeed"
 
@@ -927,6 +1177,15 @@ class ScraperAgent(BaseAgent):
                 )
             elif source_name == "tweetfeed":
                 ioc_adapters.append(TweetFeedAdapter(feed.url, trust_score=trust_score, client=self.http_client))
+            elif source_name == "openphish":
+                ioc_adapters.append(
+                    OpenPhishAdapter(
+                        feed.url,
+                        trust_score=trust_score,
+                        lookback_hours=self.settings.sources.max_item_age_hours,
+                        client=self.http_client,
+                    )
+                )
             elif source_name == "phishtank":
                 ioc_adapters.append(
                     PhishTankAdapter(
