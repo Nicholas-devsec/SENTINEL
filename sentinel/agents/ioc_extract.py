@@ -489,7 +489,7 @@ BARE_DOMAIN_RE = re.compile(
 # Trailing labels that make a dotted token a filename, not a domain.
 FILE_EXTENSIONS = {
     "exe", "dll", "sys", "bat", "cmd", "ps1", "vbs", "js", "mjs", "cjs",
-    "jsx", "ts", "tsx", "jar", "py", "sh",
+    "jsx", "ts", "tsx", "jar", "py", "sh", "svg", "svgz",
     "zip", "rar", "7z", "gz", "tar", "iso", "img", "bin", "dat", "tmp", "log",
     "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "rtf", "txt", "csv",
     "lnk", "scr", "msi", "hta", "chm", "php", "asp", "aspx", "jsp", "html", "htm",

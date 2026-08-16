@@ -147,6 +147,20 @@ hxxps://npm-cache[.]com:443/router
     assert ("url", "https://npm-cache.com:443/router") in extracted
 
 
+def test_svg_artifact_name_with_defanged_dot_is_not_extracted_as_domain() -> None:
+    text = """
+Indicators of Compromise
+SVG A3A471F1C7A605DD34AF49EF075E1251 DOC-16-ENE-2026 RESOLUCION DENUNCIA JURIDICA[.]svg
+"""
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("md5", "a3a471f1c7a605dd34af49ef075e1251") in extracted
+    assert ("domain", "juridica.svg") not in extracted
+    assert not any(item_type == "domain" and value.endswith(".svg") for item_type, value in extracted)
+
+
 def test_extracts_gbhackers_style_ioc_table_values() -> None:
     text = (
         "URL hxxps[:]//inventory-card-thumbzilla-ip[.]trycloudflare[.]com/De/\n"
