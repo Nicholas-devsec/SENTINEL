@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sentinel.agents.base import BaseAgent
-from sentinel.agents.ioc_noise import is_article_noise_hostname, is_article_noise_url
+from sentinel.agents.ioc_noise import is_article_noise_hostname, is_article_noise_url, is_article_tunnel_provider_domain
 from sentinel.agents.scraper import RawIOC
 from sentinel.db.models import IOC, IOCSighting, SourceMaterial
 
@@ -210,7 +210,7 @@ class ValidationAgent(BaseAgent):
         if ioc_type == "url":
             return is_article_noise_url(normalized_value)
         if ioc_type == "domain":
-            return is_article_noise_hostname(normalized_value)
+            return is_article_noise_hostname(normalized_value) or is_article_tunnel_provider_domain(normalized_value)
         return False
 
     def _coerce_raw_ioc(self, item: RawIOC | dict[str, Any]) -> RawIOC:

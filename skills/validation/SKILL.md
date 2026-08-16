@@ -13,6 +13,7 @@ updated_by: human
 ## False Positive Rules
 - Reject RFC1918, localhost, loopback, and documentation-only test values.
 - Reject entries present in the Tranco top domains allowlist.
+- For article/discovery-derived domain-only indicators, suppress legitimate tunnel/provider roots and generated subdomains such as localhost.run, lhr.life, and trycloudflare.com unless a specific URL/path is listed.
 
 ## Deduplication
 - Normalize values consistently before hashing and comparison.
@@ -20,4 +21,3 @@ updated_by: human
 
 ## Learner Updates
 <!-- learner: append here -->
-

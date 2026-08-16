@@ -269,6 +269,39 @@ def test_validator_rejects_article_shorteners_without_blocking_feed_url_iocs(
     assert agent._validate_item(feed_item) is not None
 
 
+def test_validator_rejects_article_tunnel_provider_domains_but_keeps_specific_urls(
+    validation_skill: Path, tranco_file: Path
+) -> None:
+    agent = ValidationAgent(skill_path=str(validation_skill), tranco_path=str(tranco_file), session_factory=None)
+    first_seen = datetime(2026, 8, 7, 23, 59, tzinfo=UTC)
+    article_domains = [
+        RawIOC(
+            value=value,
+            type="domain",
+            source="elastic_security_labs",
+            source_trust=0.67,
+            first_seen=first_seen,
+            last_seen=first_seen,
+            reference_url="https://www.elastic.co/security-labs/coding-agent-launchagent-tunnel-detection",
+            provenance="writeup",
+        )
+        for value in ("lhr.life", "localhost.run", "trycloudflare.com", "example.lhr.life")
+    ]
+    specific_url = RawIOC(
+        value="https://inventory-card-thumbzilla-ip.trycloudflare.com/De/",
+        type="url",
+        source="elastic_security_labs",
+        source_trust=0.67,
+        first_seen=first_seen,
+        last_seen=first_seen,
+        reference_url="https://www.elastic.co/security-labs/coding-agent-launchagent-tunnel-detection",
+        provenance="writeup",
+    )
+
+    assert [agent._validate_item(item) for item in article_domains] == [None, None, None, None]
+    assert agent._validate_item(specific_url) is not None
+
+
 @pytest.mark.asyncio
 async def test_validator_deduplicates_against_existing_database_rows(agent: ValidationAgent, db_session_factory) -> None:
     first_batch = [
