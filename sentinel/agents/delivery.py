@@ -104,6 +104,7 @@ CAMPAIGN_STOPWORDS = {
     "using",
     "weeks",
     "with",
+    "writeup",
 }
 
 
@@ -909,6 +910,34 @@ class DeliveryAgent(BaseAgent):
             diversified.append(card)
         return [*diversified, *deferred]
 
+    def _suppress_duplicate_feed_campaign_cards(self, cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        suppressed = 0
+        for card in cards:
+            campaign_key = self._campaign_key(card)
+            existing = kept.get(campaign_key)
+            if existing is None:
+                kept[campaign_key] = card
+                order.append(campaign_key)
+                continue
+            kept[campaign_key] = self._merge_digest_card(existing, card)
+            suppressed += 1
+        if suppressed:
+            self.logger.info(
+                "Suppressed %s duplicate feed campaign alert card(s) within this delivery cycle",
+                suppressed,
+            )
+        deduped = [kept[key] for key in order]
+        deduped.sort(
+            key=lambda item: (
+                float(item.get("risk_score", 0.0) or 0.0),
+                self._sort_last_seen_value(item.get("last_seen")),
+            ),
+            reverse=True,
+        )
+        return deduped
+
     def _apply_type_limits(self, cards: list[dict[str, Any]], type_limits: dict[str, int] | None) -> list[dict[str, Any]]:
         limits = self._normalized_type_limits(type_limits)
         if not limits:
@@ -938,9 +967,8 @@ class DeliveryAgent(BaseAgent):
                     feed_article_cards.append(card)
             else:
                 feed_cards.append(card)
-        feed_cards = self._diversify_campaign_cards(feed_cards)
+        feed_cards = self._suppress_duplicate_feed_campaign_cards(feed_cards)
         feed_cards = self._apply_type_limits(feed_cards, self.settings.workflow.telegram_type_limits_per_run)
-        feed_cards = self._diversify_campaign_cards(feed_cards)
         if (
             self.settings.workflow.telegram_feed_article_alert_limit_per_run is not None
             or self.settings.workflow.telegram_discovery_article_alert_limit_per_run is not None

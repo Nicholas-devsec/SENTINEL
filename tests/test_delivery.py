@@ -342,6 +342,76 @@ def test_delivery_agent_diversifies_feed_alerts_by_campaign_before_siblings() ->
 
 
 @pytest.mark.asyncio
+async def test_delivery_agent_sends_one_feed_alert_per_otx_campaign_per_run() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 70
+    settings.thresholds.feedback_candidate_score = 20
+    settings.delivery.telegram_max_alerts_per_run = 5
+    settings.workflow.telegram_feed_alert_limit_per_run = 5
+    settings.workflow.telegram_type_limits_per_run = {"ipv4": 5, "hash": 5}
+    settings.sources.feeds = [
+        FeedConfig(name="otx", url="https://otx.example/api", trust=0.90, enabled=True),
+    ]
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    pulse_url = "https://otx.alienvault.com/pulse/6a8478fe441f9c15e06ee4cc"
+    title = "Signed Overwolf Binary Sideloads ValleyRAT Malware in India"
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "f062e682ee38b33141ba03b17880b9cacca0e376",
+            "type": "sha1",
+            "source": "otx",
+            "risk_score": 35.86,
+            "severity": "informational",
+            "reference_url": pulse_url,
+            "source_title": title,
+            "vt_detections": 37,
+            "external_links": {"VirusTotal": "https://www.virustotal.com/gui/file/f062e682ee38b33141ba03b17880b9cacca0e376"},
+            "mitre_techniques": ["T1593.002"],
+            "mitre_tactics": ["reconnaissance"],
+            "last_seen": now,
+            "attributes": {"provenance": "feed"},
+        },
+        {
+            "id": str(uuid4()),
+            "value": "103.240.196.115",
+            "type": "ipv4",
+            "source": "otx",
+            "risk_score": 21.09,
+            "severity": "informational",
+            "reference_url": pulse_url,
+            "source_title": title,
+            "vt_detections": 7,
+            "abuse_confidence": 0,
+            "shodan_ports": [5985, 8443, 135, 137, 6667],
+            "external_links": {"VirusTotal": "https://www.virustotal.com/gui/ip-address/103.240.196.115"},
+            "mitre_techniques": ["T1559.001"],
+            "mitre_tactics": ["execution"],
+            "last_seen": now,
+            "attributes": {"provenance": "feed"},
+        },
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 1
+    assert len(telegram_bot.messages) == 1
+    message = telegram_bot.messages[0]["text"]
+    assert "SENTINEL Feedback Candidate" in message
+    assert title in message
+    assert "<b>IOCs (2)</b>" in message
+    assert "f062e682ee38b33141ba03b17880b9cacca0e376" in message
+    assert "103[.]240[.]196[.]115" in message
+
+
+@pytest.mark.asyncio
 async def test_send_immediate_alerts_filters_feedback_labeled_iocs() -> None:
     telegram_bot = FakeTelegramBot()
     agent = DeliveryAgent(
