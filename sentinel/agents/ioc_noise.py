@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 # indicators by themselves. Apply this only to article/discovery extraction and
 # validation, not to direct threat-feed URL IOCs.
 ARTICLE_NOISE_HOSTS = {
+    "any.run",
     "bit.ly",
     "bitly.com",
     "buff.ly",

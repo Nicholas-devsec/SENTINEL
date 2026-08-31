@@ -78,6 +78,20 @@ def test_suppresses_embedded_social_shortener_urls_from_articles() -> None:
     assert not any(value.startswith("https://x.com/") for _, value in extracted)
 
 
+def test_suppresses_common_sandbox_platform_domains_from_articles() -> None:
+    text = (
+        "Indicators of Compromise\n"
+        "any.run\n"
+        "c2.manic-bankers.io\n"
+    )
+    section = find_ioc_section(text)
+    assert section is not None
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+
+    assert ("domain", "c2.manic-bankers.io") in extracted
+    assert ("domain", "any.run") not in extracted
+
+
 def test_defanged_email_domain_is_not_extracted_as_standalone_domain() -> None:
     text = """
 Indicators of compromise (IOCs)

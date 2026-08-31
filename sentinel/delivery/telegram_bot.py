@@ -188,6 +188,14 @@ def _reference_link_label(source: str, reference_url: str | None) -> str:
     return "Article"
 
 
+def _format_reference_url_line(source: str, reference_url: str | None) -> str | None:
+    href = _normalize_link_display(reference_url)
+    if not href:
+        return None
+    label = _reference_link_label(source, reference_url)
+    return f'<b>{_escape(label)}</b>: <a href="{_escape(href)}">{_escape(_truncate(href, MAX_LINK_CHARS))}</a>'
+
+
 def _format_source_context(source: str, attributes: dict[str, Any] | None = None) -> str:
     attrs = attributes or {}
     if source.lower() == "threatfox":
@@ -338,6 +346,9 @@ def format_alert_message(
         lines.append(f"<b>{_escape(_truncate(str(source_title), MAX_SOURCE_TITLE_CHARS))}</b>")
     lines.append(f"<i>{_escape(source_line)}</i>")
     lines.append(f"Observed {observed_text} · Corroboration {corroboration_text}")
+    reference_url_line = _format_reference_url_line(source, reference_url)
+    if reference_url_line:
+        lines.append(reference_url_line)
     if related_cves:
         lines.append(f"CVEs: {_escape(', '.join(related_cves))}")
     lines.extend(
@@ -414,6 +425,9 @@ def format_grouped_alert_message(
         lines.append(f"CVEs: {_escape(', '.join(related_cves))}")
     if article_href:
         lines.append(f'📄 <a href="{_escape(article_href)}">{_escape(_reference_link_label(source, reference_url))}</a>')
+    reference_url_line = _format_reference_url_line(source, reference_url)
+    if reference_url_line:
+        lines.append(reference_url_line)
     lines.extend(["", f"<b>IOCs ({len(iocs)})</b>"])
     if article_ioc_note:
         lines.append(_format_article_ioc_note(article_ioc_note))

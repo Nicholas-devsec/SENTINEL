@@ -1866,6 +1866,7 @@ def test_format_alert_message_shows_ip_enrichment_placeholders() -> None:
     assert "Observed 2026-04-15 07:30 UTC · Corroboration 1 source(s)" in rendered
     assert "Feodo IP Blocklist" in rendered
     assert '<a href="https://feodotracker.abuse.ch/">Article</a>' in rendered
+    assert '<b>Article</b>: <a href="https://feodotracker.abuse.ch/">https://feodotracker.abuse.ch/</a>' in rendered
     assert "CVEs: CVE-2026-12345" in rendered
     # The indicator itself is defanged so chat clients cannot auto-link it.
     assert "<code>162[.]243[.]103[.]246</code> [ipv4]" in rendered
@@ -2026,6 +2027,12 @@ def test_grouped_alert_message_renders_clean_sections_and_ioc_summaries() -> Non
         '<a href="https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/">Article</a>'
         in rendered
     )
+    assert (
+        '<b>Article</b>: <a href="https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/">'
+        "https://arcticwolf.com/resources/blog/security-bulletin-github-impersonation-deploys-information-stealer/"
+        "</a>"
+        in rendered
+    )
     assert "<b>IOCs (3)</b>" in rendered
     assert "<code>hxxps://github[.]com/antivirus-free-bitdefender</code> [url]" in rendered
     assert "GitHub repo or path used by attacker" in rendered
@@ -2057,5 +2064,6 @@ def test_format_alert_message_refangs_domains_and_urls_and_notes_article_ioc_cou
     # Article links are refanged into clickable anchors; the IOC itself stays
     # defanged so the alert never contains a live malicious link.
     assert '<a href="https://example.com/report">Article</a>' in rendered
+    assert '<b>Article</b>: <a href="https://example.com/report">https://example.com/report</a>' in rendered
     assert "<code>evil[.]example</code> [domain]" in rendered
     assert "<b>⚠ More IOCs can be found in the article/writeup (12 extracted total).</b>" in rendered

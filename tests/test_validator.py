@@ -269,6 +269,35 @@ def test_validator_rejects_article_shorteners_without_blocking_feed_url_iocs(
     assert agent._validate_item(feed_item) is not None
 
 
+def test_validator_rejects_article_sandbox_platform_domains_without_blocking_feed_iocs(
+    validation_skill: Path, tranco_file: Path
+) -> None:
+    agent = ValidationAgent(skill_path=str(validation_skill), tranco_path=str(tranco_file), session_factory=None)
+    first_seen = datetime(2026, 8, 22, 7, 5, tzinfo=UTC)
+    article_item = RawIOC(
+        value="any.run",
+        type="domain",
+        source="discovery:cyberpress.org",
+        source_trust=0.60,
+        first_seen=first_seen,
+        last_seen=first_seen,
+        reference_url="https://cyberpress.org/manic-android-malware-steals-banking-pins-takes-remote-control/",
+        provenance="discovery",
+    )
+    feed_item = RawIOC(
+        value="any.run",
+        type="domain",
+        source="otx",
+        source_trust=0.90,
+        first_seen=first_seen,
+        last_seen=first_seen,
+        provenance="feed",
+    )
+
+    assert agent._validate_item(article_item) is None
+    assert agent._validate_item(feed_item) is not None
+
+
 def test_validator_rejects_article_tunnel_provider_domains_but_keeps_specific_urls(
     validation_skill: Path, tranco_file: Path
 ) -> None:
