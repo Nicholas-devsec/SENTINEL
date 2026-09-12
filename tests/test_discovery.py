@@ -627,6 +627,7 @@ async def test_discovery_blocks_otx_pulse_urls_as_article_candidates() -> None:
         await agent.http_client.aclose()
 
     assert agent._host_allowed(profile, "https://otx.alienvault.com/pulse/6a6241aa476b940a0df81e20") is False
+    assert agent._host_allowed(profile, "https://cyberpress.org/linux-exploits-create-botnets/") is False
     assert [provider.source_name for provider in providers] == ["discovery:feeds.local"]
 
 

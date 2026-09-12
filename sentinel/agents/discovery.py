@@ -52,7 +52,7 @@ from sentinel.feedback import (
 )
 
 
-BLOCKED_DISCOVERY_HOSTS = {"otx.alienvault.com"}
+BLOCKED_DISCOVERY_HOSTS = {"cyberpress.org", "otx.alienvault.com"}
 SKILL_LINE_RE = re.compile(r"^- ([a-zA-Z0-9_ -]+?):\s*([0-9]*\.?[0-9]+)\s*$")
 SKILL_SECTION_RE = re.compile(r"## (?P<name>[A-Za-z ]+)\n(?P<body>.*?)(?=\n## |\Z)", re.DOTALL)
 SKILL_LIST_LINE_RE = re.compile(r"^- (.+?)\s*$")

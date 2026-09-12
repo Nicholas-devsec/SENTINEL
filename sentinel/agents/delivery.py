@@ -46,6 +46,7 @@ DIRECT_IOC_FEED_SOURCES = {
     "malwarebazaar",
     "phishtank",
 }
+BLOCKED_DISCOVERY_ARTICLE_HOSTS = {"cyberpress.org"}
 ARTICLE_CAMPAIGN_MIN_IOC_OVERLAP = 2
 CAMPAIGN_STOPWORDS = {
     "about",
@@ -210,6 +211,25 @@ class DeliveryAgent(BaseAgent):
         provenance = str(item.get("provenance") or attrs.get("provenance") or "").strip().lower()
         source = str(item.get("source") or "").strip().lower()
         return provenance == "discovery" or source.startswith("discovery:")
+
+    def _is_blocked_discovery_article(self, item: dict[str, Any]) -> bool:
+        if not self._is_discovery_article_card(item):
+            return False
+        source = str(item.get("source") or "").strip().lower()
+        source_host = source.removeprefix("discovery:")
+        reference_host = (urlparse(str(item.get("reference_url") or "")).hostname or "").lower()
+        return any(
+            host == blocked or host.endswith("." + blocked)
+            for host in (source_host, reference_host)
+            for blocked in BLOCKED_DISCOVERY_ARTICLE_HOSTS
+        )
+
+    def _filter_blocked_discovery_articles(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept = [item for item in items if not self._is_blocked_discovery_article(item)]
+        suppressed = len(items) - len(kept)
+        if suppressed:
+            self.logger.info("Suppressed %s blocked discovery article alert candidate(s)", suppressed)
+        return kept
 
     def _group_immediate_alerts(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -1428,6 +1448,7 @@ class DeliveryAgent(BaseAgent):
         return f"{prefix}: {label}"
 
     async def daily_digest(self, items: list[dict[str, Any]]) -> Any:
+        items = self._filter_blocked_discovery_articles(items)
         items = await self._filter_recently_alerted(items)
         items = await self._filter_feedback_labeled(items)
         digest_cards = self._dedupe_digest_cards(items)
@@ -1519,6 +1540,7 @@ class DeliveryAgent(BaseAgent):
     async def run(self, scored_iocs: list[ScoredIOC | dict[str, Any]], *args: Any, **kwargs: Any) -> DeliveryResult:
         self.reload_skill()
         items = [self._coerce_ioc(item) for item in scored_iocs]
+        items = self._filter_blocked_discovery_articles(items)
         immediate: list[dict[str, Any]] = []
         if self.settings.delivery.enable_telegram_immediate_alerts:
             immediate_candidates = self._select_immediate_candidates(items)

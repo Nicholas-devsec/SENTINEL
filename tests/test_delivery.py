@@ -469,8 +469,8 @@ async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> 
             "source": "crimeware-fresh",
             "risk_score": 84,
             "severity": "high",
-            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
-            "source_title": "CyberPress SharkLoader in-memory beacon attack",
+            "reference_url": "https://publisher.example/sharkloader-in-memory-beacon-attack/",
+            "source_title": "Publisher SharkLoader in-memory beacon attack",
             "mitre_techniques": [],
             "mitre_tactics": [],
             "last_seen": now,
@@ -482,8 +482,8 @@ async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> 
             "source": "crimeware-fresh",
             "risk_score": 84,
             "severity": "high",
-            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
-            "source_title": "CyberPress SharkLoader in-memory beacon attack",
+            "reference_url": "https://publisher.example/sharkloader-in-memory-beacon-attack/",
+            "source_title": "Publisher SharkLoader in-memory beacon attack",
             "mitre_techniques": [],
             "mitre_tactics": [],
             "last_seen": now,
@@ -494,7 +494,7 @@ async def test_delivery_agent_groups_same_writeup_into_one_immediate_alert() -> 
 
     assert result.immediate_alerts == 1
     assert len(telegram_bot.messages) == 1
-    assert "CyberPress SharkLoader in-memory beacon attack" in telegram_bot.messages[0]["text"]
+    assert "Publisher SharkLoader in-memory beacon attack" in telegram_bot.messages[0]["text"]
     assert "<b>HIGH</b> · Score 84.00" in telegram_bot.messages[0]["text"]
     assert "<b>IOCs (2)</b>" in telegram_bot.messages[0]["text"]
     assert "<code>c559cc68986933200fd5d9e4388e2f58</code> [md5]" in telegram_bot.messages[0]["text"]
@@ -520,11 +520,11 @@ async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_articl
             "id": str(uuid4()),
             "value": "c559cc68986933200fd5d9e4388e2f58",
             "type": "md5",
-            "source": "discovery:cyberpress.org",
+            "source": "discovery:publisher.example",
             "risk_score": 74.0,
             "severity": "high",
-            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
-            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution - cyberpress.org",
+            "reference_url": "https://publisher.example/sharkloader-in-memory-beacon-attack/",
+            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution",
             "mitre_techniques": ["T1593.002"],
             "mitre_tactics": ["reconnaissance"],
             "last_seen": now,
@@ -533,11 +533,11 @@ async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_articl
             "id": str(uuid4()),
             "value": "b3352b42432dedc4a519f011dc8b5d5a",
             "type": "md5",
-            "source": "discovery:cyberpress.org",
+            "source": "discovery:publisher.example",
             "risk_score": 31.0,
             "severity": "informational",
-            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
-            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution - cyberpress.org",
+            "reference_url": "https://publisher.example/sharkloader-in-memory-beacon-attack/",
+            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution",
             "mitre_techniques": [],
             "mitre_tactics": [],
             "last_seen": now,
@@ -552,6 +552,42 @@ async def test_delivery_agent_includes_lower_score_sibling_iocs_from_same_articl
     assert "<b>IOCs (2)</b>" in telegram_bot.messages[0]["text"]
     assert "<code>c559cc68986933200fd5d9e4388e2f58</code> [md5]" in telegram_bot.messages[0]["text"]
     assert "<code>b3352b42432dedc4a519f011dc8b5d5a</code> [md5]" in telegram_bot.messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_agent_suppresses_cyberpress_discovery_alerts() -> None:
+    telegram_bot = FakeTelegramBot()
+    settings = build_settings().model_copy(deep=True)
+    settings.thresholds.alert_score = 35
+    agent = DeliveryAgent(
+        settings=settings,
+        telegram_bot=telegram_bot,
+        sendgrid_client=FakeSendGridClient(),
+        session_factory=FakeSessionFactory(),
+    )
+    now = datetime.now(UTC)
+    items = [
+        {
+            "id": str(uuid4()),
+            "value": "c559cc68986933200fd5d9e4388e2f58",
+            "type": "md5",
+            "source": "discovery:cyberpress.org",
+            "risk_score": 84.0,
+            "severity": "high",
+            "reference_url": "https://cyberpress.org/sharkloader-in-memory-beacon-attack/",
+            "source_title": "SharkLoader Malware Deploys Cobalt Strike Beacon Through Stealthy In-Memory Execution",
+            "mitre_techniques": [],
+            "mitre_tactics": [],
+            "last_seen": now,
+            "attributes": {"provenance": "discovery"},
+        }
+    ]
+
+    result = await agent.run(items)
+
+    assert result.immediate_alerts == 0
+    assert result.digest_candidates == 0
+    assert telegram_bot.messages == []
 
 
 @pytest.mark.asyncio
