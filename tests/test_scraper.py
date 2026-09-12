@@ -954,6 +954,23 @@ async def test_scraper_routes_openphish_to_ioc_adapter(settings: SentinelSetting
 
 
 @pytest.mark.asyncio
+async def test_scraper_routes_google_cloud_ti_to_writeup_adapter(settings: SentinelSettings) -> None:
+    settings.sources.feeds = [
+        FeedConfig(
+            name="google_cloud_threat_intelligence",
+            url="https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v",
+            trust=0.70,
+        )
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=""))) as client:
+        agent = ScraperAgent(settings=settings, http_client=client)
+        ioc_adapters, writeup_adapters = agent._build_adapters()
+
+    assert ioc_adapters == []
+    assert [adapter.source_name for adapter in writeup_adapters] == ["google_cloud_threat_intelligence"]
+
+
+@pytest.mark.asyncio
 async def test_scraper_agent_uses_skill_trust_scores_and_pushes_queue(settings: SentinelSettings) -> None:
     redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
     # Title must hit a writeup_search term or the keyword filter drops the item
@@ -1278,6 +1295,48 @@ async def test_writeup_extraction_marks_ioc_section_for_curation_credit(settings
     assert {"malicious-c2.badcorp.top", "45.155.204.99"} <= {item.value for item in curated_items}
     # No section -> fallback labeling (may still find defanged/urls, but not curated).
     assert all(item.attributes["extraction_mode"] == "fallback" for item in prose_items)
+
+
+@pytest.mark.asyncio
+async def test_google_cloud_ti_writeups_require_explicit_ioc_section(settings: SentinelSettings) -> None:
+    from sentinel.agents.scraper import RawWriteup
+
+    agent = ScraperAgent(settings=settings)
+    try:
+        link_heavy = RawWriteup(
+            source="google_cloud_threat_intelligence",
+            source_trust=0.70,
+            url="https://cloud.google.com/blog/topics/threat-intelligence/from-prompting-to-autonomy",
+            title="GTIG AI Threat Tracker",
+            published_at=__import__("sentinel.agents.scraper", fromlist=["_now_utc"])._now_utc(),
+            content_text=(
+                "This research links to https://blog.google/security/example and "
+                "https://storage.googleapis.com/gweb-cloudblog-publish/images/Figure_1.png "
+                "but has no curated indicators section."
+            ),
+        )
+        curated = RawWriteup(
+            source="google_cloud_threat_intelligence",
+            source_trust=0.70,
+            url="https://cloud.google.com/blog/topics/threat-intelligence/example-campaign",
+            title="GTIG campaign with indicators",
+            published_at=__import__("sentinel.agents.scraper", fromlist=["_now_utc"])._now_utc(),
+            content_text=(
+                "Google Threat Intelligence Group observed this campaign.\n"
+                "Indicators of Compromise\n"
+                "c2[.]gtig-example[.]net\n"
+                "198.51.100.42\n"
+            ),
+        )
+
+        noisy_items = agent._extract_iocs_from_writeup(link_heavy)
+        curated_items = agent._extract_iocs_from_writeup(curated)
+    finally:
+        await agent.aclose()
+
+    assert noisy_items == []
+    assert {item.value for item in curated_items} == {"198.51.100.42", "c2.gtig-example.net"}
+    assert all(item.attributes["extraction_mode"] == "ioc_section" for item in curated_items)
 
 
 def test_writeup_extraction_caps_ioc_section_article_yield(settings: SentinelSettings) -> None:

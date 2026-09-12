@@ -158,6 +158,10 @@ sources:
       url: https://blog.talosintelligence.com/feed/
       trust: 0.68
       enabled: true
+    - name: google_cloud_threat_intelligence
+      url: https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v
+      trust: 0.70
+      enabled: true
     - name: unit42_blog
       url: https://unit42.paloaltonetworks.com/feed/
       trust: 0.68

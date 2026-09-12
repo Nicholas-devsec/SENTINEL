@@ -14,6 +14,7 @@ updated_by: human
 - OpenPhish Community snapshot-diff phishing URL feed
 - abuse.ch FeodoTracker JSON
 - Cisco Talos blog RSS
+- Google Cloud Threat Intelligence RSS
 - Palo Alto Unit 42 blog RSS
 - Kaspersky Securelist blog RSS
 - CrowdStrike blog RSS
@@ -30,6 +31,7 @@ updated_by: human
 - feodotracker: 0.93
 - otx: 0.90
 - talos_blog: 0.68
+- google_cloud_threat_intelligence: 0.70
 - unit42_blog: 0.68
 - securelist_blog: 0.67
 - crowdstrike_blog: 0.67
@@ -46,6 +48,7 @@ updated_by: human
 - Record feed metadata needed for analyst traceability.
 - Treat TweetFeed IOCs as community-reported hunting/watchlist candidates unless corroborated by enrichment or another source.
 - Treat OpenPhish Community as a snapshot-diff feed: baseline without emitting, emit only URLs added since a prior successful snapshot inside the configured freshness window, and rebaseline without emitting after stale gaps.
+- Treat Google Cloud Threat Intelligence writeups as section-only: emit IOCs only from explicit IOC/Indicators sections; do not fallback-extract generic article links.
 
 ## Learner Updates
 <!-- learner: append here -->

@@ -41,6 +41,7 @@ DEFAULT_BROWSER_HEADERS = {
     "Pragma": "no-cache",
 }
 OTX_HOSTS = {"otx.alienvault.com"}
+SECTION_ONLY_WRITEUP_SOURCES = {"google_cloud_threat_intelligence"}
 
 
 @dataclass(slots=True)
@@ -1242,6 +1243,8 @@ class ScraperAgent(BaseAgent):
             extraction_mode = "ioc_section"
             max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_ioc_section)
         else:
+            if writeup.source.lower() in SECTION_ONLY_WRITEUP_SOURCES:
+                return []
             extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
             extraction_mode = "fallback"
             max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
