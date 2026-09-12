@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 17.5.1.3
+id: 17-5-1-3
+status: experimental
+description: Outbound connection to known-bad IP (source: discovery:thehackernews.com)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "17.5.1.3"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1036.005
+  - attack.t1562.002

@@ -1,0 +1,19 @@
+title: SENTINEL IP indicator 16.1.6.1
+id: 16-1-6-1
+status: experimental
+description: Outbound connection to known-bad IP (source: discovery:thehackernews.com)
+logsource:
+  category: network_connection
+detection:
+  selection:
+    Initiated: true
+    DestinationIp: "16.1.6.1"
+  condition: selection
+fields:
+  - Image
+  - DestinationPort
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1036.005
+  - attack.t1562.002
