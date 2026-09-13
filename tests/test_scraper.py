@@ -44,9 +44,7 @@ async def test_sophos_curated_feed_uses_canonical_rss_adapter() -> None:
 async def test_sans_diary_feed_and_atomic_extraction() -> None:
     settings = get_settings()
     feed = next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary")
-    assert feed.enabled is False
-    settings = settings.model_copy(deep=True)
-    next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary").enabled = True
+    assert feed.enabled is True
     agent = ScraperAgent(settings=settings)
     try:
         _, writeup_adapters = agent._build_adapters()
