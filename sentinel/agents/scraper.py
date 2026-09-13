@@ -42,6 +42,11 @@ DEFAULT_BROWSER_HEADERS = {
 }
 OTX_HOSTS = {"otx.alienvault.com"}
 SECTION_ONLY_WRITEUP_SOURCES = {"google_cloud_threat_intelligence"}
+SANS_ISC_DIARY_SOURCE = "sans_isc_diary"
+SANS_ISC_CONTEXT_RE = re.compile(
+    r"\b(?:attacker|scanner|source ip|c2|command and control|malicious host)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -1090,6 +1095,10 @@ class ScraperAgent(BaseAgent):
         return [term.strip().lower() for term in self.settings.sources.writeup_search.terms if term.strip()]
 
     def _matches_writeup_search(self, writeup: RawWriteup) -> bool:
+        if writeup.source.lower() == SANS_ISC_DIARY_SOURCE:
+            # Diary titles are often concrete but omit the generic search
+            # terms; the Stormcast entries are podcast summaries, not diaries.
+            return not (writeup.title or "").lower().startswith("isc stormcast")
         search_settings = self.settings.sources.writeup_search
         if not search_settings.enabled:
             return True
@@ -1228,26 +1237,60 @@ class ScraperAgent(BaseAgent):
             extract_iocs_from_section,
             extract_iocs_from_text,
             find_ioc_section,
+            refang,
         )
 
         text_parts = [writeup.title or "", writeup.summary or "", writeup.content_text or ""]
         full_text = "\n".join(text_parts)
         own_host = (urlparse(writeup.url).hostname or "").lower()
         exclude = {own_host} if own_host else set()
-        # Prefer an explicit IOC/indicators section when the article has one, so
-        # analyst-curated indicators earn full scoring context (parity with the
-        # discovery path). Fall back to whole-body extraction otherwise.
-        section = find_ioc_section(full_text)
-        if section is not None:
-            extracted = extract_iocs_from_section(section.text, exclude_hostnames=exclude)
-            extraction_mode = "ioc_section"
-            max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_ioc_section)
-        else:
-            if writeup.source.lower() in SECTION_ONLY_WRITEUP_SOURCES:
-                return []
-            extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
-            extraction_mode = "fallback"
+        if writeup.source.lower() == SANS_ISC_DIARY_SOURCE:
+            # ISC diaries mix genuine indicators with citations and tool links.
+            # Require local evidence for IPs and hashes. Plain linked URLs,
+            # public resolvers, and CVEs in general news are not threat IOCs.
+            lines = [refang(line) for line in full_text.splitlines()]
+            candidates = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
+            extracted = [
+                candidate for candidate in candidates
+                if (
+                    candidate.type in {"md5", "sha1", "sha256"}
+                    and any(
+                        candidate.value in line.lower()
+                        and "hash" in " ".join(lines[max(0, index - 1) : index + 1]).lower()
+                        for index, line in enumerate(lines)
+                    )
+                ) or (
+                    candidate.type == "ipv4"
+                    and any(
+                        candidate.value in line
+                        and (f"::ffff:{candidate.value}" in line or SANS_ISC_CONTEXT_RE.search(line))
+                        for line in lines
+                    )
+                ) or (
+                    candidate.type == "domain"
+                    and any(
+                        candidate.value in line.lower() and SANS_ISC_CONTEXT_RE.search(line)
+                        for line in lines
+                    )
+                )
+            ]
+            extraction_mode = "sans_diary_atomic"
             max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
+        else:
+            # Prefer an explicit IOC/indicators section when the article has one, so
+            # analyst-curated indicators earn full scoring context (parity with the
+            # discovery path). Fall back to whole-body extraction otherwise.
+            section = find_ioc_section(full_text)
+            if section is not None:
+                extracted = extract_iocs_from_section(section.text, exclude_hostnames=exclude)
+                extraction_mode = "ioc_section"
+                max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_ioc_section)
+            else:
+                if writeup.source.lower() in SECTION_ONLY_WRITEUP_SOURCES:
+                    return []
+                extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
+                extraction_mode = "fallback"
+                max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
         if max_items > 0:
             extracted = extracted[:max_items]
         records: list[RawIOC] = []

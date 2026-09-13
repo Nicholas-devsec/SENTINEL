@@ -174,6 +174,13 @@ sources:
       url: https://www.sophos.com/en-us/category/threat-research/feed
       trust: 0.67
       enabled: true
+    # SANS diary extraction is in analyst preview. A first live test misread
+    # public resolver addresses as IOCs; keep scheduled alerts off until the
+    # source-specific parser has been reviewed against more diaries.
+    - name: sans_isc_diary
+      url: https://isc.sans.edu/rssfeed.xml
+      trust: 0.68
+      enabled: false
     # Check Point Research is wired as a curated writeup feed but disabled:
     # AWS WAF currently returns HTTP 202 (x-amzn-waf-action: challenge) with
     # an empty body to non-browser clients. Enable only after the runtime host

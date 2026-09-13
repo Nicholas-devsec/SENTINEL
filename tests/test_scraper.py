@@ -15,6 +15,7 @@ from sentinel.agents.scraper import (
     OpenPhishAdapter,
     PhishTankAdapter,
     RSSAdapter,
+    RawWriteup,
     ScraperAgent,
     SourceScrapeDiagnostic,
     ThreatFoxAdapter,
@@ -35,6 +36,66 @@ async def test_sophos_curated_feed_uses_canonical_rss_adapter() -> None:
         assert isinstance(matches[0], RSSAdapter)
         assert matches[0].feed_url == "https://www.sophos.com/en-us/category/threat-research/feed"
         assert matches[0].trust_score == 0.67
+    finally:
+        await agent.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sans_diary_feed_and_atomic_extraction() -> None:
+    settings = get_settings()
+    feed = next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary")
+    assert feed.enabled is False
+    settings = settings.model_copy(deep=True)
+    next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary").enabled = True
+    agent = ScraperAgent(settings=settings)
+    try:
+        _, writeup_adapters = agent._build_adapters()
+        matches = [adapter for adapter in writeup_adapters if adapter.source_name == "sans_isc_diary"]
+        assert len(matches) == 1
+        assert isinstance(matches[0], RSSAdapter)
+        assert matches[0].feed_url == "https://isc.sans.edu/rssfeed.xml"
+
+        diary = RawWriteup(
+            source="sans_isc_diary",
+            source_trust=0.68,
+            url="https://isc.sans.edu/diary/rss/33324",
+            title="Scans for Proxmox Servers",
+            published_at=datetime.now(UTC),
+            content_text=(
+                'The PVE proxy log shows failed login attempts:\n'
+                '::ffff:62.60.130.193 - - "POST /api2/json/access/ticket HTTP/1.1" 401\n'
+                'Indicators of Compromise\n'
+                '[1] https://www.inetsim.org/index.html\n'
+                '[2] https://github.com/bruneaug/DShield-SIEM/tree/main'
+            ),
+        )
+        assert agent._matches_writeup_search(diary)
+        assert not agent._matches_writeup_search(
+            RawWriteup(source="sans_isc_diary", source_trust=0.68,
+                       url="https://isc.sans.edu/diary/rss/33330",
+                       title="ISC Stormcast For Friday", published_at=datetime.now(UTC))
+        )
+        iocs = agent._extract_iocs_from_writeup(diary)
+        assert [(ioc.type, ioc.value) for ioc in iocs] == [("ipv4", "62.60.130.193")]
+        assert iocs[0].attributes["extraction_mode"] == "sans_diary_atomic"
+
+        redtail = RawWriteup(
+            source="sans_isc_diary",
+            source_trust=0.68,
+            url="https://isc.sans.edu/diary/rss/33326",
+            title="Redtail Payload Analysis",
+            published_at=datetime.now(UTC),
+            content_text=(
+                "The sample has the following SHA-256 hash:\n"
+                "63be5f38b520b3143732962a5f8fec1f9abd1f483dbc741ed324e58f955dd35e\n"
+                "Destinations included 1.1.1.1, 8.8.8.8, and 9.9.9.9.\n"
+                "Indicators of Compromise\n"
+                "[1] https://www.inetsim.org/index.html"
+            ),
+        )
+        assert [(ioc.type, ioc.value) for ioc in agent._extract_iocs_from_writeup(redtail)] == [
+            ("sha256", "63be5f38b520b3143732962a5f8fec1f9abd1f483dbc741ed324e58f955dd35e")
+        ]
     finally:
         await agent.aclose()
 
