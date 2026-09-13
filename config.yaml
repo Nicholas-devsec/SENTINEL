@@ -170,6 +170,14 @@ sources:
       url: https://securelist.com/feed/
       trust: 0.67
       enabled: true
+    # Check Point Research is wired as a curated writeup feed but disabled:
+    # AWS WAF currently returns HTTP 202 (x-amzn-waf-action: challenge) with
+    # an empty body to non-browser clients. Enable only after the runtime host
+    # consistently receives HTTP 200 RSS XML and article pages are fetchable.
+    - name: checkpoint_research
+      url: https://research.checkpoint.com/feed/
+      trust: 0.67
+      enabled: false
     - name: crowdstrike_blog
       url: https://www.crowdstrike.com/blog/feed/
       trust: 0.67

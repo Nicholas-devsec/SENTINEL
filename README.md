@@ -203,6 +203,13 @@ two direct feed IPs, one direct feed domain, one direct feed hash, one
 configured-feed article, and one discovery/open-web article. Keep
 `delivery.telegram_max_alerts_per_run` at least as high as that total.
 
+`checkpoint_research` is configured as a curated RSS writeup source but is
+disabled. Check Point's AWS WAF has returned HTTP 202 with
+`x-amzn-waf-action: challenge` and no RSS body to the non-browser scraper.
+Before enabling it, verify from the runtime host that both the feed and
+article pages can be fetched consistently; a 202 response can otherwise be
+parsed as an empty feed.
+
 Retention is on by default so unalerted feed-only noise does not clog the DB:
 
 ```yaml
