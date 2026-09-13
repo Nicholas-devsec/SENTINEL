@@ -21,7 +21,22 @@ from sentinel.agents.scraper import (
     TweetFeedAdapter,
     URLHausAdapter,
 )
-from sentinel.config import FeedConfig, SentinelSettings
+from sentinel.config import FeedConfig, SentinelSettings, get_settings
+
+
+@pytest.mark.asyncio
+async def test_sophos_curated_feed_uses_canonical_rss_adapter() -> None:
+    settings = get_settings()
+    agent = ScraperAgent(settings=settings)
+    try:
+        _, writeup_adapters = agent._build_adapters()
+        matches = [adapter for adapter in writeup_adapters if adapter.source_name == "sophos_threat_research"]
+        assert len(matches) == 1
+        assert isinstance(matches[0], RSSAdapter)
+        assert matches[0].feed_url == "https://www.sophos.com/en-us/category/threat-research/feed"
+        assert matches[0].trust_score == 0.67
+    finally:
+        await agent.aclose()
 
 
 class MemorySnapshotStateStore:

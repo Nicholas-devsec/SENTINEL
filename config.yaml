@@ -170,6 +170,10 @@ sources:
       url: https://securelist.com/feed/
       trust: 0.67
       enabled: true
+    - name: sophos_threat_research
+      url: https://www.sophos.com/en-us/category/threat-research/feed
+      trust: 0.67
+      enabled: true
     # Check Point Research is wired as a curated writeup feed but disabled:
     # AWS WAF currently returns HTTP 202 (x-amzn-waf-action: challenge) with
     # an empty body to non-browser clients. Enable only after the runtime host
