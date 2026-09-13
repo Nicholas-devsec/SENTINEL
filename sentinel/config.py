@@ -54,6 +54,7 @@ class FeedConfig(BaseModel):
     url: str
     trust: float
     enabled: bool = True
+    required_categories: list[str] = Field(default_factory=list)
 
 
 class WriteupSearchSettings(BaseModel):

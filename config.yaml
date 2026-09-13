@@ -180,6 +180,13 @@ sources:
       url: https://isc.sans.edu/rssfeed.xml
       trust: 0.68
       enabled: true
+    # The official feed covers the whole blog. Keep only entries explicitly
+    # categorized as Threat Research before fetching article pages.
+    - name: reversinglabs_threat_research
+      url: https://www.reversinglabs.com/blog/rss.xml
+      trust: 0.67
+      required_categories: [Threat Research]
+      enabled: false
     # Check Point Research is wired as a curated writeup feed but disabled:
     # AWS WAF currently returns HTTP 202 (x-amzn-waf-action: challenge) with
     # an empty body to non-browser clients. Enable only after the runtime host

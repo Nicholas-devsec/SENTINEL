@@ -41,6 +41,34 @@ async def test_sophos_curated_feed_uses_canonical_rss_adapter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reversinglabs_feed_filters_threat_research_categories() -> None:
+    settings = get_settings().model_copy(deep=True)
+    feed = next(feed for feed in settings.sources.feeds if feed.name == "reversinglabs_threat_research")
+    assert feed.enabled is False
+    assert feed.required_categories == ["Threat Research"]
+    feed.enabled = True
+    agent = ScraperAgent(settings=settings)
+    try:
+        _, adapters = agent._build_adapters()
+        adapter = next(adapter for adapter in adapters if adapter.source_name == feed.name)
+        assert adapter.feed_url == "https://www.reversinglabs.com/blog/rss.xml"
+        rss_xml = """<rss version="2.0"><channel><title>ReversingLabs Blog</title>
+          <item><title>Malware analysis</title><link>https://www.reversinglabs.com/blog/malware</link>
+            <category>Threat Research</category><pubDate>Wed, 26 Aug 2026 15:00:00 GMT</pubDate></item>
+          <item><title>Product news</title><link>https://www.reversinglabs.com/blog/product</link>
+            <category>Products &amp; Technology</category><pubDate>Thu, 10 Sep 2026 15:00:00 GMT</pubDate></item>
+        </channel></rss>"""
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, text=rss_xml))
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter.client = client
+            writeups = await adapter.fetch_writeups()
+        assert [writeup.url for writeup in writeups] == ["https://www.reversinglabs.com/blog/malware"]
+        assert writeups[0].tags == ["Threat Research"]
+    finally:
+        await agent.aclose()
+
+
+@pytest.mark.asyncio
 async def test_sans_diary_feed_and_atomic_extraction() -> None:
     settings = get_settings()
     feed = next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary")

@@ -1020,12 +1020,18 @@ class RSSAdapter:
         *,
         trust_score: float,
         source_name: str | None = None,
+        required_categories: list[str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.feed_url = feed_url
         self.trust_score = trust_score
         if source_name is not None:
             self.source_name = source_name
+        self.required_categories = {
+            category.strip().casefold()
+            for category in (required_categories or [])
+            if category.strip()
+        }
         self.client = client or httpx.AsyncClient(timeout=30.0)
 
     async def fetch_writeups(self) -> list[RawWriteup]:
@@ -1034,6 +1040,11 @@ class RSSAdapter:
         parsed = feedparser.parse(response.text)
         records: list[RawWriteup] = []
         for entry in parsed.entries:
+            tags = [tag.get("term") for tag in entry.get("tags", []) if tag.get("term")]
+            if self.required_categories and not self.required_categories.intersection(
+                tag.casefold() for tag in tags
+            ):
+                continue
             link = getattr(entry, "link", None) or entry.get("link")
             title = getattr(entry, "title", None) or entry.get("title")
             published = getattr(entry, "published", None) or entry.get("published")
@@ -1048,7 +1059,7 @@ class RSSAdapter:
                     title=title,
                     published_at=_normalize_timestamp(published),
                     summary=summary,
-                    tags=[tag.get("term") for tag in entry.get("tags", []) if tag.get("term")],
+                    tags=tags,
                 )
             )
         return records
@@ -1220,6 +1231,7 @@ class ScraperAgent(BaseAgent):
                         feed.url,
                         trust_score=trust_score,
                         source_name=source_name,
+                        required_categories=feed.required_categories,
                         client=self.http_client,
                     )
                 )

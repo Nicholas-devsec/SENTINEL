@@ -217,6 +217,11 @@ domain-traffic headings. It excludes known public DNS resolvers, linked
 citations, and general-news CVEs. The feed is enabled after analyst review of
 live test alerts; the configured article window remains 72 hours.
 
+`reversinglabs_threat_research` uses the official ReversingLabs blog RSS feed.
+Its `required_categories: [Threat Research]` setting drops unrelated blog
+entries before article fetching and IOC extraction. The source remains disabled
+while its test alert is reviewed; the normal 72-hour article window is unchanged.
+
 Retention is on by default so unalerted feed-only noise does not clog the DB:
 
 ```yaml
