@@ -47,6 +47,16 @@ def test_extracts_defanged_domain_and_url_and_ip() -> None:
     assert ("ipv4", "45.155.204.10") in extracted
 
 
+def test_defanged_url_path_is_not_a_domain_indicator() -> None:
+    url = "https://www.mrtb.gov.ng/apps/attvpn.vip"
+    text = "IOCs\nURL | hxxps://www.mrtb[.]gov[.]ng/apps/attvpn[.]vip\n"
+    for extractor in (extract_iocs_from_text, extract_iocs_from_section):
+        extracted = {(item.type, item.value) for item in extractor(text)}
+        assert ("url", url) in extracted
+        assert ("domain", "attvpn.vip") not in extracted
+        assert ("domain", "mrtb.gov.ng") not in extracted
+
+
 def test_suppresses_common_benign_stun_turn_hosts() -> None:
     text = (
         "Indicators of Compromise\n"

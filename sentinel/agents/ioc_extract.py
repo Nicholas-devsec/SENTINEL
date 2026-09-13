@@ -44,6 +44,10 @@ SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 URL_RE = re.compile(r"\bhttps?://[^\s\"'<>\)\]]+", re.IGNORECASE)
+DEFANGED_URL_TOKEN_RE = re.compile(
+    r"\bh(?:tt|xx)ps?(?:\[:\]|:)\s*(?:\[//\]|//)[^\s\"'<>)]+",
+    re.IGNORECASE,
+)
 # Only matched against text that contained defang markers (see module docstring).
 # One or more `label[.]` groups followed by a letters-only TLD label.
 DEFANGED_DOMAIN_RE = re.compile(
@@ -398,10 +402,13 @@ def extract_iocs_from_text(text: str, *, exclude_hostnames: set[str] | None = No
     """Extract candidate IOCs from prose. exclude_hostnames drops the article's own infrastructure."""
     excluded = _expand_excluded_hostnames(exclude_hostnames)
     found: list[ExtractedIOC] = []
+    url_token_spans = [match.span() for match in DEFANGED_URL_TOKEN_RE.finditer(text)]
 
     # Defanged domains are matched on the raw text before refanging so the
     # defang marker itself acts as the confidence signal.
     for match in DEFANGED_DOMAIN_RE.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in url_token_spans):
+            continue
         if _is_domain_embedded_in_defanged_url(text, match.span()):
             continue
         if _is_domain_embedded_in_defanged_email(text, match.span()):
@@ -829,7 +836,9 @@ def extract_iocs_from_section(
             stripped = refang(cell.strip().lstrip("-*•").strip())
             if not stripped or len(stripped.split()) > 5:
                 continue
-            for part in stripped.split():
+            # A dotted URL path segment may look like a bare domain. Only
+            # consider tokens outside complete URL values in this cell.
+            for part in URL_RE.sub(" ", stripped).split():
                 token = part.rstrip(",;").rstrip(".").lower()
                 if not BARE_DOMAIN_RE.fullmatch(token):
                     continue
