@@ -88,7 +88,8 @@ async def test_sans_diary_feed_and_atomic_extraction() -> None:
             content_text=(
                 "The sample has the following SHA-256 hash:\n"
                 "63be5f38b520b3143732962a5f8fec1f9abd1f483dbc741ed324e58f955dd35e\n"
-                "Destinations included 1.1.1.1, 8.8.8.8, and 9.9.9.9.\n"
+                "Attacker destinations included 1.1.1.1, 1.0.0.1, 8.8.8.8, "
+                "8.8.4.4, 9.9.9.9, and 9.9.9.10. These are public DNS resolvers.\n"
                 "Indicators of Compromise\n"
                 "[1] https://www.inetsim.org/index.html"
             ),

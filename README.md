@@ -212,8 +212,9 @@ parsed as an empty feed.
 
 `sans_isc_diary` uses SANS ISC's title/summary diary RSS feed and a cautious
 article parser. The parser currently emits hashes with an adjacent hash label
-and IPs tied to scanner or attacker context, while excluding linked citations
-and general-news CVEs. It remains disabled during analyst review: an initial
+and IPs tied to scanner or attacker context, while excluding known public DNS
+resolvers, linked citations, and general-news CVEs. It remains disabled during
+analyst review: an initial
 live test incorrectly included public DNS resolvers from a RedTail diary;
 the follow-up test produced only a scanner IP from a Proxmox diary. Both tests
 used a temporary 120-hour article window; the configured window is 72 hours.

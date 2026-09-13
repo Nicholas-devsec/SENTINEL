@@ -47,6 +47,14 @@ SANS_ISC_CONTEXT_RE = re.compile(
     r"\b(?:attacker|scanner|source ip|c2|command and control|malicious host)\b",
     re.IGNORECASE,
 )
+SANS_ISC_PUBLIC_RESOLVERS = {
+    "1.0.0.1",
+    "1.1.1.1",
+    "8.8.4.4",
+    "8.8.8.8",
+    "9.9.9.9",
+    "9.9.9.10",
+}
 
 
 @dataclass(slots=True)
@@ -1252,6 +1260,7 @@ class ScraperAgent(BaseAgent):
             candidates = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
             extracted = [
                 candidate for candidate in candidates
+                if candidate.value not in SANS_ISC_PUBLIC_RESOLVERS
                 if (
                     candidate.type in {"md5", "sha1", "sha256"}
                     and any(
