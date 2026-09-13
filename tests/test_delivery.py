@@ -1962,6 +1962,23 @@ def test_grouped_alert_message_notes_more_iocs_at_article_display_cap() -> None:
     assert "<b>⚠ More IOCs can be found in the article/writeup (5 extracted total).</b>" in rendered
 
 
+def test_grouped_alert_shows_type_distribution_and_each_type_at_display_cap() -> None:
+    from sentinel.delivery.telegram_bot import format_grouped_alert_message
+
+    rendered = format_grouped_alert_message(
+        source="sans_isc_diary", risk_score=36.0, severity="informational",
+        source_title="Guildma infection", reference_url="https://isc.sans.edu/diary/rss/33300",
+        attributes={"article_ioc_count": 8},
+        iocs=[
+            *({"type": "sha256", "value": str(index) * 64} for index in range(4)),
+            *({"type": "domain", "value": f"host{index}.example.net"} for index in range(4)),
+        ],
+    )
+    assert "Types: domain 4, sha256 4" in rendered
+    assert "<code>host0[.]example[.]net</code> [domain]" in rendered
+    assert "<b>⚠ More IOCs can be found in the article/writeup (8 extracted total).</b>" in rendered
+
+
 def test_format_alert_message_shows_hash_intel_links() -> None:
     from sentinel.delivery.telegram_bot import format_alert_message
 

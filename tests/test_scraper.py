@@ -97,6 +97,29 @@ async def test_sans_diary_feed_and_atomic_extraction() -> None:
         assert [(ioc.type, ioc.value) for ioc in agent._extract_iocs_from_writeup(redtail)] == [
             ("sha256", "63be5f38b520b3143732962a5f8fec1f9abd1f483dbc741ed324e58f955dd35e")
         ]
+        guildma = RawWriteup(
+            source="sans_isc_diary", source_trust=0.68,
+            url="https://isc.sans.edu/diary/rss/33300", title="Guildma infection",
+            published_at=datetime.now(UTC),
+            content_text=(
+                "Domains the infected Windows host communicated with over HTTPS (TCP port 443):\n"
+                "ekg3h4htc0h0ggdh.canadacentral-01.azurewebsites[.]net\n"
+                "plosancol.aguamammillaria[.]cfd\n"
+                "crironxil.aguasedum[.]cfd\n"
+                "TCP traffic to another domain:\n"
+                "tcp[:]//omzagdmspc.a.pinggy[.]link:21601/\n"
+                "Note: GitHub is a legitimate domain, not included.\n"
+                "SHA-256 hash:\n" + "a" * 64
+            ),
+        )
+        guildma_iocs = agent._extract_iocs_from_writeup(guildma)
+        assert {ioc.value for ioc in guildma_iocs if ioc.type == "domain"} == {
+            "ekg3h4htc0h0ggdh.canadacentral-01.azurewebsites.net",
+            "plosancol.aguamammillaria.cfd",
+            "crironxil.aguasedum.cfd",
+            "omzagdmspc.a.pinggy.link",
+        }
+        assert [(ioc.type, ioc.value) for ioc in guildma_iocs if ioc.type == "sha256"] == [("sha256", "a" * 64)]
     finally:
         await agent.aclose()
 

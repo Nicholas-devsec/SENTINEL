@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import html as html_module
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -428,11 +430,21 @@ def format_grouped_alert_message(
     reference_url_line = _format_reference_url_line(source, reference_url)
     if reference_url_line:
         lines.append(reference_url_line)
-    lines.extend(["", f"<b>IOCs ({len(iocs)})</b>"])
+    type_counts = Counter(str(item.get("type", "unknown")) for item in iocs)
+    distribution = ", ".join(f"{ioc_type} {count}" for ioc_type, count in sorted(type_counts.items()))
+    lines.extend(["", f"<b>IOCs ({len(iocs)})</b>", f"Types: {_escape(distribution)}"])
     if article_ioc_note:
         lines.append(_format_article_ioc_note(article_ioc_note))
     active_label: str | None = None
-    for item in iocs[:MAX_GROUPED_IOCS]:
+    # Give each type a visible example before filling the remaining slots.
+    displayed = []
+    seen_types = set()
+    for item in iocs:
+        if item.get("type") not in seen_types:
+            displayed.append(item)
+            seen_types.add(item.get("type"))
+    displayed.extend(item for item in iocs if item not in displayed)
+    for item in displayed[:MAX_GROUPED_IOCS]:
         ioc_type = str(item.get("type", "unknown"))
         section_label = str(item.get("section_label") or "").strip() or None
         if section_label and section_label != active_label:

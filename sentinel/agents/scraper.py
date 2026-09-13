@@ -55,6 +55,7 @@ SANS_ISC_PUBLIC_RESOLVERS = {
     "9.9.9.9",
     "9.9.9.10",
 }
+SANS_ISC_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
 
 
 @dataclass(slots=True)
@@ -1242,6 +1243,7 @@ class ScraperAgent(BaseAgent):
         from urllib.parse import urlparse
 
         from sentinel.agents.ioc_extract import (
+            ExtractedIOC,
             extract_iocs_from_section,
             extract_iocs_from_text,
             find_ioc_section,
@@ -1283,6 +1285,23 @@ class ScraperAgent(BaseAgent):
                     )
                 )
             ]
+            # ISC sometimes publishes communication hosts as bare lines under
+            # an explicit domain heading. Preserve the full host (including
+            # subdomains); the generic extractor reduces it to the base domain.
+            in_domain_list = False
+            for line in lines:
+                line = line.strip()
+                if re.search(r"\bdomains?\b.*\b(?:communicated|traffic)\b|\btraffic to another domain\b", line, re.I):
+                    in_domain_list = True
+                    continue
+                if not in_domain_list:
+                    continue
+                host = re.sub(r"^tcp://", "", line, flags=re.I).split(":", 1)[0].rstrip("/")
+                if not SANS_ISC_HOST_RE.fullmatch(host):
+                    in_domain_list = False
+                    continue
+                if host.lower() not in exclude and not any(item.type == "domain" and item.value == host.lower() for item in extracted):
+                    extracted.append(ExtractedIOC(type="domain", value=host.lower()))
             extraction_mode = "sans_diary_atomic"
             max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
         else:
