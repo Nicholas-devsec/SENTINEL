@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.reya.network" or tostring(AdditionalFields) has "rpc.reya.network"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

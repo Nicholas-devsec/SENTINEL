@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "http://info-payeasy.com/pages/overview.html" or RemoteIP == "http://info-payeasy.com/pages/overview.html"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

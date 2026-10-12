@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "amigo-canino.pl" or tostring(AdditionalFields) has "amigo-canino.pl"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

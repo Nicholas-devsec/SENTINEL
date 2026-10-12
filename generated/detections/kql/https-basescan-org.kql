@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://basescan.org/"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

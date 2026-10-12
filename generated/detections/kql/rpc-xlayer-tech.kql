@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.xlayer.tech" or tostring(AdditionalFields) has "rpc.xlayer.tech"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

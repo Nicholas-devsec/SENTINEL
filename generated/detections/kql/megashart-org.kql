@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "megashart.org" or tostring(AdditionalFields) has "megashart.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

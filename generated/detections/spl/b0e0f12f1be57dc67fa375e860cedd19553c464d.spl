@@ -1,2 +1,0 @@
-index=main (file_hash="b0e0f12f1be57dc67fa375e860cedd19553c464d")
-| stats count by host, file_hash

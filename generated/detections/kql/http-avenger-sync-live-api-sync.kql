@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://avenger-sync.live/api/sync"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

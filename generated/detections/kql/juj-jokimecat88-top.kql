@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "juj.jokimecat88.top" or tostring(AdditionalFields) has "juj.jokimecat88.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

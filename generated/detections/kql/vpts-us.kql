@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "vpts.us" or tostring(AdditionalFields) has "vpts.us"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

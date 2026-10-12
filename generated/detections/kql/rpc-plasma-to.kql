@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.plasma.to" or tostring(AdditionalFields) has "rpc.plasma.to"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

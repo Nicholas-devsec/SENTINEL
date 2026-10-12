@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "topstatus.site" or tostring(AdditionalFields) has "topstatus.site"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

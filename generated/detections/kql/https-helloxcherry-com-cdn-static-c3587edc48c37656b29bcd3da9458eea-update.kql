@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://helloxcherry.com/cdn/static/c3587edc48c37656b29bcd3da9458eea/update"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

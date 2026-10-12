@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://api.wemix.com/"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

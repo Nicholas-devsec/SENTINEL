@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "token.apexaccs.org" or tostring(AdditionalFields) has "token.apexaccs.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

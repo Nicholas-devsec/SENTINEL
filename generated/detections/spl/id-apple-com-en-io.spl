@@ -1,2 +1,0 @@
-index=main (dest_host="id-apple.com-en.io")
-| stats count by host, dest_host

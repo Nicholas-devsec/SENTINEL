@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://mainnet.unichain.org/"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

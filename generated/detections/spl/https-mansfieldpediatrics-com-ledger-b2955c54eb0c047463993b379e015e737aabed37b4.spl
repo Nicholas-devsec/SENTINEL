@@ -1,2 +1,0 @@
-index=main (url="https://mansfieldpediatrics.com/ledger/b2955c54eb0c047463993b379e015e737aabed37b4")
-| stats count by host, url

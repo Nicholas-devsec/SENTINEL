@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://polygon-rpc.com/"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

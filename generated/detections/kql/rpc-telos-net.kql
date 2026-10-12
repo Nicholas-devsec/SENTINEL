@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.telos.net" or tostring(AdditionalFields) has "rpc.telos.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

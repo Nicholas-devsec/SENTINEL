@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "arigatodomen.sbs" or tostring(AdditionalFields) has "arigatodomen.sbs"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

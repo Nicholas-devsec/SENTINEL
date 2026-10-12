@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "www.dservices.space" or tostring(AdditionalFields) has "www.dservices.space"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

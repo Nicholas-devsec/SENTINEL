@@ -1,2 +1,0 @@
-index=main (url="https://x0.at/qOfN.msi")
-| stats count by host, url

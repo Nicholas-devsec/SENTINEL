@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://reindardt.lol/api/v1/session"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

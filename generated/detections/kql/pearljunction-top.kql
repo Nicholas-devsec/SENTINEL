@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pearljunction.top" or tostring(AdditionalFields) has "pearljunction.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

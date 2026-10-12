@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "0auth-chromium.com" or tostring(AdditionalFields) has "0auth-chromium.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

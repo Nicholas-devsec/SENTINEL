@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mainnet.era.zksync.io" or tostring(AdditionalFields) has "mainnet.era.zksync.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

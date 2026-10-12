@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "ipfs.io" or tostring(AdditionalFields) has "ipfs.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

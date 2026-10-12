@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "readme.md" or tostring(AdditionalFields) has "readme.md"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "deep-harborio.com" or tostring(AdditionalFields) has "deep-harborio.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

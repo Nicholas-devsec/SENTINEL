@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://154.92.16.22/xz.bin"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

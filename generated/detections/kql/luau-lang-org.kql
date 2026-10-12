@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "luau-lang.org" or tostring(AdditionalFields) has "luau-lang.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

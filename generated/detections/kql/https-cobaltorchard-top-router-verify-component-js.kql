@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://cobaltorchard.top/router/verify-component.js"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

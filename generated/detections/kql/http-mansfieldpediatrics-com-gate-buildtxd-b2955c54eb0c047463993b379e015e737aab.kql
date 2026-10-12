@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "http://mansfieldpediatrics.com/gate?buildtxd=b2955c54eb0c047463993b379e015e737aab" or RemoteIP == "http://mansfieldpediatrics.com/gate?buildtxd=b2955c54eb0c047463993b379e015e737aab"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

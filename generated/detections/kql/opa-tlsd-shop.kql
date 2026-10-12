@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "opa.tlsd.shop" or tostring(AdditionalFields) has "opa.tlsd.shop"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

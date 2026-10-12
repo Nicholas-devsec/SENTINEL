@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "optimismphantasm.shop" or tostring(AdditionalFields) has "optimismphantasm.shop"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

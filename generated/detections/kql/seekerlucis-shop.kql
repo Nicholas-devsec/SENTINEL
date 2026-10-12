@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "seekerlucis.shop" or tostring(AdditionalFields) has "seekerlucis.shop"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

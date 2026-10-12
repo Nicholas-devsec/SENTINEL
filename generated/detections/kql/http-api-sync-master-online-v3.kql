@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://api.sync-master.online/v3"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

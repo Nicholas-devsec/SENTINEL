@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "firmwareupdatechecksdoidv2627.buzz" or tostring(AdditionalFields) has "firmwareupdatechecksdoidv2627.buzz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

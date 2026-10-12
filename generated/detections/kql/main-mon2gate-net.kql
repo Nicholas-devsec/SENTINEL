@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "main.mon2gate.net" or RemoteIP == "main.mon2gate.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

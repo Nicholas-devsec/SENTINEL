@@ -1,2 +1,0 @@
-index=main (dest_host="pinhole.rootcode.ru")
-| stats count by host, dest_host

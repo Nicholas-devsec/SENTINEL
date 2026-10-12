@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://api.bscscan.com/api"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

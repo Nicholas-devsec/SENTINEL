@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mainnet.boba.network" or tostring(AdditionalFields) has "mainnet.boba.network"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

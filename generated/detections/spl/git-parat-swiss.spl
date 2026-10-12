@@ -1,2 +1,0 @@
-index=main (dest_host="git.parat.swiss")
-| stats count by host, dest_host

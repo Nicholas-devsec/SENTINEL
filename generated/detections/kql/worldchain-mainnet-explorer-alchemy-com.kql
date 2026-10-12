@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "worldchain-mainnet.explorer.alchemy.com" or tostring(AdditionalFields) has "worldchain-mainnet.explorer.alchemy.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "flingbase.net" or tostring(AdditionalFields) has "flingbase.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

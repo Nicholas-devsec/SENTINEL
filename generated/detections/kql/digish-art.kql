@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "digish.art" or tostring(AdditionalFields) has "digish.art"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

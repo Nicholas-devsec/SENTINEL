@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "blockscout.lisk.com" or tostring(AdditionalFields) has "blockscout.lisk.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

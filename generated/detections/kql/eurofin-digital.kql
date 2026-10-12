@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "eurofin.digital" or tostring(AdditionalFields) has "eurofin.digital"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

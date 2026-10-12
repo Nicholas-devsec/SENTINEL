@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://block-explorer-api.mainnet.zksync.io/api"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

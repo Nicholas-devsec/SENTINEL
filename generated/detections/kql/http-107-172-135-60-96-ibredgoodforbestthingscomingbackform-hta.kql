@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://107.172.135.60/96/ibredgoodforbestthingscomingbackform.hta"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

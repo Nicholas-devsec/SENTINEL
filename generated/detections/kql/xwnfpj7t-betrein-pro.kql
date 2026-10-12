@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "xwnfpj7t.betrein.pro" or tostring(AdditionalFields) has "xwnfpj7t.betrein.pro"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mz2qs1j6.1xforward.live" or tostring(AdditionalFields) has "mz2qs1j6.1xforward.live"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

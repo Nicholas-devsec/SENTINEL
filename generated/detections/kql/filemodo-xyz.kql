@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "filemodo.xyz" or tostring(AdditionalFields) has "filemodo.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

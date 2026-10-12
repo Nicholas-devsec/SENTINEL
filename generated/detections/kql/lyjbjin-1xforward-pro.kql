@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "lyjbjin.1xforward.pro" or tostring(AdditionalFields) has "lyjbjin.1xforward.pro"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

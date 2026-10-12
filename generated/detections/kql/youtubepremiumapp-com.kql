@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "youtubepremiumapp.com" or RemoteIP == "youtubepremiumapp.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

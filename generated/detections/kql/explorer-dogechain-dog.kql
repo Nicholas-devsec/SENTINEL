@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "explorer.dogechain.dog" or tostring(AdditionalFields) has "explorer.dogechain.dog"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

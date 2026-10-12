@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://64.224.17.118/b98b577ad87f42dbbf91.php"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

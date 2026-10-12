@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pringlesbob.cfd" or tostring(AdditionalFields) has "pringlesbob.cfd"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

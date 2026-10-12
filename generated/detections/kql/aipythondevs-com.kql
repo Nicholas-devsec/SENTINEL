@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "aipythondevs.com" or tostring(AdditionalFields) has "aipythondevs.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

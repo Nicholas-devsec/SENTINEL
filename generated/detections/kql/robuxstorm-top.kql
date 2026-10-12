@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "robuxstorm.top" or tostring(AdditionalFields) has "robuxstorm.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

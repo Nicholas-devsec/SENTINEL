@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mainnet.optimism.io" or tostring(AdditionalFields) has "mainnet.optimism.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "ketab.computer" or tostring(AdditionalFields) has "ketab.computer"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

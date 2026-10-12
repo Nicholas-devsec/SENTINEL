@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "microsoft-update.support" or RemoteIP == "microsoft-update.support"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

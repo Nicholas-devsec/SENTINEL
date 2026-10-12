@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "moonriver.public.blastapi.io" or tostring(AdditionalFields) has "moonriver.public.blastapi.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

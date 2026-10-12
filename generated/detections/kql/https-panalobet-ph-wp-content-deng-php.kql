@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://panalobet.ph/wp-content/deng.php"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

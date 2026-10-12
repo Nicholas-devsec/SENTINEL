@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "hrjjo6as.prozhe.shopping" or tostring(AdditionalFields) has "hrjjo6as.prozhe.shopping"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

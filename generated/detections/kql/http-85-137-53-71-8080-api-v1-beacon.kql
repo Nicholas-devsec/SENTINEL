@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://85.137.53.71:8080/api/v1/beacon"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

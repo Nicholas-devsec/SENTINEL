@@ -1,3 +1,0 @@
-DeviceFileEvents
-| where SHA256 == "11b50a6143f0a10495f509cc7582a141e644b7322a481e02ea8e9a6db7edbbc0"
-| project Timestamp, DeviceName, FileName, FolderPath, SHA256, InitiatingProcessFileName

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "monzoslots.life" or tostring(AdditionalFields) has "monzoslots.life"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

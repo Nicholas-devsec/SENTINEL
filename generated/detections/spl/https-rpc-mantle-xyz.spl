@@ -1,2 +1,0 @@
-index=* sourcetype IN ("proxy", "bluecoat", "squid") url="https://rpc.mantle.xyz/*"
-| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, url

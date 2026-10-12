@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "basherq53eniermxovo3bkduw5qqq5bkqcml3qictfmamgvmzovykyqd.onion" or tostring(AdditionalFields) has "basherq53eniermxovo3bkduw5qqq5bkqcml3qictfmamgvmzovykyqd.onion"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

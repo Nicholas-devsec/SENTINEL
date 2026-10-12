@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "djaczx9h.btyek.online" or tostring(AdditionalFields) has "djaczx9h.btyek.online"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

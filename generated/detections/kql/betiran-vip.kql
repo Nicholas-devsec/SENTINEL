@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "betiran.vip" or tostring(AdditionalFields) has "betiran.vip"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

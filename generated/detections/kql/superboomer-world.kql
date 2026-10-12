@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "superboomer.world" or tostring(AdditionalFields) has "superboomer.world"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

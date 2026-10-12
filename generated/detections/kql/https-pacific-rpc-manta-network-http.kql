@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://pacific-rpc.manta.network/http"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

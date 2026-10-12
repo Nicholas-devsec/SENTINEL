@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://as.al/file/KBn1RC"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "wimsedas.xyz" or tostring(AdditionalFields) has "wimsedas.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

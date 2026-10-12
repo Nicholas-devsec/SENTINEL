@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "hortidaily.es" or tostring(AdditionalFields) has "hortidaily.es"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

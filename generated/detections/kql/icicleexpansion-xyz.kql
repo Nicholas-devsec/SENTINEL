@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "icicleexpansion.xyz" or tostring(AdditionalFields) has "icicleexpansion.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

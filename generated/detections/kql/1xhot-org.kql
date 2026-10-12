@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "1xhot.org" or tostring(AdditionalFields) has "1xhot.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

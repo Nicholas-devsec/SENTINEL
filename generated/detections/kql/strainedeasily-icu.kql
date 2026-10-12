@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "strainedeasily.icu" or tostring(AdditionalFields) has "strainedeasily.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

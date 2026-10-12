@@ -1,2 +1,0 @@
-index=main (dest_host="verify-apple.com-ae.net")
-| stats count by host, dest_host

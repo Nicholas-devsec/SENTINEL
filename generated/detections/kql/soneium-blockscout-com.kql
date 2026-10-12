@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "soneium.blockscout.com" or tostring(AdditionalFields) has "soneium.blockscout.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

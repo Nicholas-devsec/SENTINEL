@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "github.code" or tostring(AdditionalFields) has "github.code"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

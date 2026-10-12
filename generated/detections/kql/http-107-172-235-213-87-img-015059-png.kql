@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://107.172.235.213/87/img_015059.png"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

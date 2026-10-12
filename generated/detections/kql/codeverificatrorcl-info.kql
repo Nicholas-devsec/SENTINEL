@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "codeverificatrorcl.info" or tostring(AdditionalFields) has "codeverificatrorcl.info"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

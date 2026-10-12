@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "estekhdam.download" or tostring(AdditionalFields) has "estekhdam.download"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

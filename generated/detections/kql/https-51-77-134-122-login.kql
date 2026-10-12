@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://51.77.134.122/login"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

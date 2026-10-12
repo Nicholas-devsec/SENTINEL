@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "enhanceblabber.cc" or tostring(AdditionalFields) has "enhanceblabber.cc"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

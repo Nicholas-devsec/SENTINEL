@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "gasshopper.sale" or tostring(AdditionalFields) has "gasshopper.sale"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

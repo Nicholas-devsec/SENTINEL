@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "creativecommunityinfo.art" or tostring(AdditionalFields) has "creativecommunityinfo.art"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

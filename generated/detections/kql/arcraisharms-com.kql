@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "arcraisharms.com" or tostring(AdditionalFields) has "arcraisharms.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

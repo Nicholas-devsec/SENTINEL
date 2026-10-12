@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "cashorix.xyz" or tostring(AdditionalFields) has "cashorix.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

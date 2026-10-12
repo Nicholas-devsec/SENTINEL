@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://api-moonbeam.moonscan.io/api"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

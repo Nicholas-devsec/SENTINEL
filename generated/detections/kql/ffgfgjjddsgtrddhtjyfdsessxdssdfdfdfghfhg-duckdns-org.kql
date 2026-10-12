@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "ffgfgjjddsgtrddhtjyfdsessxdssdfdfdfghfhg.duckdns.org" or tostring(AdditionalFields) has "ffgfgjjddsgtrddhtjyfdsessxdssdfdfdfghfhg.duckdns.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

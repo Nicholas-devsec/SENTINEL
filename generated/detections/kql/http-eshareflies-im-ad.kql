@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "http://eshareflies.im/ad/" or RemoteIP == "http://eshareflies.im/ad/"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

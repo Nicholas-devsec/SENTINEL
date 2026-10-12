@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "zkevm-rpc.com" or tostring(AdditionalFields) has "zkevm-rpc.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

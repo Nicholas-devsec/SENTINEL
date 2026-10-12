@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "bkscndcloud.beer" or tostring(AdditionalFields) has "bkscndcloud.beer"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

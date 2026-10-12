@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "en-account.info" or RemoteIP == "en-account.info"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

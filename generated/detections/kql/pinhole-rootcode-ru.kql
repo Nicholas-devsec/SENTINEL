@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "pinhole.rootcode.ru" or RemoteIP == "pinhole.rootcode.ru"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

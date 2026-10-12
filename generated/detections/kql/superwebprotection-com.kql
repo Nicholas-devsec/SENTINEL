@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "superwebprotection.com" or tostring(AdditionalFields) has "superwebprotection.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

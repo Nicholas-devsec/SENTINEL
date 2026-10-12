@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "main.findwindowsdrive" or tostring(AdditionalFields) has "main.findwindowsdrive"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

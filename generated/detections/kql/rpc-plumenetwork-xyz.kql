@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.plumenetwork.xyz" or tostring(AdditionalFields) has "rpc.plumenetwork.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

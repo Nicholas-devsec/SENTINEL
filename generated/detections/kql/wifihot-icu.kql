@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "wifihot.icu" or tostring(AdditionalFields) has "wifihot.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

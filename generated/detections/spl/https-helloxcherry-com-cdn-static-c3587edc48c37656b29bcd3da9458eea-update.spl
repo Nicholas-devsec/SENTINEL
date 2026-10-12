@@ -1,2 +1,0 @@
-index=* sourcetype IN ("proxy", "bluecoat", "squid") url="https://helloxcherry.com/cdn/static/c3587edc48c37656b29bcd3da9458eea/update*"
-| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, url

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mainnet.storyrpc.io" or tostring(AdditionalFields) has "mainnet.storyrpc.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

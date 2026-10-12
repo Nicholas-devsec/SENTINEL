@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://bentleyvazquezpvey.github.io/.github/Arctic-Wolf"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

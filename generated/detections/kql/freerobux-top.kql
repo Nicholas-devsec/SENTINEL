@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "freerobux.top" or tostring(AdditionalFields) has "freerobux.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

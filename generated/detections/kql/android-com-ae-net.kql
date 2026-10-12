@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "android.com-ae.net" or RemoteIP == "android.com-ae.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://merabs.pro/62706817.exe"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "breaksd.wifihot.icu" or tostring(AdditionalFields) has "breaksd.wifihot.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

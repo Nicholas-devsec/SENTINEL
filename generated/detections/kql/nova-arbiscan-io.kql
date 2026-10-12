@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "nova.arbiscan.io" or tostring(AdditionalFields) has "nova.arbiscan.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

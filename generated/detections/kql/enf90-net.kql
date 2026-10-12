@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "enf90.net" or tostring(AdditionalFields) has "enf90.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

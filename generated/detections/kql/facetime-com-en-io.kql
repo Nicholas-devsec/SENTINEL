@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "facetime.com-en.io" or RemoteIP == "facetime.com-en.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "1xjet.net" or tostring(AdditionalFields) has "1xjet.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "jds4p0yc.betbacklink.com" or tostring(AdditionalFields) has "jds4p0yc.betbacklink.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

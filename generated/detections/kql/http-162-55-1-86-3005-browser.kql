@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://162.55.1.86:3005/browser"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

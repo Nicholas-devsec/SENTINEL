@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "filegrowthlabs.com" or RemoteIP == "filegrowthlabs.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

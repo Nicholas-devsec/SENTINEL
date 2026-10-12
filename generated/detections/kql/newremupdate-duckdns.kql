@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "newremupdate.duckdns" or tostring(AdditionalFields) has "newremupdate.duckdns"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://tommy-y.lol/o"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

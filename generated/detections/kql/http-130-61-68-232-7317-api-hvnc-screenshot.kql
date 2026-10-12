@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://130.61.68.232:7317/api/hvnc/screenshot"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "noir-5.vortex-sys.in.net" or tostring(AdditionalFields) has "noir-5.vortex-sys.in.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

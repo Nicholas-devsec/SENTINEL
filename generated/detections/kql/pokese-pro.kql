@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pokese.pro" or tostring(AdditionalFields) has "pokese.pro"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

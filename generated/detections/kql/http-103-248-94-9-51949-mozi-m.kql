@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://103.248.94.9:51949/Mozi.m"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

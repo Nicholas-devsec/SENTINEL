@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "snowtrace.io" or tostring(AdditionalFields) has "snowtrace.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

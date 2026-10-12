@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.api.lisk.com" or tostring(AdditionalFields) has "rpc.api.lisk.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

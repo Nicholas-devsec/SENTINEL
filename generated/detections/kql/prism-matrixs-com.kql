@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "prism-matrixs.com" or tostring(AdditionalFields) has "prism-matrixs.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

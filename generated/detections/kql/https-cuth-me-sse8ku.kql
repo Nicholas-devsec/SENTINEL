@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://cuth.me/sse8kU"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

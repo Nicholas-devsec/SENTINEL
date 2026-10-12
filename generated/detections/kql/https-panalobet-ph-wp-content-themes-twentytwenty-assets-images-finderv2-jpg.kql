@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://panalobet.ph/wp-content/themes/twentytwenty/assets/images/finderv2.jpg"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

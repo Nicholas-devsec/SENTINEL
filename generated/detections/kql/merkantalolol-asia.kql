@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "merkantalolol.asia" or tostring(AdditionalFields) has "merkantalolol.asia"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

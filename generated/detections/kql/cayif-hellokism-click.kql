@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "cayif.hellokism.click" or tostring(AdditionalFields) has "cayif.hellokism.click"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

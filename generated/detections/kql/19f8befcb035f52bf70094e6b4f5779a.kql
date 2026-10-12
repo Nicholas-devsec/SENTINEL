@@ -1,3 +1,0 @@
-DeviceFileEvents
-| where MD5 == "19f8befcb035f52bf70094e6b4f5779a"
-| project Timestamp, DeviceName, FileName, FolderPath, MD5, InitiatingProcessFileName

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "alvin.bet" or tostring(AdditionalFields) has "alvin.bet"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

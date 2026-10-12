@@ -1,2 +1,0 @@
-index=main (dest_host="applesecurity.pro")
-| stats count by host, dest_host

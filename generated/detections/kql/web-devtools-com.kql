@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "web-devtools.com" or tostring(AdditionalFields) has "web-devtools.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

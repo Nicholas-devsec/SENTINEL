@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.linea.build" or tostring(AdditionalFields) has "rpc.linea.build"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

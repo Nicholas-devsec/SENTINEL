@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "agf.nl" or tostring(AdditionalFields) has "agf.nl"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

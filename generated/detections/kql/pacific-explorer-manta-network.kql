@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pacific-explorer.manta.network" or tostring(AdditionalFields) has "pacific-explorer.manta.network"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

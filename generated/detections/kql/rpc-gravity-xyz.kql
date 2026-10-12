@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.gravity.xyz" or tostring(AdditionalFields) has "rpc.gravity.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

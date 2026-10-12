@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "dsglobal.nl" or tostring(AdditionalFields) has "dsglobal.nl"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

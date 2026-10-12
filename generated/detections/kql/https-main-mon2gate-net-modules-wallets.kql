@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "https://main.mon2gate.net/modules/wallets" or RemoteIP == "https://main.mon2gate.net/modules/wallets"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

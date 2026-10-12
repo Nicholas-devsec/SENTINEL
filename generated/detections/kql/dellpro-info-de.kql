@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "dellpro-info.de" or tostring(AdditionalFields) has "dellpro-info.de"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

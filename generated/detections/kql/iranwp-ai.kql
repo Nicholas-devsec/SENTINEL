@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "iranwp.ai" or tostring(AdditionalFields) has "iranwp.ai"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

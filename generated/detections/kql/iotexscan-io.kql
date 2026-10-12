@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "iotexscan.io" or tostring(AdditionalFields) has "iotexscan.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

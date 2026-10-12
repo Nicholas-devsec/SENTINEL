@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pzczhnl.yek.autos" or tostring(AdditionalFields) has "pzczhnl.yek.autos"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

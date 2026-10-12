@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "etherscan.io" or tostring(AdditionalFields) has "etherscan.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

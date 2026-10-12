@@ -1,2 +1,0 @@
-index=main (url="http://info-payeasy.com/assets/index-DdmV8luQ.js")
-| stats count by host, url

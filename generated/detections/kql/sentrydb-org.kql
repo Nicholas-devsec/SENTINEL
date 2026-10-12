@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "sentrydb.org" or tostring(AdditionalFields) has "sentrydb.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "devicesecurity.pro" or RemoteIP == "devicesecurity.pro"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

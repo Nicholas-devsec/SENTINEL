@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "amala-sa.com" or tostring(AdditionalFields) has "amala-sa.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "uniscan.xyz" or tostring(AdditionalFields) has "uniscan.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

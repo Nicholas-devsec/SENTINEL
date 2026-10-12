@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "gjs.whitepppplatform.icu" or tostring(AdditionalFields) has "gjs.whitepppplatform.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

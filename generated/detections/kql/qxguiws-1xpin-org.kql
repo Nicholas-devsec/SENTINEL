@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "qxguiws.1xpin.org" or tostring(AdditionalFields) has "qxguiws.1xpin.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

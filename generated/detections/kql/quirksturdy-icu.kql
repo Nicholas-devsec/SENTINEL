@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "quirksturdy.icu" or tostring(AdditionalFields) has "quirksturdy.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

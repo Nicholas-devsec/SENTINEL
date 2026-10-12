@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pop.topsm188.top" or tostring(AdditionalFields) has "pop.topsm188.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

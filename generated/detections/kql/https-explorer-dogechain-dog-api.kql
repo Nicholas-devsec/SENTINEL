@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://explorer.dogechain.dog/api"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

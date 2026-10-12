@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "t10.jangkarsm188.top" or tostring(AdditionalFields) has "t10.jangkarsm188.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

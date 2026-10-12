@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "id-apple.com-en.io" or RemoteIP == "id-apple.com-en.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

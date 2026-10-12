@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "http://x0.at/qOfN.msi" or RemoteIP == "http://x0.at/qOfN.msi"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

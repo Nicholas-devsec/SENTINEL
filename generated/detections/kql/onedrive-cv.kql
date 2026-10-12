@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "onedrive.cv" or tostring(AdditionalFields) has "onedrive.cv"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mebanebols.trade" or tostring(AdditionalFields) has "mebanebols.trade"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

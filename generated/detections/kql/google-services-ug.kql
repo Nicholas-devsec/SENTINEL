@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "google.services.ug" or tostring(AdditionalFields) has "google.services.ug"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "admiration-noble.sbs" or tostring(AdditionalFields) has "admiration-noble.sbs"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

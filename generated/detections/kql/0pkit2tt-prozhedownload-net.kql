@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "0pkit2tt.prozhedownload.net" or tostring(AdditionalFields) has "0pkit2tt.prozhedownload.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

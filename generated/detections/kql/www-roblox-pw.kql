@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "www-roblox.pw" or tostring(AdditionalFields) has "www-roblox.pw"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

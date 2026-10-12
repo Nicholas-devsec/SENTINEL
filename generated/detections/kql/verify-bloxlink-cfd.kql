@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "verify-bloxlink.cfd" or tostring(AdditionalFields) has "verify-bloxlink.cfd"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

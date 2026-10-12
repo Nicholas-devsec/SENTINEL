@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "looksta.icu" or tostring(AdditionalFields) has "looksta.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

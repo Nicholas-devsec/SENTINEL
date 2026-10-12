@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "authorization-id-code.info" or tostring(AdditionalFields) has "authorization-id-code.info"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

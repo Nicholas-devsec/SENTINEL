@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "bibliorock.lol" or tostring(AdditionalFields) has "bibliorock.lol"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

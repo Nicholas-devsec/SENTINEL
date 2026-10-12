@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "sscibrc.pinprobet.com" or tostring(AdditionalFields) has "sscibrc.pinprobet.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

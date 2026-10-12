@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "swell-mainnet.alt.technology" or tostring(AdditionalFields) has "swell-mainnet.alt.technology"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

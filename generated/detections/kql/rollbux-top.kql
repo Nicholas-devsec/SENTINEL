@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rollbux.top" or tostring(AdditionalFields) has "rollbux.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

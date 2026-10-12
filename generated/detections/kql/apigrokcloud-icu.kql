@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "apigrokcloud.icu" or tostring(AdditionalFields) has "apigrokcloud.icu"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

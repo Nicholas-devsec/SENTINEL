@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "encryption-plug-in-signal.com-ae.net" or RemoteIP == "encryption-plug-in-signal.com-ae.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

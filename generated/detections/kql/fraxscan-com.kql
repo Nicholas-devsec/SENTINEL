@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "fraxscan.com" or tostring(AdditionalFields) has "fraxscan.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

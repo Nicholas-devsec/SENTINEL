@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "arena.apexfdn.xyz" or tostring(AdditionalFields) has "arena.apexfdn.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "hazelcompass.top" or tostring(AdditionalFields) has "hazelcompass.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

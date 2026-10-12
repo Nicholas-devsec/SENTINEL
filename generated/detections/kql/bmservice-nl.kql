@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "bmservice.nl" or tostring(AdditionalFields) has "bmservice.nl"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

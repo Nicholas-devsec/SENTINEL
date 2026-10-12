@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "squvbf6p.btyek.one" or tostring(AdditionalFields) has "squvbf6p.btyek.one"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

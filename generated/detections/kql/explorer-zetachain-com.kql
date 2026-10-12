@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "explorer.zetachain.com" or tostring(AdditionalFields) has "explorer.zetachain.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

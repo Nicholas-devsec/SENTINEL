@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "relay.dltsolutions.top" or tostring(AdditionalFields) has "relay.dltsolutions.top"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

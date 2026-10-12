@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "photo-download-drive.info" or tostring(AdditionalFields) has "photo-download-drive.info"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

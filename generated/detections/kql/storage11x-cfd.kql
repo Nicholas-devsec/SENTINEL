@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "storage11x.cfd" or tostring(AdditionalFields) has "storage11x.cfd"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

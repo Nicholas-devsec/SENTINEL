@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "explorer.metis.io" or tostring(AdditionalFields) has "explorer.metis.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

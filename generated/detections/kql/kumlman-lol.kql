@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "kumlman.lol" or tostring(AdditionalFields) has "kumlman.lol"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

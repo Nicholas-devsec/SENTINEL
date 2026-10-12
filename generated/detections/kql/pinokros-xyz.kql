@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "pinokros.xyz" or tostring(AdditionalFields) has "pinokros.xyz"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

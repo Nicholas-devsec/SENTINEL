@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "56.rpc.thirdweb.com" or tostring(AdditionalFields) has "56.rpc.thirdweb.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

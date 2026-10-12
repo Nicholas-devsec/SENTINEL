@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteIP == "68.64.178.130"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteIP, RemotePort

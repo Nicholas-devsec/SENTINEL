@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "finderv2.jpg" or tostring(AdditionalFields) has "finderv2.jpg"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

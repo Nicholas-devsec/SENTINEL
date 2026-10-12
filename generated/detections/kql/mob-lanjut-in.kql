@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mob.lanjut.in" or tostring(AdditionalFields) has "mob.lanjut.in"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

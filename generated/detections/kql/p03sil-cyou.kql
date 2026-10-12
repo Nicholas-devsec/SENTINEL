@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "p03sil.cyou" or tostring(AdditionalFields) has "p03sil.cyou"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

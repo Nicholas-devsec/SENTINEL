@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://bronzehorizon.top/role/route-state"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

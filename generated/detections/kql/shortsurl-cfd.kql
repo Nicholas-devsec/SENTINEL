@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "shortsurl.cfd" or tostring(AdditionalFields) has "shortsurl.cfd"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

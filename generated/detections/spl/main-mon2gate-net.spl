@@ -1,2 +1,0 @@
-index=main (dest_host="main.mon2gate.net")
-| stats count by host, dest_host

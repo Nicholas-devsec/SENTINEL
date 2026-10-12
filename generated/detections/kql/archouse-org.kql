@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "archouse.org" or tostring(AdditionalFields) has "archouse.org"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

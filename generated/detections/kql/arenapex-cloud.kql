@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "arenapex.cloud" or tostring(AdditionalFields) has "arenapex.cloud"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

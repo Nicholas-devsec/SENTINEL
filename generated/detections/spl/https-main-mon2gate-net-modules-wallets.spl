@@ -1,2 +1,0 @@
-index=main (url="https://main.mon2gate.net/modules/wallets")
-| stats count by host, url

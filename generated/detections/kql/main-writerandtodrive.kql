@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "main.writerandtodrive" or tostring(AdditionalFields) has "main.writerandtodrive"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

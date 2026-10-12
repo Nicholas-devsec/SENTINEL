@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "polygon-rpc.com" or tostring(AdditionalFields) has "polygon-rpc.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

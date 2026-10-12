@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "sctawfw.1xgame.games" or tostring(AdditionalFields) has "sctawfw.1xgame.games"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

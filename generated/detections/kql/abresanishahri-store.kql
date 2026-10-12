@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "abresanishahri.store" or tostring(AdditionalFields) has "abresanishahri.store"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

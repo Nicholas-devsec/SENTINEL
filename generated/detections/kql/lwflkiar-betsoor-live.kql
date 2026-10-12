@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "lwflkiar.betsoor.live" or tostring(AdditionalFields) has "lwflkiar.betsoor.live"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

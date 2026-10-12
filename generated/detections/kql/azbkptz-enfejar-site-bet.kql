@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "azbkptz.enfejar-site.bet" or tostring(AdditionalFields) has "azbkptz.enfejar-site.bet"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,2 +1,0 @@
-index=* sourcetype IN ("proxy", "bluecoat", "squid") url="http://107.172.135.60/96/ibredgoodforbestthingscomingbackform.hta*"
-| stats count min(_time) as first_seen max(_time) as last_seen by src_ip, url

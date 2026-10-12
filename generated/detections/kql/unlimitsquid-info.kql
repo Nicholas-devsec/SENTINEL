@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "unlimitsquid.info" or tostring(AdditionalFields) has "unlimitsquid.info"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

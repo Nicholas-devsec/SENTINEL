@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://explorer.gravity.xyz/api"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

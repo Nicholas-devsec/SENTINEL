@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "gbbzsnq.1xgame.cash" or tostring(AdditionalFields) has "gbbzsnq.1xgame.cash"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

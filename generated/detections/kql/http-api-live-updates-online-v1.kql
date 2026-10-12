@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "http://api.live-updates.online/v1"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

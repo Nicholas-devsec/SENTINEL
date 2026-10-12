@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "rpc.soniclabs.com" or tostring(AdditionalFields) has "rpc.soniclabs.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl == "telegram.com-en.io" or RemoteIP == "telegram.com-en.io"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

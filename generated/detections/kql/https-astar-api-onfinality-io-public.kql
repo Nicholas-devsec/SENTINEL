@@ -1,3 +1,0 @@
-DeviceNetworkEvents
-| where RemoteUrl startswith "https://astar.api.onfinality.io/public"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl, RemoteIP

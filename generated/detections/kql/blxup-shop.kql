@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "blxup.shop" or tostring(AdditionalFields) has "blxup.shop"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

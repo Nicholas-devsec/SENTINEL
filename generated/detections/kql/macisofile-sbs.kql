@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "macisofile.sbs" or tostring(AdditionalFields) has "macisofile.sbs"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

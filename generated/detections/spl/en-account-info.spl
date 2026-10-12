@@ -1,2 +1,0 @@
-index=main (dest_host="en-account.info")
-| stats count by host, dest_host

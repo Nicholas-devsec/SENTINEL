@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "checkmarx.cx" or tostring(AdditionalFields) has "checkmarx.cx"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

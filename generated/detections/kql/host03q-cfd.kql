@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "host03q.cfd" or tostring(AdditionalFields) has "host03q.cfd"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "kwsgmru.btyek.click" or tostring(AdditionalFields) has "kwsgmru.btyek.click"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

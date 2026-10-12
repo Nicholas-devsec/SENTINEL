@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "129.202.178.68.host.secureserver.net" or tostring(AdditionalFields) has "129.202.178.68.host.secureserver.net"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

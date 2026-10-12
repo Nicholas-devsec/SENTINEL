@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "underwearbrick.space" or tostring(AdditionalFields) has "underwearbrick.space"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "zkevm.polygonscan.com" or tostring(AdditionalFields) has "zkevm.polygonscan.com"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

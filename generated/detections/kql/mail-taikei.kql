@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "mail.taikei" or tostring(AdditionalFields) has "mail.taikei"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

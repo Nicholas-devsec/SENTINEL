@@ -1,3 +1,0 @@
-union DeviceNetworkEvents, DeviceEvents
-| where RemoteUrl has "shortsurl.bio" or tostring(AdditionalFields) has "shortsurl.bio"
-| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
