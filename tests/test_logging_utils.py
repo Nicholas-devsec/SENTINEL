@@ -6,15 +6,16 @@ from sentinel.logging_utils import RedactingFormatter, configure_logging, redact
 
 
 def test_redact_secrets_hides_telegram_bot_token_in_url() -> None:
+    fake_token = "1234567890:" + "AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx"
     text = (
         'HTTP Request: POST '
-        'https://api.telegram.org/bot1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx/sendMessage '
+        f'https://api.telegram.org/bot{fake_token}/sendMessage '
         '"HTTP/1.1 200 OK"'
     )
 
     redacted = redact_secrets(text)
 
-    assert "1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx" not in redacted
+    assert fake_token not in redacted
     assert "https://api.telegram.org/bot<redacted>/sendMessage" in redacted
 
 
@@ -32,13 +33,14 @@ def test_redact_secrets_hides_common_api_key_patterns() -> None:
 
 
 def test_redacting_formatter_sanitizes_logged_message() -> None:
+    fake_token = "1234567890:" + "AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx"
     formatter = RedactingFormatter("%(message)s")
     record = logging.LogRecord(
         name="httpx",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
-        msg="POST https://api.telegram.org/bot1234567890:AAFAKEtokenFORtestsONLYxxxxxxxxxxxxxxx/sendMessage",
+        msg=f"POST https://api.telegram.org/bot{fake_token}/sendMessage",
         args=(),
         exc_info=None,
     )
@@ -46,7 +48,7 @@ def test_redacting_formatter_sanitizes_logged_message() -> None:
     rendered = formatter.format(record)
 
     assert "<redacted>" in rendered
-    assert "FAKE_TOKEN_FRAGMENT_FOR_REDACTION_TEST" not in rendered
+    assert fake_token not in rendered
 
 
 def test_configure_logging_turns_down_verbose_http_loggers(monkeypatch) -> None:

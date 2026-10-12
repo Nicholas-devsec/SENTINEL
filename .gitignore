@@ -2,9 +2,34 @@
 .env
 .env.*
 !.env.example
+*.env
+*.env.*
+!.env.example
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+service-account*.json
+service_account*.json
+*.secret
+*.secrets
+*.token
+*.credentials
 *.pem
 *.key
 *.crt
+*.cer
+*.der
+*.p7b
+*.p7c
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
 
 # Python environments and caches
 .venv/
@@ -43,12 +68,24 @@ pip-wheel-metadata/
 .agents/
 .claude/
 .karpathy_runs/
+.idea/
+.vscode/
+.history/
+.direnv/
+.envrc
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
 
 # Logs and runtime files
 *.log
 *.local.log
 *.out
 *.pid
+*.pid.lock
+*.sock
+*.retry
 
 # Local-only notes and deployment docs
 *.local.md
@@ -60,6 +97,10 @@ pip-wheel-metadata/
 *.sql
 *.db.*
 *.bak
+*.dump
+*.dmp
+*.backup
+*.orig
 data/*.db
 data/*.db.*
 data/*.sqlite
@@ -67,6 +108,27 @@ data/*.sqlite3
 data/*.sql
 data/*.bak
 data/attack-stix-data/
+
+# Local reports, captures, and temporary exports
+reports/local/
+artifacts/local/
+captures/
+*.har
+*.pcap
+*.pcapng
+*.csv.local
+*.json.local
+config.local.*
+config.*.local
+
+# Local deployment and cloud tooling
+.aws/
+.gcloud/
+.terraform/
+*.tfstate
+*.tfstate.*
+.serverless/
+.chalice/
 
 # OS/editor noise
 .DS_Store
