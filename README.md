@@ -4,22 +4,9 @@ SENTINEL is a threat-intelligence pipeline for atomic IOC feeds and security res
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A[IOC APIs] --> S[Source adapters]
-    B[Curated RSS] --> W[Article fetch and IOC extraction]
-    C[Bounded discovery] --> W
-    S --> V[Normalize and validate]
-    W --> V
-    V --> D[(IOC, sighting, article store)]
-    D --> E[VT, Shodan, AbuseIPDB]
-    E --> R[Risk score and ATT&CK mapping]
-    R --> G[Sigma, KQL, SPL, YARA]
-    R --> T[Telegram alerts and digest]
-    T --> F[Analyst verdicts]
-    F --> K[Replay-evaluated source trust]
-    K --> S
-```
+![SENTINEL threat-intelligence pipeline architecture](pictures/sentinel-drawio-diagram.png)
+
+Editable source: [`sentinel-architecture.drawio`](sentinel-architecture.drawio)
 
 Production uses two execution paths:
 
