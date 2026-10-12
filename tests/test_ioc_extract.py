@@ -205,6 +205,43 @@ def test_defanged_url_does_not_emit_duplicate_root_domain() -> None:
     assert ("domain", "github.com") not in extracted
 
 
+def test_ioc_section_keeps_c2s_url_subsection() -> None:
+    text = (
+        "Indicators of Compromise (IoCs)\n"
+        "SHA256\n" + "a" * 64 + "\n"
+        "C2s\n"
+        "URLs\n"
+        "hxxp[://]azurhay[.]shop:8539\n"
+        "hxxp[://]carogra[.]biz:4219\n"
+    )
+    section = find_ioc_section(text)
+    assert section is not None
+    assert "azurhay" in section.text
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+    assert ("sha256", "a" * 64) in extracted
+    assert ("url", "http://azurhay.shop:8539") in extracted
+    assert ("url", "http://carogra.biz:4219") in extracted
+
+
+def test_ioc_section_keeps_malware_family_groups_with_metadata() -> None:
+    text = (
+        "Indicators of Compromise (IoCs)\n"
+        "AuraStealer\nObserved July 2026\nHashes\n" + "a" * 64 + "\n"
+        "ACRStealer/Amatera\nObserved July 2026\nHashes\nPacked\n" + "b" * 64 + "\n"
+        "Remus Stealer\nObserved August 2026\nHashes\n" + "c" * 64 + "\n"
+        "C2s\nURLs\nhxxp[://]azurhay[.]shop:8539\n"
+        "Conclusion\nDefensive guidance follows."
+    )
+    section = find_ioc_section(text)
+    assert section is not None
+    assert "Remus Stealer" in section.text
+    assert "azurhay" in section.text
+    assert "Defensive guidance" not in section.text
+    extracted = {(item.type, item.value) for item in extract_iocs_from_section(section.text)}
+    assert {("sha256", "a" * 64), ("sha256", "b" * 64), ("sha256", "c" * 64)} <= extracted
+    assert ("url", "http://azurhay.shop:8539") in extracted
+
+
 def test_malformed_ipv6_url_token_does_not_abort_extraction() -> None:
     text = "Ignore hxxps://[not-an-ipv6]/stage but keep C2 45.155.204.10"
     extracted = {(item.type, item.value) for item in extract_iocs_from_text(text)}

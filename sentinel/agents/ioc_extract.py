@@ -564,7 +564,7 @@ def _is_table_of_contents_heading(lines: list[str], index: int) -> bool:
 INDICATOR_TYPE_LABELS = {
     "type", "value", "indicator", "indicators", "description", "notes",
     "domain", "domains", "url", "urls", "ip", "ips", "ip address", "ip addresses",
-    "ipv4", "ipv6", "c2", "c2 ip", "c2 server", "c2 servers", "c2 domain",
+    "ipv4", "ipv6", "c2", "c2s", "c2 ip", "c2 server", "c2 servers", "c2 domain",
     "hash", "hashes", "file hash", "file hashes", "md5", "sha1", "sha256",
     "sha-1", "sha-256", "filename", "filenames", "file name", "file names",
     "email", "emails", "cve",
@@ -770,7 +770,13 @@ def find_ioc_section(
             if _is_non_ioc_section_heading(candidate):
                 break
             if is_next_topic_heading(candidate, indicator_count, next_nonempty):
-                break
+                # IOC appendices often group indicators by malware family, with
+                # an observation date and type label between the family heading
+                # and its first value. Keep that group when a nearby value proves
+                # this is a subsection rather than the next article topic.
+                nearby_lines = lines[offset : offset + 5]
+                if not any(_looks_like_indicator_line(item) for item in nearby_lines):
+                    break
             body.append(candidate)
             if _looks_like_indicator_line(candidate):
                 indicator_count += 1

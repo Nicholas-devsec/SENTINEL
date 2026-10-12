@@ -69,6 +69,32 @@ async def test_reversinglabs_feed_filters_threat_research_categories() -> None:
 
 
 @pytest.mark.asyncio
+async def test_writeup_ioc_cap_preserves_each_available_type() -> None:
+    settings = get_settings().model_copy(deep=True)
+    settings.sources.writeup_search.max_iocs_per_article_ioc_section = 5
+    agent = ScraperAgent(settings=settings)
+    try:
+        writeup = RawWriteup(
+            source="reversinglabs_threat_research",
+            source_trust=0.67,
+            url="https://www.reversinglabs.com/blog/campaign",
+            title="Infostealer campaign",
+            published_at=datetime.now(UTC),
+            content_text=(
+                "Indicators of Compromise (IoCs)\nHashes\n"
+                + "\n".join(f"{index:064x}" for index in range(1, 8))
+                + "\nC2s\nURLs\nhxxp[://]azurhay[.]shop:8539\n"
+                + "Domains\ncarogra[.]biz\nConclusion\nDone."
+            ),
+        )
+        iocs = agent._extract_iocs_from_writeup(writeup)
+        assert len(iocs) == 5
+        assert {ioc.type for ioc in iocs} == {"sha256", "url", "domain"}
+    finally:
+        await agent.aclose()
+
+
+@pytest.mark.asyncio
 async def test_sans_diary_feed_and_atomic_extraction() -> None:
     settings = get_settings()
     feed = next(feed for feed in settings.sources.feeds if feed.name == "sans_isc_diary")

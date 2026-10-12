@@ -1331,8 +1331,20 @@ class ScraperAgent(BaseAgent):
                 extracted = extract_iocs_from_text(full_text, exclude_hostnames=exclude)
                 extraction_mode = "fallback"
                 max_items = int(self.settings.sources.writeup_search.max_iocs_per_article_fallback)
-        if max_items > 0:
-            extracted = extracted[:max_items]
+        if max_items > 0 and len(extracted) > max_items:
+            # Preserve type diversity when a large IOC appendix hits the cap.
+            # Otherwise an early hash block can consume every slot and hide
+            # later network indicators from enrichment and alert previews.
+            representatives: list[ExtractedIOC] = []
+            represented_types: set[str] = set()
+            for candidate in extracted:
+                if candidate.type in represented_types:
+                    continue
+                representatives.append(candidate)
+                represented_types.add(candidate.type)
+            selected_ids = {id(candidate) for candidate in representatives}
+            remaining = [candidate for candidate in extracted if id(candidate) not in selected_ids]
+            extracted = (representatives + remaining)[:max_items]
         records: list[RawIOC] = []
         for candidate in extracted:
             records.append(
