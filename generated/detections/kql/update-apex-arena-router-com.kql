@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "update.apex-arena-router.com" or tostring(AdditionalFields) has "update.apex-arena-router.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

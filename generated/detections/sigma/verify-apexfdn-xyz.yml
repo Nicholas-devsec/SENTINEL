@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator verify.apexfdn.xyz
+id: verify-apexfdn-xyz
+status: experimental
+description: DNS resolution of known-bad domain (source: elastic_security_labs)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "verify.apexfdn.xyz"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

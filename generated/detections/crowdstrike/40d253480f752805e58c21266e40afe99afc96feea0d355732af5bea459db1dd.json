@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for 40d253480f752805e58c21266e40afe99afc96feea0d355732af5bea459db1dd",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "sha256",
+  "value": "40d253480f752805e58c21266e40afe99afc96feea0d355732af5bea459db1dd"
+}

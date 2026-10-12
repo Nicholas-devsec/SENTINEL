@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator x-wolverine.servebbs.com
+id: x-wolverine-servebbs-com
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:cybersecuritynews.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "x-wolverine.servebbs.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1568.001

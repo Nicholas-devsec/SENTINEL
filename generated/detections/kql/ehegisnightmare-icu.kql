@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "ehegisnightmare.icu" or tostring(AdditionalFields) has "ehegisnightmare.icu"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "cloudmain365duo.top" or tostring(AdditionalFields) has "cloudmain365duo.top"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

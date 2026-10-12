@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "main.router-apex.com" or tostring(AdditionalFields) has "main.router-apex.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

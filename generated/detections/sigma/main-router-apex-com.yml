@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator main.router-apex.com
+id: main-router-apex-com
+status: experimental
+description: DNS resolution of known-bad domain (source: elastic_security_labs)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "main.router-apex.com"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

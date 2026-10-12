@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "fdn4apex.com" or tostring(AdditionalFields) has "fdn4apex.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl

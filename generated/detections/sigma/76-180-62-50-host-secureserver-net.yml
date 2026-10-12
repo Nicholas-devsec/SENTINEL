@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator 76.180.62.50.host.secureserver.net
+id: 76-180-62-50-host-secureserver-net
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:cybersecuritynews.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "76.180.62.50.host.secureserver.net"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

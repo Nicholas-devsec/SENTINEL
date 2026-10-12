@@ -1,0 +1,12 @@
+{
+  "action": "detect",
+  "description": "SENTINEL generated IOC for debe871710268e7bb770b72c6772f2e0b8bd40a22b2eabf4b6556eaba2d71057",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "severity": "informational",
+  "type": "sha256",
+  "value": "debe871710268e7bb770b72c6772f2e0b8bd40a22b2eabf4b6556eaba2d71057"
+}

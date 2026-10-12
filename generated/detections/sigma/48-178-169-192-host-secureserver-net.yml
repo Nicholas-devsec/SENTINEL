@@ -1,0 +1,18 @@
+title: SENTINEL domain indicator 48.178.169.192.host.secureserver.net
+id: 48-178-169-192-host-secureserver-net
+status: experimental
+description: DNS resolution of known-bad domain (source: discovery:cybersecuritynews.com)
+logsource:
+  category: dns_query
+detection:
+  selection:
+    QueryName|endswith: "48.178.169.192.host.secureserver.net"
+  condition: selection
+fields:
+  - Image
+  - QueryName
+level: informational
+tags:
+  - attack.t1036.004
+  - attack.t1593.002
+  - attack.t1557.001

@@ -1,0 +1,3 @@
+union DeviceNetworkEvents, DeviceEvents
+| where RemoteUrl has "gexwalltool.com" or tostring(AdditionalFields) has "gexwalltool.com"
+| project Timestamp, DeviceName, InitiatingProcessFileName, RemoteUrl
