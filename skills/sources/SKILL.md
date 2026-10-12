@@ -37,7 +37,6 @@ updated_by: human
 - crowdstrike_blog: 0.67
 - sentinelone_blog: 0.66
 - rapid7_blog: 0.66
-- gbhackers_blog: 0.64
 
 ## Rate Limits
 - Respect provider-specific API limits and use per-source throttling.
