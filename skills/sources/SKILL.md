@@ -24,7 +24,7 @@ updated_by: human
 - Generic RSS security news feeds
 
 ## Trust Scores
-- threatfox: 0.94
+- threatfox: 0.89
 - urlhaus: 0.91
 - tweetfeed: 0.62
 - openphish: 0.82
