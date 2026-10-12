@@ -64,7 +64,7 @@ This stays blocked until there is enough real analyst verdict coverage.
 ### Detection Loop
 Measures the ratio of generated detection rules that were actually pushed.
 
-This is intentionally secondary in the MVP because CrowdStrike is disabled.
+This is intentionally secondary in the MVP because generated detections are exported for analyst review rather than deployed automatically.
 
 ## Safety Rules
 - One skill file per loop run

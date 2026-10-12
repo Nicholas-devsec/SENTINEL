@@ -531,7 +531,6 @@ async def _persist_generated(generated: list[GeneratedArtifacts]) -> None:
             if row is None:
                 continue
             row.sigma_rule = artifact.sigma_rule
-            row.crowdstrike_pushed = artifact.crowdstrike_response is not None
         await session.commit()
 
 

@@ -468,7 +468,6 @@ async def test_load_real_sample_iocs_uses_discovery_sighting_metadata(
             mitre_techniques=[],
             mitre_tactics=[],
             sigma_rule=None,
-            crowdstrike_pushed=False,
             analyst_verdict=None,
             campaign_id=None,
             vt_ratio=None,

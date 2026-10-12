@@ -176,13 +176,6 @@ class EnrichmentSettings(BaseModel):
     weights: WeightSettings = Field(default_factory=WeightSettings)
 
 
-class CrowdStrikeSettings(BaseModel):
-    enabled: bool = False
-    client_id: str = "${CS_CLIENT_ID}"
-    client_secret: str = "${CS_CLIENT_SECRET}"
-    base_url: str = "https://api.crowdstrike.com"
-
-
 class DeliverySettings(BaseModel):
     telegram_token: str = "${TELEGRAM_BOT_TOKEN}"
     telegram_chat_id: str = "${TELEGRAM_CHAT_ID}"
@@ -263,7 +256,6 @@ class SentinelSettings(BaseModel):
     sources: SourceSettings = Field(default_factory=SourceSettings)
     discovery: DiscoverySettings = Field(default_factory=DiscoverySettings)
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
-    crowdstrike: CrowdStrikeSettings = Field(default_factory=CrowdStrikeSettings)
     delivery: DeliverySettings = Field(default_factory=DeliverySettings)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)

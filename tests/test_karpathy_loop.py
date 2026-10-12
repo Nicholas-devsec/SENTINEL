@@ -62,6 +62,34 @@ class SequencedMetric:
         return self.values.pop(0)
 
 
+@pytest.mark.asyncio
+async def test_detection_metric_uses_analyst_verdicts_for_generated_rules() -> None:
+    class DetectionSession:
+        iocs = [
+            type("IOC", (), {"sigma_rule": "rule-a", "analyst_verdict": "true_positive"})(),
+            type("IOC", (), {"sigma_rule": "rule-b", "analyst_verdict": "true_positive"})(),
+            type("IOC", (), {"sigma_rule": "rule-c", "analyst_verdict": "false_positive"})(),
+            type("IOC", (), {"sigma_rule": None, "analyst_verdict": "true_positive"})(),
+            type("IOC", (), {"sigma_rule": "rule-d", "analyst_verdict": None})(),
+        ]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    loop = DetectionEffectivenessLoop(
+        provider=FakeProvider([]),
+        skill_path=Path("skills/detection/SKILL.md"),
+        budget_minutes=1,
+        settings=build_settings(),
+        session_factory=DetectionSession,
+    )
+
+    assert await loop.measure_metric() == pytest.approx(2 / 3)
+
+
 def build_settings() -> SentinelSettings:
     return SentinelSettings.model_validate(
         {

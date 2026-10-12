@@ -27,9 +27,6 @@ def build_settings() -> SentinelSettings:
                 "model": "gpt-5.4",
                 "base_url": "https://api.openai.com/v1",
             },
-            "crowdstrike": {
-                "enabled": False,
-            },
             "git": {
                 "skills_repo_path": "./skills",
                 "author_name": "SENTINEL Learner",
@@ -80,7 +77,6 @@ class FakeSessionFactory:
 class FakeIOC:
     analyst_verdict: str | None = None
     sigma_rule: str | None = None
-    crowdstrike_pushed: bool = False
 
 
 @pytest.mark.asyncio

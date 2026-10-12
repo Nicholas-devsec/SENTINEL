@@ -219,10 +219,6 @@ sources:
       url: https://www.elastic.co/security-labs/rss/feed.xml
       trust: 0.67
       enabled: true
-    - name: gbhackers_blog
-      url: https://gbhackers.com/feed/
-      trust: 0.64
-      enabled: true
 
 discovery:
   # Additive analyst-style discovery pass. Runs inside the pipeline only when
@@ -311,12 +307,6 @@ enrichment:
     recency: 0.05
     context: 0.30
     corroboration: 0.20
-
-crowdstrike:
-  enabled: false
-  client_id: ${CS_CLIENT_ID}
-  client_secret: ${CS_CLIENT_SECRET}
-  base_url: https://api.crowdstrike.com
 
 delivery:
   telegram_token: ${TELEGRAM_BOT_TOKEN}

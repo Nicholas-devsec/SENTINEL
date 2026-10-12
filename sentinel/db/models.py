@@ -51,7 +51,6 @@ class IOC(Base, TimestampMixin):
     mitre_techniques: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     mitre_tactics: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     sigma_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
-    crowdstrike_pushed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     analyst_verdict: Mapped[str | None] = mapped_column(String(64), nullable=True)
     campaign_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vt_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)

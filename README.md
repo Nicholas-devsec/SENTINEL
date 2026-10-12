@@ -60,6 +60,8 @@ MITRE ATT&CK matching uses a local Enterprise ATT&CK STIX bundle. Detection gene
 | IPv4 | Network-connection rules |
 | Hash | Process/hash telemetry and YARA |
 
+Generated Sigma, KQL, SPL, and YARA files are local review artifacts. SENTINEL does not create or deploy vendor-native detection rules.
+
 ## Telegram output
 
 Atomic alerts include a defanged IOC, source, score components, evidence, ATT&CK mapping, pivots, and feedback buttons.

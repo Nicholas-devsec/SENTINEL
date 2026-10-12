@@ -538,7 +538,7 @@ async def test_run_pipeline_once_orchestrates_agents(monkeypatch) -> None:
             "mitre_tactics": ["command and control"],
         }
     ]
-    generated = [type("Generated", (), {"value": "1.1.1.1", "crowdstrike_response": {"ok": True}, "sigma_rule": "rule"})]
+    generated = [type("Generated", (), {"value": "1.1.1.1", "sigma_rule": "rule"})]
     delivery = type("DeliveryResult", (), {"immediate_alerts": 1, "digest_candidates": 1})()
 
     agents = {
@@ -628,7 +628,7 @@ async def test_run_pipeline_once_reprocesses_corroborated_iocs(monkeypatch) -> N
             "mitre_tactics": [],
         }
     ]
-    generated = [type("Generated", (), {"value": "repeat.example", "crowdstrike_response": None, "sigma_rule": "rule"})]
+    generated = [type("Generated", (), {"value": "repeat.example", "sigma_rule": "rule"})]
     delivery = type("DeliveryResult", (), {"immediate_alerts": 1, "digest_candidates": 1})()
 
     class CorroboratedValidatorAgent(FakeAgent):
@@ -763,8 +763,8 @@ async def test_run_pipeline_once_preserves_ip_and_hash_payload_fields(monkeypatc
         },
     ]
     generated = [
-        type("Generated", (), {"value": "8.8.8.8", "crowdstrike_response": None, "sigma_rule": "rule-ip"}),
-        type("Generated", (), {"value": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "crowdstrike_response": None, "sigma_rule": "rule-hash"}),
+        type("Generated", (), {"value": "8.8.8.8", "sigma_rule": "rule-ip"}),
+        type("Generated", (), {"value": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "sigma_rule": "rule-hash"}),
     ]
     delivery = type("DeliveryResult", (), {"immediate_alerts": 2, "digest_candidates": 2})()
 

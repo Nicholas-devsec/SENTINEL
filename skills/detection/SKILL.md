@@ -8,7 +8,6 @@ updated_by: human
 
 ## Output Formats
 - Sigma YAML for network_connection logsource
-- CrowdStrike IOC API payloads
 - KQL for Microsoft Sentinel
 - SPL savedsearch definitions
 - YARA rules for hash-based indicators
@@ -130,18 +129,6 @@ tags:
 {% for technique in indicator.mitre_techniques %}
   - attack.{{ technique | lower }}
 {% endfor %}
-```
-
-### CrowdStrike
-```jinja
-{
-  "type": "{{ indicator.crowdstrike_type }}",
-  "value": "{{ indicator.crowdstrike_value }}",
-  "action": "detect",
-  "severity": "{{ indicator.severity }}",
-  "platforms": ["windows", "mac", "linux"],
-  "description": "SENTINEL generated IOC for {{ indicator.value }}"
-}
 ```
 
 ### kql_ip

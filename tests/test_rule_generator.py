@@ -1,57 +1,31 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
-from git import Repo
-
 from sentinel.agents.rule_generator import RuleGeneratorAgent
 from sentinel.config import SentinelSettings
 
 
-class FakeCrowdStrikeClient:
-    def __init__(self) -> None:
-        self.payloads: list[dict] = []
-
-    async def push_ioc(self, payload: dict) -> dict:
-        self.payloads.append(payload)
-        return {"resources": [{"id": payload["value"]}]}
-
-
 @pytest.fixture
 def temp_repo(tmp_path: Path) -> Path:
-    repo_path = tmp_path / "repo"
-    repo_path.mkdir()
-    repo = Repo.init(repo_path)
-    (repo_path / "README.md").write_text("test repo\n", encoding="utf-8")
-    repo.index.add(["README.md"])
-    repo.index.commit("init")
-    return repo_path
+    return tmp_path
 
 
 def build_settings() -> SentinelSettings:
     return SentinelSettings.model_validate(
         {
             "thresholds": {"rule_score": 50, "alert_score": 70, "karpathy_experiments": 25, "karpathy_budget_mins": 30},
-            "crowdstrike": {
-                "client_id": "client",
-                "client_secret": "secret",
-                "base_url": "https://api.crowdstrike.test",
-            },
             "db": {"url": "sqlite+aiosqlite:///:memory:", "redis_url": "redis://localhost:6379/0"},
         }
     )
 
 
 @pytest.mark.asyncio
-async def test_rule_generator_renders_artifacts_pushes_crowdstrike_and_commits(temp_repo: Path) -> None:
-    client = FakeCrowdStrikeClient()
+async def test_rule_generator_renders_local_artifacts(temp_repo: Path) -> None:
     agent = RuleGeneratorAgent(
         settings=build_settings(),
-        crowdstrike_client=client,
         output_dir=str(temp_repo / "generated/detections"),
-        repo_path=str(temp_repo),
     )
 
     results = await agent.run(
@@ -78,29 +52,24 @@ async def test_rule_generator_renders_artifacts_pushes_crowdstrike_and_commits(t
     )
 
     assert len(results) == 2
-    assert len(client.payloads) == 2
     sigma_path = temp_repo / "generated/detections/sigma/8-8-8-8.yml"
-    crowdstrike_path = temp_repo / "generated/detections/crowdstrike/8-8-8-8.json"
+    kql_path = temp_repo / "generated/detections/kql/8-8-8-8.kql"
+    spl_path = temp_repo / "generated/detections/spl/8-8-8-8.spl"
     yara_path = temp_repo / "generated/detections/yara/deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef.yar"
     assert sigma_path.exists()
-    assert crowdstrike_path.exists()
+    assert kql_path.exists()
+    assert spl_path.exists()
     assert yara_path.exists()
+    assert not (temp_repo / "generated/detections/crowdstrike").exists()
     assert "attack.t1071" in sigma_path.read_text(encoding="utf-8").lower()
-    payload = json.loads(crowdstrike_path.read_text(encoding="utf-8"))
-    assert payload["value"] == "8.8.8.8"
 
-    repo = Repo(temp_repo)
-    assert repo.head.commit.message.startswith("rules:")
 
 
 @pytest.mark.asyncio
 async def test_rule_generator_filters_below_threshold_and_skips_yara_for_non_hash(temp_repo: Path) -> None:
-    client = FakeCrowdStrikeClient()
     agent = RuleGeneratorAgent(
         settings=build_settings(),
-        crowdstrike_client=client,
         output_dir=str(temp_repo / "generated/detections"),
-        repo_path=str(temp_repo),
     )
 
     results = await agent.run(
@@ -128,18 +97,15 @@ async def test_rule_generator_filters_below_threshold_and_skips_yara_for_non_has
 
     assert len(results) == 1
     assert results[0].yara_rule is None
-    assert len(client.payloads) == 1
     assert not (temp_repo / "generated/detections/yara").exists()
+    assert not (temp_repo / "generated/detections/crowdstrike").exists()
 
 
 @pytest.mark.asyncio
 async def test_rule_generator_is_type_aware_per_platform(temp_repo: Path) -> None:
-    client = FakeCrowdStrikeClient()
     agent = RuleGeneratorAgent(
         settings=build_settings(),
-        crowdstrike_client=client,
         output_dir=str(temp_repo / "generated/detections"),
-        repo_path=str(temp_repo),
     )
 
     results = await agent.run(
@@ -191,14 +157,12 @@ async def test_rule_generator_is_type_aware_per_platform(temp_repo: Path) -> Non
     assert "QueryName|endswith" in domain.sigma_rule
     assert "DestinationHostname" not in domain.sigma_rule
 
-    # URL: proxy Sigma; CrowdStrike degrades to a domain indicator on the hostname
-    # because the Falcon IOC API has no url type.
+    # URL: proxy Sigma plus URL-aware KQL and SPL.
     url = by_type["https://evil.example/path/gate.php"]
     assert "proxy" in url.sigma_rule
     assert "c-uri|contains" in url.sigma_rule
-    assert url.crowdstrike_payload is not None
-    assert url.crowdstrike_payload["type"] == "domain"
-    assert url.crowdstrike_payload["value"] == "evil.example"
+    assert "RemoteUrl startswith" in url.kql_query
+    assert 'url="https://evil.example/path/gate.php*"' in url.spl_query
 
     # IP: network_connection with DestinationIp.
     ip = by_type["203.0.114.7"]
@@ -219,13 +183,10 @@ async def test_rule_generator_is_type_aware_per_platform(temp_repo: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_rule_generator_skips_crowdstrike_for_unsupported_types(temp_repo: Path) -> None:
-    client = FakeCrowdStrikeClient()
+async def test_rule_generator_supports_sha1_across_local_formats(temp_repo: Path) -> None:
     agent = RuleGeneratorAgent(
         settings=build_settings(),
-        crowdstrike_client=client,
         output_dir=str(temp_repo / "generated/detections"),
-        repo_path=str(temp_repo),
     )
 
     results = await agent.run(
@@ -243,9 +204,7 @@ async def test_rule_generator_skips_crowdstrike_for_unsupported_types(temp_repo:
     )
 
     assert len(results) == 1
-    assert results[0].crowdstrike_payload is None
-    assert "sha1" in (results[0].crowdstrike_skipped_reason or "")
-    assert client.payloads == []
-    # Sigma/KQL/SPL/YARA still generated for the sha1.
     assert results[0].yara_rule is not None
+    assert "SHA1=" in results[0].sigma_rule
+    assert "SHA1 ==" in results[0].kql_query
     assert "hash.sha1(0, filesize)" in results[0].yara_rule
